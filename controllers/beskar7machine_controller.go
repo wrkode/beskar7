@@ -200,17 +200,70 @@ func (r *Beskar7MachineReconciler) reconcileNormal(ctx context.Context, logger l
 func (r *Beskar7MachineReconciler) reconcileDelete(ctx context.Context, logger logr.Logger, b7machine *infrastructurev1alpha1.Beskar7Machine) (ctrl.Result, error) {
 	logger.Info("Reconciling Beskar7Machine deletion")
 
-	// TODO: Implement cleanup logic:
-	// 1. Find the associated PhysicalHost (using ProviderID or maybe labels/annotations?)
-	// 2. If found, release the host by clearing its ConsumerRef and BootISOSource.
-	//    (This will trigger the PhysicalHost controller to deprovision/power off/eject media).
-	// 3. Wait for the PhysicalHost controller to confirm cleanup?
-	logger.Info("Deletion cleanup logic not yet implemented")
+	// Get the associated PhysicalHost to release it
+	var physicalHost *infrastructurev1alpha1.PhysicalHost
+	if b7machine.Spec.ProviderID != nil && *b7machine.Spec.ProviderID != "" {
+		ns, name, err := parseProviderID(*b7machine.Spec.ProviderID)
+		if err != nil {
+			logger.Error(err, "Failed to parse ProviderID during deletion, unable to release host", "ProviderID", *b7machine.Spec.ProviderID)
+			// Cannot release the host, but proceed with finalizer removal as the ProviderID is invalid
+		} else if ns != b7machine.Namespace {
+			logger.Error(err, "ProviderID namespace mismatch during deletion, unable to release host", "ProviderID", *b7machine.Spec.ProviderID, "MachineNamespace", b7machine.Namespace)
+			// Cannot release the host, proceed with finalizer removal
+		} else {
+			logger.Info("Finding associated PhysicalHost to release", "PhysicalHostName", name)
+			foundHost := &infrastructurev1alpha1.PhysicalHost{}
+			if err := r.Get(ctx, client.ObjectKey{Namespace: ns, Name: name}, foundHost); err != nil {
+				if client.IgnoreNotFound(err) != nil {
+					logger.Error(err, "Failed to get PhysicalHost for release", "PhysicalHostName", name)
+					return ctrl.Result{}, err // Requeue to retry fetching/releasing
+				}
+				// Host not found, nothing to release.
+				logger.Info("Associated PhysicalHost not found, nothing to release", "PhysicalHostName", name)
+			} else {
+				// Host found, store it for release
+				physicalHost = foundHost
+			}
+		}
+	} else {
+		logger.Info("No ProviderID set, assuming no PhysicalHost was associated.")
+		// If no provider ID, maybe try listing hosts claimed by this machine?
+		// For now, assume nothing to release if ProviderID is missing.
+	}
 
-	// Beskar7Machine is deleted, remove the finalizer.
+	// Release the host if found
+	if physicalHost != nil {
+		logger.Info("Releasing associated PhysicalHost", "PhysicalHost", physicalHost.Name)
+		// Check if we are the consumer before releasing
+		if physicalHost.Spec.ConsumerRef != nil &&
+			physicalHost.Spec.ConsumerRef.Name == b7machine.Name &&
+			physicalHost.Spec.ConsumerRef.Namespace == b7machine.Namespace {
+
+			originalHostToPatch := physicalHost.DeepCopy()
+			physicalHost.Spec.ConsumerRef = nil
+			physicalHost.Spec.BootISOSource = nil
+			// No need to manage UserDataSecretRef here, PhysicalHost controller should handle it if needed during its own delete/deprovision.
+
+			hostPatchHelper, err := patch.NewHelper(originalHostToPatch, r.Client)
+			if err != nil {
+				logger.Error(err, "Failed to init patch helper for releasing PhysicalHost", "PhysicalHost", physicalHost.Name)
+				return ctrl.Result{}, err
+			}
+			if err := hostPatchHelper.Patch(ctx, physicalHost); err != nil {
+				logger.Error(err, "Failed to patch PhysicalHost for release", "PhysicalHost", physicalHost.Name)
+				return ctrl.Result{}, err // Requeue to retry patch
+			}
+			logger.Info("Successfully released PhysicalHost", "PhysicalHost", physicalHost.Name)
+			// TODO: Maybe wait briefly or requeue to allow PhysicalHost controller to react?
+		} else {
+			logger.Info("PhysicalHost already released or claimed by another resource", "PhysicalHost", physicalHost.Name)
+		}
+	}
+
+	// Beskar7Machine is being deleted, remove the finalizer.
 	if controllerutil.RemoveFinalizer(b7machine, Beskar7MachineFinalizer) {
 		logger.Info("Removing finalizer")
-		// Patching is handled by the deferred patch function.
+		// Patching is handled by the deferred patch function in Reconcile.
 	}
 
 	return ctrl.Result{}, nil
