@@ -5,7 +5,6 @@ go 1.24.0
 toolchain go1.24.2
 
 require (
-	github.com/pkg/errors v0.9.1
 	k8s.io/api v0.33.0
 	k8s.io/apimachinery v0.33.0
 	k8s.io/client-go v0.33.0
@@ -17,6 +16,7 @@ require (
 	github.com/blang/semver/v4 v4.0.0 // indirect
 	github.com/gobuffalo/flect v1.0.3 // indirect
 	github.com/onsi/gomega v1.36.3 // indirect
+	github.com/pkg/errors v0.9.1 // indirect
 )
 
 replace github.com/wrkode/beskar7 => ./
@@ -29,7 +29,7 @@ require (
 	github.com/evanphx/json-patch/v5 v5.9.11 // indirect
 	github.com/fsnotify/fsnotify v1.8.0 // indirect
 	github.com/fxamacker/cbor/v2 v2.7.0 // indirect
-	github.com/go-logr/logr v1.4.2 // indirect
+	github.com/go-logr/logr v1.4.2
 	github.com/go-logr/zapr v1.3.0 // indirect
 	github.com/go-openapi/jsonpointer v0.21.0 // indirect
 	github.com/go-openapi/jsonreference v0.20.2 // indirect
