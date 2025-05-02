@@ -8,22 +8,18 @@ metadata:
 spec:
   group: infrastructure.cluster.x-k8s.io
   names:
-    categories:
-    - cluster-api
     kind: Beskar7Machine
     listKind: Beskar7MachineList
     plural: beskar7machines
-    shortNames:
-    - b7m
     singular: beskar7machine
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
     - description: Cluster to which this Beskar7Machine belongs
-      jsonPath: .metadata.labels['cluster.x-k8s.io/cluster-name']
+      jsonPath: .metadata.labels.cluster.x-k8s.io/cluster-name
       name: Cluster
       type: string
-    - description: Machine status such as Terminating/Pending/Running/Failed etc
+    - description: Current state of the Beskar7Machine
       jsonPath: .status.phase
       name: State
       type: string
@@ -31,7 +27,7 @@ spec:
       jsonPath: .status.ready
       name: Ready
       type: string
-    - description: PhysicalHost instance ID
+    - description: Provider ID
       jsonPath: .spec.providerID
       name: ProviderID
       type: string
@@ -39,9 +35,6 @@ spec:
       jsonPath: .metadata.ownerReferences[?(@.kind=='Machine')].name
       name: Machine
       type: string
-    - jsonPath: .metadata.creationTimestamp
-      name: Age
-      type: date
     name: v1alpha1
     schema:
       openAPIV3Schema:
@@ -68,26 +61,30 @@ spec:
             description: Beskar7MachineSpec defines the desired state of Beskar7Machine
             properties:
               image:
-                description: Image is the details of the OS image to boot the machine
-                  with.
+                description: Image specifies the boot image details.
                 properties:
                   checksum:
-                    description: Checksum is the SHA256 checksum of the ISO image.
+                    description: Checksum specifies the checksum of the image for
+                      verification.
+                    type: string
+                  checksumType:
+                    description: ChecksumType specifies the type of the checksum (e.g.,
+                      "sha256", "md5").
                     type: string
                   url:
-                    description: URL is the location of the ISO image.
+                    description: URL specifies the location of the boot image (e.g.,
+                      an ISO file).
                     type: string
                 required:
                 - url
                 type: object
               providerID:
-                description: |-
-                  ProviderID will be the reference to the PhysicalHost used for this machine.
-                  Format: b7:////<namespace>/<physicalhost-name>
+                description: ProviderID is the unique identifier for the instance
+                  assigned by the provider.
                 type: string
-              userDataSecret:
-                description: UserDataSecret contains a reference to a Secret containing
-                  the cloud-init user data.
+              userDataSecretRef:
+                description: UserDataSecretRef is a reference to the Secret containing
+                  the user data (cloud-init) for the machine.
                 properties:
                   name:
                     default: ""
@@ -186,23 +183,23 @@ spec:
                 type: array
               failureMessage:
                 description: |-
-                  FailureMessage will be set in the event that there is a terminal problem
+                  FailureMessage will be set in the case when there is a terminal problem
                   reconciling the Machine and will contain a more verbose string suitable
                   for logging and human consumption.
                 type: string
               failureReason:
                 description: |-
-                  FailureReason will be set in the event that there is a terminal problem
+                  FailureReason will be set in the case when there is a terminal problem
                   reconciling the Machine and will contain a succinct value suitable
                   for machine interpretation.
                 type: string
               phase:
                 description: |-
-                  Phase represents the current phase of machine actuation.
-                  E.g. Pending, Provisioning, Provisioned, Running, Deleting, Failed.
+                  Phase represents the current phase of machine provisioning.
+                  E.g., Pending, Provisioning, Provisioned, Failed, Deleting
                 type: string
               ready:
-                description: Ready denotes that the machine is ready.
+                description: Ready indicates the machine is ready.
                 type: boolean
             type: object
         type: object

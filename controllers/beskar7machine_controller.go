@@ -27,6 +27,7 @@ import (
 	infrastructurev1alpha1 "github.com/wrkode/beskar7/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	"sigs.k8s.io/cluster-api/util"
 	conditions "sigs.k8s.io/cluster-api/util/conditions"
@@ -398,6 +399,52 @@ func (r *Beskar7MachineReconciler) findAndClaimOrGetAssociatedHost(ctx context.C
 		logger.Info("Claiming available PhysicalHost", "PhysicalHost", availableHost.Name)
 		originalHost := availableHost.DeepCopy()
 
+		// --- Handle UserData ---
+		var userData string
+		customIsoURL := b7machine.Spec.Image.URL // Start with the base URL
+
+		if b7machine.Spec.UserDataSecretRef != nil && b7machine.Spec.UserDataSecretRef.Name != "" {
+			secretName := types.NamespacedName{
+				Namespace: b7machine.Namespace, // Assume secret is in the same namespace
+				Name:      b7machine.Spec.UserDataSecretRef.Name,
+			}
+			userDataSecret := &corev1.Secret{}
+			if err := r.Get(ctx, secretName, userDataSecret); err != nil {
+				logger.Error(err, "Failed to get UserData secret", "SecretName", secretName)
+				// Don't claim the host if UserData secret is specified but not found/readable
+				// TODO: Set a condition on b7machine?
+				return nil, ctrl.Result{}, errors.Wrapf(err, "failed to get UserData secret %s", secretName.Name)
+			}
+
+			// Assuming user data is stored under the key "value" (common convention) or "userdata"
+			if data, ok := userDataSecret.Data["value"]; ok {
+				userData = string(data)
+			} else if data, ok := userDataSecret.Data["userdata"]; ok {
+				userData = string(data)
+			} else {
+				err := errors.Errorf("UserData secret %s missing 'value' or 'userdata' key", secretName.Name)
+				logger.Error(err, "Invalid UserData secret format")
+				return nil, ctrl.Result{}, err
+			}
+
+			_ = userData // Explicitly ignore until ISO customization is implemented
+			logger.Info("Successfully retrieved UserData from secret", "SecretName", secretName)
+
+			// --- Placeholder for ISO Customization ---
+			// Here, we would call an image builder service or use a library
+			// to combine b7machine.Spec.Image.URL with 'userData'
+			// and get a new 'customIsoURL'.
+			logger.Info("TODO: Implement ISO customization using base image and UserData", "BaseImageURL", b7machine.Spec.Image.URL)
+			// For now, customIsoURL remains the base image URL.
+			// Example: customIsoURL, err = imageBuilder.Build(ctx, b7machine.Spec.Image.URL, userData)
+			// Handle error...
+			// --- End Placeholder ---
+
+		} else {
+			logger.Info("No UserDataSecretRef specified.")
+		}
+		// --- End UserData Handling ---
+
 		availableHost.Spec.ConsumerRef = &corev1.ObjectReference{
 			Kind:       b7machine.Kind,
 			APIVersion: b7machine.APIVersion,
@@ -405,9 +452,9 @@ func (r *Beskar7MachineReconciler) findAndClaimOrGetAssociatedHost(ctx context.C
 			Namespace:  b7machine.Namespace,
 			UID:        b7machine.UID,
 		}
-		isoURL := b7machine.Spec.Image.URL
-		availableHost.Spec.BootISOSource = &isoURL
-		// TODO: Set UserDataSecretRef on PhysicalHost?
+		// Set the BootISOSource to the (potentially customized) URL
+		availableHost.Spec.BootISOSource = &customIsoURL
+		logger.Info("Setting BootISOSource", "URL", customIsoURL)
 
 		hostPatchHelper, err := patch.NewHelper(originalHost, r.Client)
 		if err != nil {

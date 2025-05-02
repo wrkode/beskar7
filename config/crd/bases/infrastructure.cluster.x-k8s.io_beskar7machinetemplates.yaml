@@ -53,27 +53,30 @@ spec:
                       of the machine.
                     properties:
                       image:
-                        description: Image is the details of the OS image to boot
-                          the machine with.
+                        description: Image specifies the boot image details.
                         properties:
                           checksum:
-                            description: Checksum is the SHA256 checksum of the ISO
-                              image.
+                            description: Checksum specifies the checksum of the image
+                              for verification.
+                            type: string
+                          checksumType:
+                            description: ChecksumType specifies the type of the checksum
+                              (e.g., "sha256", "md5").
                             type: string
                           url:
-                            description: URL is the location of the ISO image.
+                            description: URL specifies the location of the boot image
+                              (e.g., an ISO file).
                             type: string
                         required:
                         - url
                         type: object
                       providerID:
-                        description: |-
-                          ProviderID will be the reference to the PhysicalHost used for this machine.
-                          Format: b7:////<namespace>/<physicalhost-name>
+                        description: ProviderID is the unique identifier for the instance
+                          assigned by the provider.
                         type: string
-                      userDataSecret:
-                        description: UserDataSecret contains a reference to a Secret
-                          containing the cloud-init user data.
+                      userDataSecretRef:
+                        description: UserDataSecretRef is a reference to the Secret
+                          containing the user data (cloud-init) for the machine.
                         properties:
                           name:
                             default: ""
