@@ -1,0 +1,77 @@
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: manager-role
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - secrets
+  verbs:
+  - get
+  - list
+  - watch // Needed for Redfish credentials
+  - watch // Needed for UserData
+- apiGroups:
+  - cluster.x-k8s.io
+  resources:
+  - clusters
+  - clusters/status
+  verbs:
+  - get
+  - list
+  - watch // Needed to interact with Cluster object
+- apiGroups:
+  - cluster.x-k8s.io
+  resources:
+  - machines
+  - machines/status
+  verbs:
+  - get
+  - list
+  - watch // Needed to interact with Machine object
+- apiGroups:
+  - infrastructure.cluster.x-k8s.io
+  resources:
+  - beskar7clusters
+  - beskar7machines
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - infrastructure.cluster.x-k8s.io
+  resources:
+  - beskar7clusters/finalizers
+  - beskar7machines/finalizers
+  - physicalhosts/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - infrastructure.cluster.x-k8s.io
+  resources:
+  - beskar7clusters/status
+  - beskar7machines/status
+  - physicalhosts/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - infrastructure.cluster.x-k8s.io
+  resources:
+  - physicalhosts
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - patch // Needed to find and claim/patch PhysicalHost
+  - update
+  - watch

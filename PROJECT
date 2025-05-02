@@ -1,0 +1,5 @@
+domain: cluster.x-k8s.io
+layout: go.kubebuilder.io/v4
+projectName: beskar7
+repo: github.com/user/beskar7
+version: v1alpha1 

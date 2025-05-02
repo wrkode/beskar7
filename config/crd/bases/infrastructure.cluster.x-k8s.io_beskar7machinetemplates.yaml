@@ -1,0 +1,100 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.17.3
+  name: beskar7machinetemplates.infrastructure.cluster.x-k8s.io
+spec:
+  group: infrastructure.cluster.x-k8s.io
+  names:
+    categories:
+    - cluster-api
+    kind: Beskar7MachineTemplate
+    listKind: Beskar7MachineTemplateList
+    plural: beskar7machinetemplates
+    shortNames:
+    - b7mt
+    singular: beskar7machinetemplate
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: Beskar7MachineTemplate is the Schema for the beskar7machinetemplates
+          API
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: Beskar7MachineTemplateSpec defines the desired state of Beskar7MachineTemplate
+            properties:
+              template:
+                description: Beskar7MachineTemplateResource describes the data needed
+                  to create a Beskar7Machine from a template
+                properties:
+                  spec:
+                    description: Spec is the specification of the desired behavior
+                      of the machine.
+                    properties:
+                      image:
+                        description: Image is the details of the OS image to boot
+                          the machine with.
+                        properties:
+                          checksum:
+                            description: Checksum is the SHA256 checksum of the ISO
+                              image.
+                            type: string
+                          url:
+                            description: URL is the location of the ISO image.
+                            type: string
+                        required:
+                        - url
+                        type: object
+                      providerID:
+                        description: |-
+                          ProviderID will be the reference to the PhysicalHost used for this machine.
+                          Format: b7:////<namespace>/<physicalhost-name>
+                        type: string
+                      userDataSecret:
+                        description: UserDataSecret contains a reference to a Secret
+                          containing the cloud-init user data.
+                        properties:
+                          name:
+                            default: ""
+                            description: |-
+                              Name of the referent.
+                              This field is effectively required, but due to backwards compatibility is
+                              allowed to be empty. Instances of this type with an empty value here are
+                              almost certainly wrong.
+                              More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                            type: string
+                        type: object
+                        x-kubernetes-map-type: atomic
+                    required:
+                    - image
+                    type: object
+                required:
+                - spec
+                type: object
+            required:
+            - template
+            type: object
+        type: object
+    served: true
+    storage: true
