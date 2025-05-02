@@ -36,6 +36,7 @@ import (
 
 	infrastructurev1alpha1 "github.com/wrkode/beskar7/api/v1alpha1"
 	"github.com/wrkode/beskar7/controllers"
+	internalredfish "github.com/wrkode/beskar7/internal/redfish"
 	//+kubebuilder:scaffold:imports
 )
 
@@ -94,8 +95,9 @@ func main() {
 
 	// Setup controllers here
 	if err = (&controllers.PhysicalHostReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
+		Client:               mgr.GetClient(),
+		Scheme:               mgr.GetScheme(),
+		RedfishClientFactory: internalredfish.NewClient,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "PhysicalHost")
 		os.Exit(1)

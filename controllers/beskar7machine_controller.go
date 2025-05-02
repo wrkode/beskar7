@@ -29,6 +29,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	"sigs.k8s.io/cluster-api/util"
+	conditions "sigs.k8s.io/cluster-api/util/conditions"
 	"sigs.k8s.io/cluster-api/util/patch"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -96,6 +97,9 @@ func (r *Beskar7MachineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 
 	// Always attempt to patch the Beskar7Machine object and its status on reconciliation exit.
 	defer func() {
+		// Set the summary condition based on InfrastructureReadyCondition
+		conditions.SetSummary(b7machine, conditions.WithConditions(infrastructurev1alpha1.InfrastructureReadyCondition))
+
 		if err := patchHelper.Patch(ctx, b7machine); err != nil {
 			logger.Error(err, "Failed to patch Beskar7Machine")
 			if reterr == nil {
@@ -130,66 +134,69 @@ func (r *Beskar7MachineReconciler) reconcileNormal(ctx context.Context, logger l
 	physicalHost, result, err := r.findAndClaimOrGetAssociatedHost(ctx, logger, b7machine)
 	if err != nil {
 		logger.Error(err, "Failed to find, claim, or get associated PhysicalHost")
+		conditions.MarkFalse(b7machine, infrastructurev1alpha1.PhysicalHostAssociatedCondition, infrastructurev1alpha1.PhysicalHostAssociationFailedReason, clusterv1.ConditionSeverityWarning, "Failed to associate with PhysicalHost: %v", err.Error())
 		return ctrl.Result{}, err
 	}
 	if !result.IsZero() {
 		logger.Info("Requeuing requested by findAndClaimOrGetAssociatedHost")
+		if physicalHost == nil { // This means no available host was found
+			conditions.MarkFalse(b7machine, infrastructurev1alpha1.PhysicalHostAssociatedCondition, infrastructurev1alpha1.WaitingForPhysicalHostReason, clusterv1.ConditionSeverityInfo, "No available PhysicalHost found")
+		}
 		return result, nil
 	}
 	if physicalHost == nil {
 		// Should not happen if result is zero and err is nil, but check defensively.
 		logger.Info("No associated or available PhysicalHost found, requeuing")
+		conditions.MarkFalse(b7machine, infrastructurev1alpha1.PhysicalHostAssociatedCondition, infrastructurev1alpha1.WaitingForPhysicalHostReason, clusterv1.ConditionSeverityInfo, "No available PhysicalHost found")
 		return ctrl.Result{RequeueAfter: time.Minute}, nil
 	}
 
 	logger = logger.WithValues("physicalhost", physicalHost.Name)
 	logger.Info("Successfully associated with PhysicalHost")
+	conditions.MarkTrue(b7machine, infrastructurev1alpha1.PhysicalHostAssociatedCondition)
 
 	// Reconcile based on PhysicalHost status
 	switch physicalHost.Status.State {
 	case infrastructurev1alpha1.StateProvisioned:
 		logger.Info("Associated PhysicalHost is Provisioned")
-		// Set ProviderID if not already set
 		currentProviderID := providerID(physicalHost.Namespace, physicalHost.Name)
 		if b7machine.Spec.ProviderID == nil || *b7machine.Spec.ProviderID != currentProviderID {
 			logger.Info("Setting ProviderID", "ProviderID", currentProviderID)
 			b7machine.Spec.ProviderID = &currentProviderID
 		}
-		// Set machine status
-		b7machine.Status.Ready = true
-		phase := "Provisioned" // TODO: Use constants for phases
+		conditions.MarkTrue(b7machine, infrastructurev1alpha1.InfrastructureReadyCondition)
+		phase := "Provisioned"
 		b7machine.Status.Phase = &phase
-		// TODO: Set addresses from physicalHost.Status?
-		logger.Info("Beskar7Machine is Ready")
+		logger.Info("Beskar7Machine infrastructure is Ready")
 
 	case infrastructurev1alpha1.StateProvisioning:
 		logger.Info("Waiting for associated PhysicalHost to finish provisioning")
+		conditions.MarkFalse(b7machine, infrastructurev1alpha1.InfrastructureReadyCondition, infrastructurev1alpha1.PhysicalHostNotReadyReason, clusterv1.ConditionSeverityInfo, "PhysicalHost %q is still provisioning", physicalHost.Name)
 		phase := "Provisioning"
 		b7machine.Status.Phase = &phase
-		b7machine.Status.Ready = false
 		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 
 	case infrastructurev1alpha1.StateAvailable, infrastructurev1alpha1.StateClaimed, infrastructurev1alpha1.StateEnrolling:
 		logger.Info("Waiting for associated PhysicalHost to start/complete provisioning", "hostState", physicalHost.Status.State)
-		phase := "Associating" // Or Pending? Claimed?
+		conditions.MarkFalse(b7machine, infrastructurev1alpha1.InfrastructureReadyCondition, infrastructurev1alpha1.PhysicalHostNotReadyReason, clusterv1.ConditionSeverityInfo, "PhysicalHost %q is not yet provisioned (state: %s)", physicalHost.Name, physicalHost.Status.State)
+		phase := "Associating"
 		b7machine.Status.Phase = &phase
-		b7machine.Status.Ready = false
 		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 
 	case infrastructurev1alpha1.StateError:
-		logger.Error(nil, "Associated PhysicalHost is in error state", "errorMessage", physicalHost.Status.ErrorMessage)
-		// TODO: Maybe set a condition on Beskar7Machine?
+		errMsg := fmt.Sprintf("PhysicalHost %q is in error state: %s", physicalHost.Name, physicalHost.Status.ErrorMessage)
+		logger.Error(nil, errMsg)
+		// Temporarily use a hardcoded string for testing build issue
+		conditions.MarkFalse(b7machine, infrastructurev1alpha1.InfrastructureReadyCondition, infrastructurev1alpha1.PhysicalHostErrorReason, clusterv1.ConditionSeverityError, "Associated host in error")
 		phase := "Failed"
 		b7machine.Status.Phase = &phase
-		b7machine.Status.Ready = false
-		// No automatic requeue, needs intervention or PhysicalHost to recover.
-		return ctrl.Result{}, nil
+		return ctrl.Result{}, nil // No automatic requeue
 
 	default:
 		logger.Info("Associated PhysicalHost is in unknown or intermediate state", "hostState", physicalHost.Status.State)
+		conditions.MarkFalse(b7machine, infrastructurev1alpha1.InfrastructureReadyCondition, infrastructurev1alpha1.PhysicalHostNotReadyReason, clusterv1.ConditionSeverityInfo, "PhysicalHost %q is in state: %s", physicalHost.Name, physicalHost.Status.State)
 		phase := "Pending"
 		b7machine.Status.Phase = &phase
-		b7machine.Status.Ready = false
 		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 	}
 
@@ -199,6 +206,10 @@ func (r *Beskar7MachineReconciler) reconcileNormal(ctx context.Context, logger l
 // reconcileDelete handles the logic when the Beskar7Machine is marked for deletion.
 func (r *Beskar7MachineReconciler) reconcileDelete(ctx context.Context, logger logr.Logger, b7machine *infrastructurev1alpha1.Beskar7Machine) (ctrl.Result, error) {
 	logger.Info("Reconciling Beskar7Machine deletion")
+
+	// Mark conditions False
+	conditions.MarkFalse(b7machine, infrastructurev1alpha1.InfrastructureReadyCondition, clusterv1.DeletingReason, clusterv1.ConditionSeverityInfo, "Beskar7Machine is being deleted")
+	conditions.MarkFalse(b7machine, infrastructurev1alpha1.PhysicalHostAssociatedCondition, clusterv1.DeletingReason, clusterv1.ConditionSeverityInfo, "Beskar7Machine is being deleted")
 
 	// Get the associated PhysicalHost to release it
 	var physicalHost *infrastructurev1alpha1.PhysicalHost
@@ -216,7 +227,8 @@ func (r *Beskar7MachineReconciler) reconcileDelete(ctx context.Context, logger l
 			if err := r.Get(ctx, client.ObjectKey{Namespace: ns, Name: name}, foundHost); err != nil {
 				if client.IgnoreNotFound(err) != nil {
 					logger.Error(err, "Failed to get PhysicalHost for release", "PhysicalHostName", name)
-					return ctrl.Result{}, err // Requeue to retry fetching/releasing
+					conditions.MarkFalse(b7machine, infrastructurev1alpha1.PhysicalHostAssociatedCondition, infrastructurev1alpha1.ReleasePhysicalHostFailedReason, clusterv1.ConditionSeverityWarning, "Failed to get PhysicalHost %s for release: %v", name, err.Error())
+					return ctrl.Result{}, err // Requeue
 				}
 				// Host not found, nothing to release.
 				logger.Info("Associated PhysicalHost not found, nothing to release", "PhysicalHostName", name)
@@ -247,10 +259,12 @@ func (r *Beskar7MachineReconciler) reconcileDelete(ctx context.Context, logger l
 			hostPatchHelper, err := patch.NewHelper(originalHostToPatch, r.Client)
 			if err != nil {
 				logger.Error(err, "Failed to init patch helper for releasing PhysicalHost", "PhysicalHost", physicalHost.Name)
+				conditions.MarkFalse(b7machine, infrastructurev1alpha1.PhysicalHostAssociatedCondition, infrastructurev1alpha1.ReleasePhysicalHostFailedReason, clusterv1.ConditionSeverityWarning, "Failed to init patch helper for release: %v", err.Error())
 				return ctrl.Result{}, err
 			}
 			if err := hostPatchHelper.Patch(ctx, physicalHost); err != nil {
 				logger.Error(err, "Failed to patch PhysicalHost for release", "PhysicalHost", physicalHost.Name)
+				conditions.MarkFalse(b7machine, infrastructurev1alpha1.PhysicalHostAssociatedCondition, infrastructurev1alpha1.ReleasePhysicalHostFailedReason, clusterv1.ConditionSeverityWarning, "Failed to patch PhysicalHost %s for release: %v", physicalHost.Name, err.Error())
 				return ctrl.Result{}, err // Requeue to retry patch
 			}
 			logger.Info("Successfully released PhysicalHost", "PhysicalHost", physicalHost.Name)

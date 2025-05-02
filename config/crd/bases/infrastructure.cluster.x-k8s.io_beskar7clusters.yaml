@@ -19,10 +19,10 @@ spec:
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
-    - description: '''Cluster to which this Beskar7Cluster belongs'''
-      jsonPath: '''.metadata.labels["cluster.x-k8s.io/cluster-name"]'''
-      name: '''Cluster'''
-      type: '''string'''
+    - description: Cluster to which this Beskar7Cluster belongs
+      jsonPath: .metadata.labels['cluster.x-k8s.io/cluster-name']
+      name: Cluster
+      type: string
     - description: Control Plane Endpoint Host
       jsonPath: .spec.controlPlaneEndpoint.host
       name: Endpoint

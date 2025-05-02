@@ -48,11 +48,23 @@ type Beskar7ClusterStatus struct {
 	// TODO: Add any observed status fields specific to Beskar7
 }
 
+// Beskar7Cluster specific conditions
+const (
+	// ControlPlaneEndpointReady documents the availability of the Control Plane Endpoint.
+	ControlPlaneEndpointReady clusterv1.ConditionType = "ControlPlaneEndpointReady"
+)
+
+// Beskar7Cluster condition reasons
+const (
+	// ControlPlaneEndpointNotSetReason indicates the ControlPlaneEndpoint is not defined in the spec.
+	ControlPlaneEndpointNotSetReason = "ControlPlaneEndpointNotSet"
+)
+
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
 //+kubebuilder:resource:path=beskar7clusters,scope=Namespaced,categories=cluster-api,shortName=b7c
 //+kubebuilder:storageversion
-//+kubebuilder:printcolumn:name='Cluster',type='string',JSONPath='.metadata.labels["cluster.x-k8s.io/cluster-name"]',description='Cluster to which this Beskar7Cluster belongs'
+//+kubebuilder:printcolumn:name="Cluster",type="string",JSONPath=".metadata.labels['cluster.x-k8s.io/cluster-name']",description="Cluster to which this Beskar7Cluster belongs"
 //+kubebuilder:printcolumn:name="Endpoint",type="string",JSONPath=".spec.controlPlaneEndpoint.host",description="Control Plane Endpoint Host"
 //+kubebuilder:printcolumn:name="Ready",type="string",JSONPath=".status.ready",description="Cluster infrastructure is ready for bootstrapping"
 //+kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
@@ -64,6 +76,16 @@ type Beskar7Cluster struct {
 
 	Spec   Beskar7ClusterSpec   `json:"spec,omitempty"`
 	Status Beskar7ClusterStatus `json:"status,omitempty"`
+}
+
+// GetConditions returns the conditions for the Beskar7Cluster.
+func (c *Beskar7Cluster) GetConditions() clusterv1.Conditions {
+	return c.Status.Conditions
+}
+
+// SetConditions sets the conditions for the Beskar7Cluster.
+func (c *Beskar7Cluster) SetConditions(conditions clusterv1.Conditions) {
+	c.Status.Conditions = conditions
 }
 
 //+kubebuilder:object:root=true

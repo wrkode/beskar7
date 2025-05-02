@@ -21,6 +21,7 @@ import (
 	"github.com/stmcginnis/gofish/redfish"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 )
 
 // PhysicalHostProvisioningState defines the states a PhysicalHost can be in.
@@ -111,7 +112,7 @@ type PhysicalHostStatus struct {
 
 	// Conditions represent the latest available observations of an object's state.
 	// +optional
-	Conditions []metav1.Condition `json:"conditions,omitempty"` // TODO: Use CAPI conditions
+	Conditions clusterv1.Conditions `json:"conditions,omitempty"` // Use clusterv1.Conditions type
 }
 
 // HardwareDetails stores hardware information discovered via Redfish.
@@ -121,6 +122,48 @@ type HardwareDetails struct {
 	SerialNumber string        `json:"serialNumber,omitempty"`
 	Status       common.Status `json:"status,omitempty"`
 }
+
+// PhysicalHost specific conditions
+const (
+	// RedfishConnectionReadyCondition documents the connectivity status to the Redfish endpoint.
+	RedfishConnectionReadyCondition clusterv1.ConditionType = "RedfishConnectionReady"
+
+	// HostAvailableCondition documents whether the host is available for claiming (unclaimed and enrolled).
+	HostAvailableCondition clusterv1.ConditionType = "HostAvailable"
+
+	// HostProvisionedCondition documents whether the host has been provisioned according to its spec.
+	HostProvisionedCondition clusterv1.ConditionType = "HostProvisioned"
+)
+
+// PhysicalHost condition reasons
+const (
+	// WaitingForCredentialsReason indicates the controller is waiting for the user to provide credentials.
+	WaitingForCredentialsReason = "WaitingForCredentials"
+	// MissingCredentialsReason indicates the credential secret reference is missing in the spec.
+	MissingCredentialsReason = "MissingCredentialsSecretRef"
+	// SecretGetFailedReason indicates the referenced credential secret could not be retrieved.
+	SecretGetFailedReason = "SecretGetFailed"
+	// SecretNotFoundReason indicates the referenced credential secret was not found.
+	SecretNotFoundReason = "SecretNotFound"
+	// MissingSecretDataReason indicates the credential secret is missing required data (username/password).
+	MissingSecretDataReason = "MissingSecretData"
+	// RedfishConnectionFailedReason indicates the controller could not establish a connection to the Redfish endpoint.
+	RedfishConnectionFailedReason = "RedfishConnectionFailed"
+	// RedfishQueryFailedReason indicates a query to the Redfish endpoint failed after connection.
+	RedfishQueryFailedReason = "RedfishQueryFailed"
+	// WaitingForBootInfoReason indicates the host is claimed but waiting for BootISOSource.
+	WaitingForBootInfoReason = "WaitingForBootInfo"
+	// ProvisioningReason indicates the host is currently being provisioned (setting boot source, powering on).
+	ProvisioningReason = "Provisioning"
+	// SetBootISOFailedReason indicates setting the boot ISO via Redfish failed.
+	SetBootISOFailedReason = "SetBootISOFailed"
+	// PowerOnFailedReason indicates powering on the host via Redfish failed.
+	PowerOnFailedReason = "PowerOnFailed"
+	// PowerOffFailedReason indicates powering off the host via Redfish failed.
+	PowerOffFailedReason = "PowerOffFailed"
+	// EjectMediaFailedReason indicates ejecting virtual media via Redfish failed.
+	EjectMediaFailedReason = "EjectMediaFailed"
+)
 
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
@@ -149,4 +192,14 @@ type PhysicalHostList struct {
 
 func init() {
 	SchemeBuilder.Register(&PhysicalHost{}, &PhysicalHostList{})
+}
+
+// GetConditions returns the list of conditions for a PhysicalHost.
+func (ph *PhysicalHost) GetConditions() clusterv1.Conditions {
+	return ph.Status.Conditions
+}
+
+// SetConditions sets the conditions on a PhysicalHost.
+func (ph *PhysicalHost) SetConditions(conditions clusterv1.Conditions) {
+	ph.Status.Conditions = conditions
 }

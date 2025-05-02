@@ -53,6 +53,37 @@ type Image struct {
 	// TODO: Add ChecksumType if supporting other algorithms?
 }
 
+// Beskar7Machine specific conditions
+const (
+	// PhysicalHostAssociatedCondition documents the successful association of a PhysicalHost with this Beskar7Machine.
+	PhysicalHostAssociatedCondition clusterv1.ConditionType = "PhysicalHostAssociated"
+	// InfrastructureReadyCondition indicates that the underlying infrastructure (PhysicalHost) is provisioned and ready.
+	// This becomes true once the PhysicalHostAssociatedCondition is true AND the associated PhysicalHost is ready.
+	InfrastructureReadyCondition clusterv1.ConditionType = "InfrastructureReady"
+
+	// TODO: Add other conditions like UserDataSecretReady?
+)
+
+// Beskar7Machine condition reasons
+const (
+	// WaitingForPhysicalHostReason indicates the controller is waiting for an available PhysicalHost to claim.
+	WaitingForPhysicalHostReason = "WaitingForPhysicalHost"
+	// PhysicalHostAssociatedReason indicates a PhysicalHost has been successfully claimed.
+	PhysicalHostAssociatedReason = "PhysicalHostAssociated"
+	// PhysicalHostAssociationFailedReason indicates an error occurred trying to claim a PhysicalHost.
+	PhysicalHostAssociationFailedReason = "PhysicalHostAssociationFailed"
+	// PhysicalHostNotFoundReason indicates the associated PhysicalHost (by ProviderID or label) could not be found.
+	PhysicalHostNotFoundReason = "PhysicalHostNotFound"
+	// PhysicalHostNotReadyReason indicates the associated PhysicalHost is not yet ready/provisioned.
+	PhysicalHostNotReadyReason = "PhysicalHostNotReady"
+	// PhysicalHostReleasedReason indicates the associated PhysicalHost has been released during deletion.
+	PhysicalHostReleasedReason = "PhysicalHostReleased"
+	// ReleasePhysicalHostFailedReason indicates an error occurred trying to release the PhysicalHost.
+	ReleasePhysicalHostFailedReason = "ReleasePhysicalHostFailed"
+	// PhysicalHostErrorReason indicates the associated PhysicalHost is in an Error state.
+	PhysicalHostErrorReason = "PhysicalHostError"
+)
+
 // Beskar7MachineStatus defines the observed state of Beskar7Machine
 type Beskar7MachineStatus struct {
 	// Ready denotes that the machine is ready.
@@ -85,11 +116,21 @@ type Beskar7MachineStatus struct {
 	Conditions clusterv1.Conditions `json:"conditions,omitempty"`
 }
 
+// GetConditions returns the conditions for the Beskar7Machine.
+func (m *Beskar7Machine) GetConditions() clusterv1.Conditions {
+	return m.Status.Conditions
+}
+
+// SetConditions sets the conditions for the Beskar7Machine.
+func (m *Beskar7Machine) SetConditions(conditions clusterv1.Conditions) {
+	m.Status.Conditions = conditions
+}
+
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
 //+kubebuilder:resource:path=beskar7machines,scope=Namespaced,categories=cluster-api,shortName=b7m
 //+kubebuilder:storageversion
-//+kubebuilder:printcolumn:name='Cluster',type='string',JSONPath='.metadata.labels["cluster.x-k8s.io/cluster-name"]',description='Cluster to which this Beskar7Machine belongs'
+//+kubebuilder:printcolumn:name="Cluster",type="string",JSONPath=".metadata.labels['cluster.x-k8s.io/cluster-name']",description="Cluster to which this Beskar7Machine belongs"
 //+kubebuilder:printcolumn:name="State",type="string",JSONPath=".status.phase",description="Machine status such as Terminating/Pending/Running/Failed etc"
 //+kubebuilder:printcolumn:name="Ready",type="string",JSONPath=".status.ready",description="Machine ready status"
 //+kubebuilder:printcolumn:name="ProviderID",type="string",JSONPath=".spec.providerID",description="PhysicalHost instance ID"
