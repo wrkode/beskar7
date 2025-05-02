@@ -137,23 +137,32 @@ func (r *Beskar7MachineReconciler) reconcileNormal(ctx context.Context, logger l
 		conditions.MarkFalse(b7machine, infrastructurev1alpha1.PhysicalHostAssociatedCondition, infrastructurev1alpha1.PhysicalHostAssociationFailedReason, clusterv1.ConditionSeverityWarning, "Failed to associate with PhysicalHost: %v", err.Error())
 		return ctrl.Result{}, err
 	}
+
+	// ---> Set Condition True if host is found/claimed, even if requeuing <---
+	if physicalHost != nil {
+		logger.Info("Successfully associated with PhysicalHost", "physicalhost", physicalHost.Name)
+		conditions.MarkTrue(b7machine, infrastructurev1alpha1.PhysicalHostAssociatedCondition)
+	} else {
+		// No host found yet
+		conditions.MarkFalse(b7machine, infrastructurev1alpha1.PhysicalHostAssociatedCondition, infrastructurev1alpha1.WaitingForPhysicalHostReason, clusterv1.ConditionSeverityInfo, "No available PhysicalHost found")
+		// If result is also zero here, it's an unexpected state, but the later check handles it.
+	}
+
 	if !result.IsZero() {
 		logger.Info("Requeuing requested by findAndClaimOrGetAssociatedHost")
-		if physicalHost == nil { // This means no available host was found
-			conditions.MarkFalse(b7machine, infrastructurev1alpha1.PhysicalHostAssociatedCondition, infrastructurev1alpha1.WaitingForPhysicalHostReason, clusterv1.ConditionSeverityInfo, "No available PhysicalHost found")
-		}
+		// Condition is already set based on whether physicalHost was nil or not above
 		return result, nil
 	}
 	if physicalHost == nil {
 		// Should not happen if result is zero and err is nil, but check defensively.
-		logger.Info("No associated or available PhysicalHost found, requeuing")
+		logger.Info("No associated or available PhysicalHost found (unexpected state after check), requeuing")
 		conditions.MarkFalse(b7machine, infrastructurev1alpha1.PhysicalHostAssociatedCondition, infrastructurev1alpha1.WaitingForPhysicalHostReason, clusterv1.ConditionSeverityInfo, "No available PhysicalHost found")
 		return ctrl.Result{RequeueAfter: time.Minute}, nil
 	}
 
 	logger = logger.WithValues("physicalhost", physicalHost.Name)
-	logger.Info("Successfully associated with PhysicalHost")
-	conditions.MarkTrue(b7machine, infrastructurev1alpha1.PhysicalHostAssociatedCondition)
+	// logger.Info("Successfully associated with PhysicalHost") // Moved up
+	// conditions.MarkTrue(b7machine, infrastructurev1alpha1.PhysicalHostAssociatedCondition) // Moved up
 
 	// Reconcile based on PhysicalHost status
 	switch physicalHost.Status.State {
@@ -251,6 +260,22 @@ func (r *Beskar7MachineReconciler) reconcileDelete(ctx context.Context, logger l
 			physicalHost.Spec.ConsumerRef.Name == b7machine.Name &&
 			physicalHost.Spec.ConsumerRef.Namespace == b7machine.Namespace {
 
+			// --- Try using Update instead of Patch for simplicity in test ---
+			originalHost := physicalHost.DeepCopy() // Keep for potential revert or logging
+			logger.Info("Attempting to release host via client.Update", "PhysicalHost", physicalHost.Name)
+			physicalHost.Spec.ConsumerRef = nil
+			physicalHost.Spec.BootISOSource = nil
+
+			if err := r.Update(ctx, physicalHost); err != nil {
+				logger.Error(err, "Failed to Update PhysicalHost for release", "PhysicalHost", physicalHost.Name)
+				conditions.MarkFalse(b7machine, infrastructurev1alpha1.PhysicalHostAssociatedCondition, infrastructurev1alpha1.ReleasePhysicalHostFailedReason, clusterv1.ConditionSeverityWarning, "Failed to update PhysicalHost %s for release: %v", originalHost.Name, err.Error())
+				// Attempt to revert local change before returning error?
+				// physicalHost.Spec = originalHost.Spec
+				return ctrl.Result{}, err // Requeue to retry update
+			}
+			// --- End Update attempt ---
+
+			/* --- Original Patch Logic ---
 			originalHostToPatch := physicalHost.DeepCopy()
 			physicalHost.Spec.ConsumerRef = nil
 			physicalHost.Spec.BootISOSource = nil
@@ -267,6 +292,8 @@ func (r *Beskar7MachineReconciler) reconcileDelete(ctx context.Context, logger l
 				conditions.MarkFalse(b7machine, infrastructurev1alpha1.PhysicalHostAssociatedCondition, infrastructurev1alpha1.ReleasePhysicalHostFailedReason, clusterv1.ConditionSeverityWarning, "Failed to patch PhysicalHost %s for release: %v", physicalHost.Name, err.Error())
 				return ctrl.Result{}, err // Requeue to retry patch
 			}
+			--- End Original Patch Logic --- */
+
 			logger.Info("Successfully released PhysicalHost", "PhysicalHost", physicalHost.Name)
 			// TODO: Maybe wait briefly or requeue to allow PhysicalHost controller to react?
 		} else {

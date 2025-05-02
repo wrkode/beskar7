@@ -56,9 +56,21 @@ var _ = BeforeSuite(func() {
 
 	ctx, cancel = context.WithCancel(context.TODO())
 
+	// === Setup Scheme FIRST ===
+	// Add Beskar7 types to scheme
+	Expect(infrastructurev1alpha1.AddToScheme(scheme.Scheme)).To(Succeed())
+	// Add CAPI types to scheme
+	Expect(clusterv1.AddToScheme(scheme.Scheme)).To(Succeed())
+	//+kubebuilder:scaffold:scheme
+
 	By("bootstrapping test environment")
 	testEnv = &envtest.Environment{
-		CRDDirectoryPaths:     []string{filepath.Join("..", "config", "crd", "bases")},
+		CRDDirectoryPaths: []string{
+			filepath.Join("..", "config", "crd", "bases"), // Local CRDs
+			// Absolute path to CAPI CRDs from go list command
+			"/Users/wrizzo/go/pkg/mod/sigs.k8s.io/cluster-api@v1.10.1/config/crd/bases",
+		},
+		// Remove CRDInstallOptions as we use CRDDirectoryPaths explicitly
 		ErrorIfCRDPathMissing: true,
 	}
 
@@ -68,12 +80,7 @@ var _ = BeforeSuite(func() {
 	Expect(err).NotTo(HaveOccurred())
 	Expect(cfg).NotTo(BeNil())
 
-	// Add Beskar7 types to scheme
-	Expect(infrastructurev1alpha1.AddToScheme(scheme.Scheme)).To(Succeed())
-	// Add CAPI types to scheme
-	Expect(clusterv1.AddToScheme(scheme.Scheme)).To(Succeed())
-
-	//+kubebuilder:scaffold:scheme
+	// === Scheme setup can remain here or move back, order doesn't matter as much now ===
 
 	k8sClient, err = client.New(cfg, client.Options{Scheme: scheme.Scheme})
 	Expect(err).NotTo(HaveOccurred())
