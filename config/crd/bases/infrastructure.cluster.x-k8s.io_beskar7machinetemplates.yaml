@@ -52,45 +52,45 @@ spec:
                     description: Spec is the specification of the desired behavior
                       of the machine.
                     properties:
-                      image:
-                        description: Image specifies the boot image details.
-                        properties:
-                          checksum:
-                            description: Checksum specifies the checksum of the image
-                              for verification.
-                            type: string
-                          checksumType:
-                            description: ChecksumType specifies the type of the checksum
-                              (e.g., "sha256", "md5").
-                            type: string
-                          url:
-                            description: URL specifies the location of the boot image
-                              (e.g., an ISO file).
-                            type: string
-                        required:
-                        - url
-                        type: object
+                      configURL:
+                        description: |-
+                          ConfigURL is the URL from which the OS should fetch its configuration file.
+                          Required if ProvisioningMode is "RemoteConfig".
+                        type: string
+                      imageURL:
+                        description: |-
+                          ImageURL specifies the URL of the boot ISO image.
+                          This can be a generic installer ISO (for remote config) or a pre-baked ISO.
+                        type: string
+                      osFamily:
+                        description: |-
+                          OSFamily specifies the target operating system family for this machine.
+                          This determines how provisioning is handled (e.g., kernel parameters for config).
+                          Examples: "kairos", "talos", "flatcar", "microos".
+                        enum:
+                        - kairos
+                        - talos
+                        - flatcar
+                        - microos
+                        type: string
                       providerID:
                         description: ProviderID is the unique identifier for the instance
                           assigned by the provider.
                         type: string
-                      userDataSecretRef:
-                        description: UserDataSecretRef is a reference to the Secret
-                          containing the user data (cloud-init) for the machine.
-                        properties:
-                          name:
-                            default: ""
-                            description: |-
-                              Name of the referent.
-                              This field is effectively required, but due to backwards compatibility is
-                              allowed to be empty. Instances of this type with an empty value here are
-                              almost certainly wrong.
-                              More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
-                            type: string
-                        type: object
-                        x-kubernetes-map-type: atomic
+                      provisioningMode:
+                        description: |-
+                          ProvisioningMode specifies how the OS should be provisioned.
+                          "RemoteConfig": The OS will fetch its configuration from ConfigURL.
+                          "PreBakedISO": The ImageURL points to an ISO that already has the configuration embedded.
+                          If omitted and ConfigURL is provided, "RemoteConfig" is assumed.
+                          If omitted and ConfigURL is not provided, "PreBakedISO" is assumed (though an image without config might not be useful).
+                        enum:
+                        - RemoteConfig
+                        - PreBakedISO
+                        type: string
                     required:
-                    - image
+                    - imageURL
+                    - osFamily
                     type: object
                 required:
                 - spec

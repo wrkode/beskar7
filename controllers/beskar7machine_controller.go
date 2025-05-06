@@ -25,9 +25,9 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/pkg/errors"
 	infrastructurev1alpha1 "github.com/wrkode/beskar7/api/v1alpha1"
+	internalredfish "github.com/wrkode/beskar7/internal/redfish"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/types"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	"sigs.k8s.io/cluster-api/util"
 	conditions "sigs.k8s.io/cluster-api/util/conditions"
@@ -50,6 +50,9 @@ const (
 type Beskar7MachineReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
+	// RedfishClientFactory allows overriding the Redfish client creation for testing.
+	// If nil, internalredfish.NewClient will be used by default in getRedfishClientForHost.
+	RedfishClientFactory internalredfish.RedfishClientFactory
 }
 
 //+kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=beskar7machines,verbs=get;list;watch;create;update;patch;delete
@@ -399,52 +402,7 @@ func (r *Beskar7MachineReconciler) findAndClaimOrGetAssociatedHost(ctx context.C
 		logger.Info("Claiming available PhysicalHost", "PhysicalHost", availableHost.Name)
 		originalHost := availableHost.DeepCopy()
 
-		// --- Handle UserData ---
-		var userData string
-		customIsoURL := b7machine.Spec.Image.URL // Start with the base URL
-
-		if b7machine.Spec.UserDataSecretRef != nil && b7machine.Spec.UserDataSecretRef.Name != "" {
-			secretName := types.NamespacedName{
-				Namespace: b7machine.Namespace, // Assume secret is in the same namespace
-				Name:      b7machine.Spec.UserDataSecretRef.Name,
-			}
-			userDataSecret := &corev1.Secret{}
-			if err := r.Get(ctx, secretName, userDataSecret); err != nil {
-				logger.Error(err, "Failed to get UserData secret", "SecretName", secretName)
-				// Don't claim the host if UserData secret is specified but not found/readable
-				// TODO: Set a condition on b7machine?
-				return nil, ctrl.Result{}, errors.Wrapf(err, "failed to get UserData secret %s", secretName.Name)
-			}
-
-			// Assuming user data is stored under the key "value" (common convention) or "userdata"
-			if data, ok := userDataSecret.Data["value"]; ok {
-				userData = string(data)
-			} else if data, ok := userDataSecret.Data["userdata"]; ok {
-				userData = string(data)
-			} else {
-				err := errors.Errorf("UserData secret %s missing 'value' or 'userdata' key", secretName.Name)
-				logger.Error(err, "Invalid UserData secret format")
-				return nil, ctrl.Result{}, err
-			}
-
-			_ = userData // Explicitly ignore until ISO customization is implemented
-			logger.Info("Successfully retrieved UserData from secret", "SecretName", secretName)
-
-			// --- Placeholder for ISO Customization ---
-			// Here, we would call an image builder service or use a library
-			// to combine b7machine.Spec.Image.URL with 'userData'
-			// and get a new 'customIsoURL'.
-			logger.Info("TODO: Implement ISO customization using base image and UserData", "BaseImageURL", b7machine.Spec.Image.URL)
-			// For now, customIsoURL remains the base image URL.
-			// Example: customIsoURL, err = imageBuilder.Build(ctx, b7machine.Spec.Image.URL, userData)
-			// Handle error...
-			// --- End Placeholder ---
-
-		} else {
-			logger.Info("No UserDataSecretRef specified.")
-		}
-		// --- End UserData Handling ---
-
+		// Set ConsumerRef first
 		availableHost.Spec.ConsumerRef = &corev1.ObjectReference{
 			Kind:       b7machine.Kind,
 			APIVersion: b7machine.APIVersion,
@@ -452,10 +410,8 @@ func (r *Beskar7MachineReconciler) findAndClaimOrGetAssociatedHost(ctx context.C
 			Namespace:  b7machine.Namespace,
 			UID:        b7machine.UID,
 		}
-		// Set the BootISOSource to the (potentially customized) URL
-		availableHost.Spec.BootISOSource = &customIsoURL
-		logger.Info("Setting BootISOSource", "URL", customIsoURL)
 
+		// Patch the ConsumerRef update immediately
 		hostPatchHelper, err := patch.NewHelper(originalHost, r.Client)
 		if err != nil {
 			logger.Error(err, "Failed to init patch helper for PhysicalHost", "PhysicalHost", availableHost.Name)
@@ -463,6 +419,86 @@ func (r *Beskar7MachineReconciler) findAndClaimOrGetAssociatedHost(ctx context.C
 		}
 		if err := hostPatchHelper.Patch(ctx, availableHost); err != nil {
 			logger.Error(err, "Failed to patch PhysicalHost to claim it", "PhysicalHost", availableHost.Name)
+			return nil, ctrl.Result{}, err
+		}
+
+		logger.Info("Successfully patched PhysicalHost with ConsumerRef")
+
+		// Determine provisioning mode and configure boot
+		provisioningMode := b7machine.Spec.ProvisioningMode
+		if provisioningMode == "" {
+			if b7machine.Spec.ConfigURL != "" {
+				provisioningMode = "RemoteConfig"
+			} else {
+				provisioningMode = "PreBakedISO"
+			}
+			logger.Info("ProvisioningMode defaulted", "Mode", provisioningMode)
+		}
+
+		// Get Redfish client for the claimed host
+		rfClient, err := r.getRedfishClientForHost(ctx, logger, availableHost)
+		if err != nil {
+			logger.Error(err, "Failed to get Redfish client for host provisioning", "PhysicalHost", availableHost.Name)
+			// TODO: Should we set a condition on b7machine here? Or just let it requeue?
+			return nil, ctrl.Result{}, err // Requeue and try again
+		}
+		defer rfClient.Close(ctx)
+
+		switch provisioningMode {
+		case "RemoteConfig":
+			logger.Info("Configuring boot for RemoteConfig mode")
+			if b7machine.Spec.ConfigURL == "" {
+				err := errors.New("ConfigURL must be set when ProvisioningMode is RemoteConfig")
+				logger.Error(err, "Invalid spec")
+				return nil, ctrl.Result{}, err
+			}
+
+			var kernelParams []string
+			switch b7machine.Spec.OSFamily {
+			case "kairos":
+				kernelParams = []string{fmt.Sprintf("config_url=%s", b7machine.Spec.ConfigURL)}
+			case "talos":
+				kernelParams = []string{fmt.Sprintf("talos.config=%s", b7machine.Spec.ConfigURL)}
+			case "flatcar":
+				kernelParams = []string{fmt.Sprintf("flatcar.ignition.config.url=%s", b7machine.Spec.ConfigURL)}
+			case "microos":
+				kernelParams = []string{fmt.Sprintf("combustion.path=%s", b7machine.Spec.ConfigURL)}
+			default:
+				err := errors.Errorf("unsupported OSFamily for RemoteConfig: %s", b7machine.Spec.OSFamily)
+				logger.Error(err, "Invalid spec")
+				return nil, ctrl.Result{}, err
+			}
+			logger.Info("Calculated kernel parameters", "Params", kernelParams)
+
+			// TODO: Replace with actual Redfish client calls
+			logger.Info("TODO: Call rfClient.SetBootParameters", "Params", kernelParams)
+			if err := rfClient.SetBootParameters(ctx, kernelParams); err != nil {
+				logger.Error(err, "Failed to set boot parameters for RemoteConfig", "Params", kernelParams)
+				return nil, ctrl.Result{}, err // Requeue
+			}
+			logger.Info("TODO: Call rfClient.SetBootSourceISO", "URL", b7machine.Spec.ImageURL)
+			if err := rfClient.SetBootSourceISO(ctx, b7machine.Spec.ImageURL); err != nil {
+				logger.Error(err, "Failed to set boot source ISO for RemoteConfig", "ImageURL", b7machine.Spec.ImageURL)
+				return nil, ctrl.Result{}, err // Requeue
+			}
+
+		case "PreBakedISO":
+			logger.Info("Configuring boot for PreBakedISO mode")
+			// TODO: Replace with actual Redfish client calls
+			logger.Info("TODO: Call rfClient.SetBootParameters with nil")
+			if err := rfClient.SetBootParameters(ctx, nil); err != nil { // Clear any existing boot params
+				logger.Error(err, "Failed to clear boot parameters for PreBakedISO")
+				return nil, ctrl.Result{}, err // Requeue
+			}
+			logger.Info("TODO: Call rfClient.SetBootSourceISO", "URL", b7machine.Spec.ImageURL)
+			if err := rfClient.SetBootSourceISO(ctx, b7machine.Spec.ImageURL); err != nil {
+				logger.Error(err, "Failed to set boot source ISO for PreBakedISO", "ImageURL", b7machine.Spec.ImageURL)
+				return nil, ctrl.Result{}, err // Requeue
+			}
+
+		default:
+			err := errors.Errorf("invalid ProvisioningMode: %s", provisioningMode)
+			logger.Error(err, "Invalid spec")
 			return nil, ctrl.Result{}, err
 		}
 
@@ -484,6 +520,59 @@ func (r *Beskar7MachineReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		// TODO: Add watches for CAPI Machine, PhysicalHost?
 		// Watches(&source.Kind{Type: &infrastructurev1alpha1.PhysicalHost{}}, handler.EnqueueRequestsFromMapFunc(r.PhysicalHostToBeskar7Machine))?
 		Complete(r)
+}
+
+// getRedfishClientForHost retrieves credentials and establishes a connection
+// to the Redfish endpoint specified in the PhysicalHost spec.
+func (r *Beskar7MachineReconciler) getRedfishClientForHost(ctx context.Context, logger logr.Logger, physicalHost *infrastructurev1alpha1.PhysicalHost) (internalredfish.Client, error) {
+	log := logger.WithValues("physicalhost", physicalHost.Name)
+
+	// --- Fetch Redfish Credentials ---
+	secretName := physicalHost.Spec.RedfishConnection.CredentialsSecretRef
+	if secretName == "" {
+		// Should ideally be validated by webhook, but double-check
+		err := errors.New("PhysicalHost CredentialsSecretRef is not set")
+		log.Error(err, "Missing CredentialsSecretRef")
+		return nil, err
+	}
+	credentialsSecret := &corev1.Secret{}
+	secretKey := client.ObjectKey{Namespace: physicalHost.Namespace, Name: secretName}
+	if err := r.Get(ctx, secretKey, credentialsSecret); err != nil {
+		if client.IgnoreNotFound(err) != nil {
+			log.Error(err, "Failed to fetch credentials secret", "SecretName", secretName)
+		} else {
+			log.Error(err, "Credentials secret not found", "SecretName", secretName)
+		}
+		return nil, fmt.Errorf("failed to get credentials secret %s: %w", secretName, err)
+	}
+	usernameBytes, okUser := credentialsSecret.Data["username"]
+	passwordBytes, okPass := credentialsSecret.Data["password"]
+	if !okUser || !okPass {
+		err := errors.New("username or password missing in credentials secret data")
+		log.Error(err, "Invalid credentials secret format", "SecretName", secretName)
+		return nil, err
+	}
+	username := string(usernameBytes)
+	password := string(passwordBytes)
+	// --- End Fetch Redfish Credentials ---
+
+	// --- Connect to Redfish ---
+	clientFactory := r.RedfishClientFactory
+	if clientFactory == nil {
+		log.Info("RedfishClientFactory not provided, using default internalredfish.NewClient")
+		clientFactory = internalredfish.NewClient
+	}
+
+	insecure := physicalHost.Spec.RedfishConnection.InsecureSkipVerify != nil && *physicalHost.Spec.RedfishConnection.InsecureSkipVerify
+	rfClient, err := clientFactory(ctx, physicalHost.Spec.RedfishConnection.Address, username, password, insecure)
+	if err != nil {
+		log.Error(err, "Failed to create Redfish client")
+		return nil, fmt.Errorf("failed to create redfish client for %s: %w", physicalHost.Spec.RedfishConnection.Address, err)
+	}
+	log.Info("Successfully connected to Redfish endpoint")
+	// --- End Connect to Redfish ---
+
+	return rfClient, nil
 }
 
 // providerID returns the Beskar7 providerID for the given PhysicalHost.

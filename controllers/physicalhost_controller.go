@@ -42,15 +42,12 @@ const (
 	PhysicalHostFinalizer = "physicalhost.infrastructure.cluster.x-k8s.io"
 )
 
-// RedfishClientFactory defines the signature for a function that creates a Redfish client.
-type RedfishClientFactory func(ctx context.Context, address, username, password string, insecure bool) (internalredfish.Client, error)
-
 // PhysicalHostReconciler reconciles a PhysicalHost object
 type PhysicalHostReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
 	// RedfishClientFactory allows overriding the Redfish client creation for testing.
-	RedfishClientFactory RedfishClientFactory
+	RedfishClientFactory internalredfish.RedfishClientFactory
 }
 
 //+kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=physicalhosts,verbs=get;list;watch;create;update;patch;delete

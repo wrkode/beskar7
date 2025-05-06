@@ -27,6 +27,10 @@ type MockClient struct {
 	SetPowerStateCalled bool
 	SetBootSourceCalled bool
 	EjectMediaCalled    bool
+	// Add fields for SetBootParameters
+	SetBootParametersFunc   func(ctx context.Context, params []string) error
+	SetBootParametersCalled bool
+	StoredBootParams        []string // To store the parameters for assertion
 }
 
 // NewMockClient creates a new mock client with default values.
@@ -40,6 +44,8 @@ func NewMockClient() *MockClient {
 		},
 		PowerState: redfish.OffPowerState,
 		ShouldFail: make(map[string]error),
+		// Initialize new fields
+		StoredBootParams: nil,
 	}
 }
 
@@ -123,6 +129,28 @@ func (m *MockClient) EjectVirtualMedia(ctx context.Context) error {
 	defer m.mu.Unlock()
 	m.InsertedISO = ""
 	m.BootSourceIsISO = false
+	return nil
+}
+
+// SetBootParameters mock implementation.
+func (m *MockClient) SetBootParameters(ctx context.Context, params []string) error {
+	m.mu.Lock()
+	m.SetBootParametersCalled = true
+	// Store a copy of the params. If params is nil, StoredBootParams will be nil.
+	if params != nil {
+		m.StoredBootParams = make([]string, len(params))
+		copy(m.StoredBootParams, params)
+	} else {
+		m.StoredBootParams = nil
+	}
+	m.mu.Unlock()
+
+	if err := m.failIfNeeded("SetBootParameters"); err != nil {
+		return err
+	}
+	if m.SetBootParametersFunc != nil {
+		return m.SetBootParametersFunc(ctx, params)
+	}
 	return nil
 }
 

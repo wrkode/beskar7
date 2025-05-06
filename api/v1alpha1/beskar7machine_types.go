@@ -1,7 +1,6 @@
 package v1alpha1
 
 import (
-	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 )
@@ -39,26 +38,29 @@ type Beskar7MachineSpec struct {
 	// +optional
 	ProviderID *string `json:"providerID,omitempty"`
 
-	// UserDataSecretRef is a reference to the Secret containing the user data (cloud-init) for the machine.
+	// OSFamily specifies the target operating system family for this machine.
+	// This determines how provisioning is handled (e.g., kernel parameters for config).
+	// Examples: "kairos", "talos", "flatcar", "microos".
+	// +kubebuilder:validation:Enum=kairos;talos;flatcar;microos
+	OSFamily string `json:"osFamily"`
+
+	// ImageURL specifies the URL of the boot ISO image.
+	// This can be a generic installer ISO (for remote config) or a pre-baked ISO.
+	ImageURL string `json:"imageURL"`
+
+	// ProvisioningMode specifies how the OS should be provisioned.
+	// "RemoteConfig": The OS will fetch its configuration from ConfigURL.
+	// "PreBakedISO": The ImageURL points to an ISO that already has the configuration embedded.
+	// If omitted and ConfigURL is provided, "RemoteConfig" is assumed.
+	// If omitted and ConfigURL is not provided, "PreBakedISO" is assumed (though an image without config might not be useful).
+	// +kubebuilder:validation:Enum=RemoteConfig;PreBakedISO
 	// +optional
-	UserDataSecretRef *corev1.LocalObjectReference `json:"userDataSecretRef,omitempty"`
+	ProvisioningMode string `json:"provisioningMode,omitempty"`
 
-	// Image specifies the boot image details.
-	Image Image `json:"image"`
-}
-
-// Image defines the boot image details for a Beskar7Machine
-type Image struct {
-	// URL specifies the location of the boot image (e.g., an ISO file).
-	URL string `json:"url"`
-
-	// Checksum specifies the checksum of the image for verification.
+	// ConfigURL is the URL from which the OS should fetch its configuration file.
+	// Required if ProvisioningMode is "RemoteConfig".
 	// +optional
-	Checksum *string `json:"checksum,omitempty"`
-
-	// ChecksumType specifies the type of the checksum (e.g., "sha256", "md5").
-	// +optional
-	ChecksumType *string `json:"checksumType,omitempty"`
+	ConfigURL string `json:"configURL,omitempty"`
 }
 
 // Beskar7MachineStatus defines the observed state of Beskar7Machine
