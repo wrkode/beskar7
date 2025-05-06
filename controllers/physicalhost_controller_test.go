@@ -10,7 +10,9 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	conditions "sigs.k8s.io/cluster-api/util/conditions"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	infrastructurev1alpha1 "github.com/wrkode/beskar7/api/v1alpha1"
 	internalredfish "github.com/wrkode/beskar7/internal/redfish" // Import internal redfish
@@ -120,6 +122,65 @@ var _ = Describe("PhysicalHost Controller", func() {
 			Expect(mockRfClient.GetSystemInfoCalled).To(BeTrue())
 			Expect(mockRfClient.GetPowerStateCalled).To(BeTrue())
 
+		})
+
+		It("Should deprovision and remove finalizer on delete", func() {
+			By("Creating the PhysicalHost resource with a finalizer")
+			// Ensure the mock client will report the host as 'On' initially to test power-off
+			mockRfClient.PowerState = redfish.OnPowerState
+			mockRfClient.InsertedISO = "http://example.com/test.iso" // Simulate media inserted
+
+			phToCreate := physicalHost.DeepCopy() // Use the one from BeforeEach
+			phToCreate.Finalizers = []string{PhysicalHostFinalizer}
+			// Simulate it was provisioned and then released (ConsumerRef is nil)
+			phToCreate.Status.State = infrastructurev1alpha1.StateProvisioned // Set to a state that allows deprovisioning
+			phToCreate.Spec.ConsumerRef = nil                                 // Ensure it's not considered in use
+
+			Expect(k8sClient.Create(ctx, phToCreate)).To(Succeed())
+			// Update status separately as Create doesn't take status usually
+			Eventually(func(g Gomega) {
+				getStatusPh := &infrastructurev1alpha1.PhysicalHost{}
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: PhName, Namespace: PhNamespace}, getStatusPh)).To(Succeed())
+				getStatusPh.Status.State = infrastructurev1alpha1.StateProvisioned
+				getStatusPh.Status.ObservedPowerState = redfish.OnPowerState
+				g.Expect(k8sClient.Status().Update(ctx, getStatusPh)).To(Succeed())
+			}, Timeout, Interval).Should(Succeed(), "Failed to set initial status for deletion test")
+
+			phLookupKey := types.NamespacedName{Name: PhName, Namespace: PhNamespace}
+
+			By("Deleting the PhysicalHost resource")
+			Expect(k8sClient.Delete(ctx, phToCreate)).To(Succeed())
+
+			By("Reconciling to trigger deprovisioning logic")
+			// First reconcile after delete might just update status to Deprovisioning
+			_, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: phLookupKey})
+			Expect(err).NotTo(HaveOccurred(), "Reconcile for deprovisioning state set failed")
+
+			// Check if state moved to deprovisioning
+			Eventually(func(g Gomega) {
+				deletedPh := &infrastructurev1alpha1.PhysicalHost{}
+				g.Expect(k8sClient.Get(ctx, phLookupKey, deletedPh)).To(Succeed())
+				g.Expect(deletedPh.Status.State).To(Equal(infrastructurev1alpha1.StateDeprovisioning))
+				cond := conditions.Get(deletedPh, infrastructurev1alpha1.HostProvisionedCondition)
+				Expect(cond).NotTo(BeNil())
+				Expect(cond.Reason).To(Equal(infrastructurev1alpha1.DeprovisioningReason))
+			}, Timeout, Interval).Should(Succeed(), "PhysicalHost should be in Deprovisioning state")
+
+			By("Reconciling again to perform Redfish actions and remove finalizer")
+			_, err = reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: phLookupKey})
+			Expect(err).NotTo(HaveOccurred(), "Reconcile for Redfish actions and finalizer removal failed")
+
+			// Verify mock client methods were called for deprovisioning
+			Expect(mockRfClient.EjectMediaCalled).To(BeTrue(), "EjectVirtualMedia should have been called")
+			Expect(mockRfClient.SetPowerStateCalled).To(BeTrue(), "SetPowerState should have been called")
+			Expect(mockRfClient.PowerState).To(Equal(redfish.OffPowerState), "SetPowerState should have been called with OffPowerState")
+
+			By("Ensuring PhysicalHost is eventually deleted from API server")
+			Eventually(func() bool {
+				ph := &infrastructurev1alpha1.PhysicalHost{}
+				err := k8sClient.Get(ctx, phLookupKey, ph)
+				return client.IgnoreNotFound(err) == nil
+			}, Timeout*2, Interval).Should(BeTrue(), "PhysicalHost should be deleted from API server")
 		})
 
 		// TODO: Add more tests:

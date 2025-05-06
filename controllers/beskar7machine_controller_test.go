@@ -18,6 +18,7 @@ package controllers
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -716,7 +717,75 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 			}, "5s", "100ms").Should(Succeed(), "PhysicalHostAssociatedCondition should be True")
 		})
 
-		// TODO: Add test for "RemoteConfig" mode with Kairos
+		It("should configure boot for RemoteConfig mode with Kairos", func() {
+			remoteConfigURL := "https://example.com/kairos-config.yaml"
+			genericIsoURL := "http://example.com/kairos-generic.iso"
+
+			b7machine.Spec.OSFamily = "kairos"
+			b7machine.Spec.ImageURL = genericIsoURL
+			b7machine.Spec.ProvisioningMode = "RemoteConfig"
+			b7machine.Spec.ConfigURL = remoteConfigURL
+
+			// Create a PhysicalHost that the reconciler will find and claim
+			host = &infrastructurev1alpha1.PhysicalHost{
+				ObjectMeta: metav1.ObjectMeta{Name: "available-host-remote", Namespace: testNs.Name},
+				Spec: infrastructurev1alpha1.PhysicalHostSpec{
+					RedfishConnection: infrastructurev1alpha1.RedfishConnectionInfo{
+						Address:              "redfish://dummy-remote",
+						CredentialsSecretRef: "dummy-secret-remote",
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, host)).To(Succeed())
+			Eventually(func(g Gomega) {
+				createdHost := &infrastructurev1alpha1.PhysicalHost{}
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: host.Name, Namespace: host.Namespace}, createdHost)).To(Succeed())
+				createdHost.Status = infrastructurev1alpha1.PhysicalHostStatus{State: infrastructurev1alpha1.StateAvailable, Ready: true}
+				g.Expect(k8sClient.Status().Update(ctx, createdHost)).To(Succeed())
+			}, "10s", "100ms").Should(Succeed(), "Failed to update PhysicalHost status for remote config test")
+
+			// Create dummy secret for Redfish credentials
+			dummySecret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{Name: "dummy-secret-remote", Namespace: testNs.Name},
+				Data:       map[string][]byte{"username": []byte("user"), "password": []byte("pass")},
+			}
+			Expect(k8sClient.Create(ctx, dummySecret)).To(Succeed())
+
+			Expect(k8sClient.Create(ctx, b7machine)).To(Succeed())
+
+			reconciler := &Beskar7MachineReconciler{
+				Client:               k8sClient,
+				Scheme:               k8sClient.Scheme(),
+				RedfishClientFactory: NewMockRedfishClientFactory(mockRfClient),
+			}
+
+			By("First reconcile to add finalizer and claim host (ConsumerRef patch)")
+			_, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: key})
+			Expect(err).NotTo(HaveOccurred())
+
+			Eventually(func(g Gomega) {
+				updatedHost := &infrastructurev1alpha1.PhysicalHost{}
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: host.Name, Namespace: host.Namespace}, updatedHost)).To(Succeed())
+				g.Expect(updatedHost.Spec.ConsumerRef).NotTo(BeNil())
+			}, "10s", "200ms").Should(Succeed(), "PhysicalHost should be claimed after first reconcile for remote config")
+
+			By("Second reconcile to configure boot settings on PhysicalHost")
+			result, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: key})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.RequeueAfter).To(BeNumerically(">", 0))
+
+			Expect(mockRfClient.SetBootParametersCalls).To(HaveLen(1), "SetBootParameters should be called once for RemoteConfig")
+			Expect(mockRfClient.SetBootParametersCalls[0]).To(Equal([]string{fmt.Sprintf("config_url=%s", remoteConfigURL)}), "SetBootParameters called with incorrect Kairos params")
+			Expect(mockRfClient.SetBootSourceISOCalls).To(HaveLen(1), "SetBootSourceISO should be called once for RemoteConfig")
+			Expect(mockRfClient.SetBootSourceISOCalls[0]).To(Equal(genericIsoURL), "SetBootSourceISO called with incorrect ImageURL for RemoteConfig")
+
+			// Verify Beskar7Machine conditions
+			Eventually(func(g Gomega) {
+				Expect(k8sClient.Get(ctx, key, b7machine)).To(Succeed())
+				g.Expect(conditions.IsTrue(b7machine, infrastructurev1alpha1.PhysicalHostAssociatedCondition)).To(BeTrue())
+			}, "5s", "100ms").Should(Succeed(), "PhysicalHostAssociatedCondition should be True")
+		})
+
 		// TODO: Add test for "RemoteConfig" mode with missing ConfigURL (error expected)
 		// TODO: Add test for "RemoteConfig" mode with unsupported OSFamily (error expected)
 

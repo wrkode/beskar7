@@ -163,6 +163,8 @@ const (
 	PowerOffFailedReason = "PowerOffFailed"
 	// EjectMediaFailedReason indicates ejecting virtual media via Redfish failed.
 	EjectMediaFailedReason = "EjectMediaFailed"
+	// DeprovisioningReason indicates the host is actively undergoing deprovisioning steps.
+	DeprovisioningReason string = "DeprovisioningReason"
 )
 
 //+kubebuilder:object:root=true

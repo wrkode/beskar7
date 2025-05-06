@@ -267,35 +267,24 @@ func (r *PhysicalHostReconciler) reconcileDelete(ctx context.Context, physicalHo
 	logger := log.FromContext(ctx).WithValues("physicalhost", physicalHost.Name)
 	logger.Info("Reconciling PhysicalHost deletion")
 
-	// TODO: This delete logic needs refinement with conditions
-	// Mark related conditions as deleting/false
-	conditions.MarkFalse(physicalHost, infrastructurev1alpha1.HostAvailableCondition, clusterv1.DeletingReason, clusterv1.ConditionSeverityInfo, "Host is being deleted")
-	conditions.MarkFalse(physicalHost, infrastructurev1alpha1.HostProvisionedCondition, clusterv1.DeletingReason, clusterv1.ConditionSeverityInfo, "Host is being deleted")
+	// Mark overall HostProvisioned and HostAvailable conditions as False because the host is being deleted.
+	conditions.MarkFalse(physicalHost, infrastructurev1alpha1.HostProvisionedCondition, clusterv1.DeletingReason, clusterv1.ConditionSeverityInfo, "PhysicalHost is being deleted")
+	conditions.MarkFalse(physicalHost, infrastructurev1alpha1.HostAvailableCondition, clusterv1.DeletingReason, clusterv1.ConditionSeverityInfo, "PhysicalHost is being deleted")
 
 	// Check if host is still provisioned or in use - we should only cleanup if unowned
 	if physicalHost.Spec.ConsumerRef != nil {
 		logger.Info("PhysicalHost still has ConsumerRef, waiting for it to be cleared before cleaning up", "ConsumerRef", physicalHost.Spec.ConsumerRef)
-		// Requeue, maybe the Beskar7Machine delete hasn't finished releasing yet.
-		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
-	}
-	// Check if state indicates it might still be in use (e.g., Provisioned, Provisioning)
-	// Allow cleanup from Available, Error, Deprovisioning, Unknown, Enrolled states.
-	isProvisioningOrProvisioned := physicalHost.Status.State == infrastructurev1alpha1.StateProvisioning || physicalHost.Status.State == infrastructurev1alpha1.StateProvisioned
-	if isProvisioningOrProvisioned {
-		logger.Info("PhysicalHost state is still Provisioning/Provisioned, requeuing before cleanup", "State", physicalHost.Status.State)
-		// This might happen if ConsumerRef was cleared manually without going through B7Machine deletion.
-		// We might want to force deprovisioning steps anyway, TBD.
-		// For now, let's wait.
+		conditions.MarkFalse(physicalHost, infrastructurev1alpha1.HostProvisionedCondition, "WaitingForConsumerRelease", clusterv1.ConditionSeverityInfo, "Host is claimed by %s, waiting for release.", physicalHost.Spec.ConsumerRef.Name)
 		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 	}
 
-	// Set state to Deprovisioning
-	needsPatch := false
+	// Set state to Deprovisioning and update condition
 	if physicalHost.Status.State != infrastructurev1alpha1.StateDeprovisioning {
 		logger.Info("Setting state to Deprovisioning")
 		physicalHost.Status.State = infrastructurev1alpha1.StateDeprovisioning
 		physicalHost.Status.Ready = false
-		needsPatch = true // Patch handled by defer in main Reconcile
+		conditions.MarkFalse(physicalHost, infrastructurev1alpha1.HostProvisionedCondition, infrastructurev1alpha1.DeprovisioningReason, clusterv1.ConditionSeverityInfo, "Host deprovisioning started.")
+		// No immediate patch, defer func in Reconcile will handle it.
 	}
 
 	// --- Connect to Redfish for cleanup ---
@@ -324,6 +313,8 @@ func (r *PhysicalHostReconciler) reconcileDelete(ctx context.Context, physicalHo
 	}
 	if username == "" || password == "" {
 		logger.Info("Missing credentials, skipping Redfish cleanup operations.")
+		// If we can't connect, we can't confirm deprovisioning, but we should still allow finalizer removal.
+		conditions.MarkFalse(physicalHost, infrastructurev1alpha1.HostProvisionedCondition, infrastructurev1alpha1.MissingCredentialsReason, clusterv1.ConditionSeverityWarning, "Missing Redfish credentials, cannot perform deprovisioning operations.")
 	} else {
 		// Use the factory to create the client
 		clientFactory := r.RedfishClientFactory
@@ -334,7 +325,7 @@ func (r *PhysicalHostReconciler) reconcileDelete(ctx context.Context, physicalHo
 		rfClient, err := clientFactory(ctx, physicalHost.Spec.RedfishConnection.Address, username, password, insecure)
 		if err != nil {
 			logger.Error(err, "Failed to create Redfish client during delete, skipping cleanup")
-			// Proceed with finalizer removal, maybe log event?
+			conditions.MarkFalse(physicalHost, infrastructurev1alpha1.HostProvisionedCondition, infrastructurev1alpha1.RedfishConnectionFailedReason, clusterv1.ConditionSeverityError, "Failed to connect to Redfish for deprovisioning: %v", err)
 		} else {
 			defer rfClient.Close(ctx)
 			logger.Info("Connected to Redfish for cleanup")
@@ -342,20 +333,26 @@ func (r *PhysicalHostReconciler) reconcileDelete(ctx context.Context, physicalHo
 			// Eject Virtual Media
 			logger.Info("Attempting to eject virtual media during delete")
 			if err := rfClient.EjectVirtualMedia(ctx); err != nil {
-				// Log error but continue cleanup
 				logger.Error(err, "Failed to eject virtual media during delete")
+				conditions.MarkFalse(physicalHost, infrastructurev1alpha1.HostProvisionedCondition, infrastructurev1alpha1.EjectMediaFailedReason, clusterv1.ConditionSeverityWarning, "Failed to eject virtual media: %v", err)
+				// Log error but continue cleanup
+			} else {
+				// Optionally, mark a positive condition or clear the EjectMediaFailedReason if it was previously set.
 			}
 
 			// Power Off the host
 			logger.Info("Attempting to power off host during delete")
 			powerState, psErr := rfClient.GetPowerState(ctx)
-			if (psErr == nil && powerState != redfish.OffPowerState) || psErr != nil {
-				if psErr != nil {
-					logger.Error(psErr, "Failed to get power state before power off attempt")
-				}
+			if psErr != nil {
+				logger.Error(psErr, "Failed to get power state before power off attempt")
+				conditions.MarkFalse(physicalHost, infrastructurev1alpha1.HostProvisionedCondition, infrastructurev1alpha1.RedfishQueryFailedReason, clusterv1.ConditionSeverityWarning, "Failed to get power state for power off: %v", psErr)
+			} else if powerState != redfish.OffPowerState {
 				if err := rfClient.SetPowerState(ctx, redfish.OffPowerState); err != nil {
-					// Log error but continue cleanup
 					logger.Error(err, "Failed to power off host during delete")
+					conditions.MarkFalse(physicalHost, infrastructurev1alpha1.HostProvisionedCondition, infrastructurev1alpha1.PowerOffFailedReason, clusterv1.ConditionSeverityError, "Failed to power off host: %v", err)
+					// Log error but continue cleanup
+				} else {
+					// Optionally, mark a positive condition or clear the PowerOffFailedReason.
 				}
 			} else {
 				logger.Info("Host already powered off")
@@ -365,24 +362,10 @@ func (r *PhysicalHostReconciler) reconcileDelete(ctx context.Context, physicalHo
 	}
 	// --- End Redfish Connection ---
 
-	// Patch status if changed
-	if needsPatch {
-		patchHelper, err := patch.NewHelper(physicalHost, r.Client) // Need a fresh helper or use the original?
-		if err != nil {
-			logger.Error(err, "Failed to initialize patch helper for deprovisioning state update")
-			return ctrl.Result{}, err
-		}
-		if err := patchHelper.Patch(ctx, physicalHost); err != nil {
-			logger.Error(err, "Failed to patch PhysicalHost status to Deprovisioning")
-			return ctrl.Result{}, err
-		}
-	}
-
 	// Cleanup finished (or skipped), remove the finalizer
 	logger.Info("Removing finalizer")
 	if controllerutil.RemoveFinalizer(physicalHost, PhysicalHostFinalizer) {
 		logger.Info("Finalizer flag set for removal by controllerutil")
-		// Patching handled by defer in main Reconcile
 	}
 	return ctrl.Result{}, nil
 }
