@@ -126,12 +126,16 @@ func (r *Beskar7ClusterReconciler) reconcileNormal(ctx context.Context, logger l
 	if !b7cluster.Spec.ControlPlaneEndpoint.IsValid() {
 		logger.Info("ControlPlaneEndpoint is not set or invalid in Spec, waiting.")
 		conditions.MarkFalse(b7cluster, infrastructurev1alpha1.ControlPlaneEndpointReady, infrastructurev1alpha1.ControlPlaneEndpointNotSetReason, clusterv1.ConditionSeverityInfo, "ControlPlaneEndpoint is not set in spec")
-		return ctrl.Result{}, nil
+		// When the ControlPlaneEndpoint is not ready, the cluster infrastructure is not ready.
+		b7cluster.Status.Ready = false
+		return ctrl.Result{}, nil // Don't requeue immediately, wait for external update to Spec or watch.
 	}
 
 	logger.Info("ControlPlaneEndpoint is set in Spec, marking infrastructure as ready", "host", b7cluster.Spec.ControlPlaneEndpoint.Host, "port", b7cluster.Spec.ControlPlaneEndpoint.Port)
 	conditions.MarkTrue(b7cluster, infrastructurev1alpha1.ControlPlaneEndpointReady)
-	// Note: Beskar7Cluster.Status.Ready is now managed by the summary condition
+	// Note: Beskar7Cluster.Status.Ready is now managed by the summary condition // This comment is no longer fully accurate
+	// Set Status.Ready to true explicitly when conditions are met.
+	b7cluster.Status.Ready = true
 
 	// TODO: Potentially reconcile other cluster-wide settings if needed
 

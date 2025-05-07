@@ -225,8 +225,8 @@ func (c *gofishClient) SetBootSourceISO(ctx context.Context, isoURL string) erro
 	}
 
 	boot := redfish.Boot{
-		BootSourceOverrideTarget:  redfish.CdBootSourceOverrideTarget,          // Target CD/DVD
-		BootSourceOverrideEnabled: redfish.ContinuousBootSourceOverrideEnabled, // Boot from it next time
+		BootSourceOverrideTarget:  redfish.CdBootSourceOverrideTarget,    // Target CD/DVD
+		BootSourceOverrideEnabled: redfish.OnceBootSourceOverrideEnabled, // Boot from it once
 		// BootSourceOverrideMode indicates UEFI or BIOS. Assuming UEFI is default or desired.
 		// BootSourceOverrideMode: redfish.UEFIBootSourceOverrideMode,
 	}
@@ -273,7 +273,6 @@ func (c *gofishClient) EjectVirtualMedia(ctx context.Context) error {
 // SetBootParameters configures kernel command line parameters for the next boot.
 // These are typically applied when booting from an ISO via VirtualMedia.
 // The parameters are for one-time boot.
-// TODO: Implement the actual Redfish calls to set UEFI boot options.
 func (c *gofishClient) SetBootParameters(ctx context.Context, params []string) error {
 	log := logf.FromContext(ctx)
 	log.Info("Attempting to set boot parameters", "Params", params)
@@ -284,47 +283,57 @@ func (c *gofishClient) SetBootParameters(ctx context.Context, params []string) e
 	}
 
 	var bootSettings redfish.Boot
+
 	if len(params) == 0 {
-		// Clear one-time boot parameters by disabling the override
-		log.Info("Clearing boot parameters (disabling override)")
+		log.Info("Clearing one-time UEFI boot parameters by disabling override.")
 		bootSettings = redfish.Boot{
 			BootSourceOverrideEnabled: redfish.DisabledBootSourceOverrideEnabled,
-			// Set target to None explicitly to be safe
-			BootSourceOverrideTarget: redfish.NoneBootSourceOverrideTarget,
+			BootSourceOverrideTarget:  redfish.NoneBootSourceOverrideTarget,
+			// UefiTargetBootSourceOverride should ideally be cleared or not present
+			// when disabling. Gofish might handle sending an empty string if the field is empty.
+			// For explicit clear, one might need to fetch current boot settings first if supported.
+			UefiTargetBootSourceOverride: "", // Explicitly try to clear it
 		}
 	} else {
-		// Attempt to set parameters using UefiTargetBootSourceOverride
-		// WARNING: This assumes the BMC supports this and that we know the correct EFI path.
-		// Using a common placeholder path.
-		efiBootloaderPath := "\\EFI\\BOOT\\BOOTX64.EFI" // Common path, might need adjustment
+		// Default EFI bootloader path. This is a guess and might need to be configurable
+		// or discovered for different ISOs/OSes.
+		// Common for many Linux ISOs. Some systems might use /efi/boot/bootx64.efi (forward slashes).
+		efiBootloaderPath := "\\EFI\\BOOT\\BOOTX64.EFI"
+
 		fullBootString := efiBootloaderPath + " " + strings.Join(params, " ")
-		log.Info("Setting UEFI boot parameters", "Target", fullBootString)
+		log.Info("Attempting to set UEFI boot target with parameters", "UefiTarget", fullBootString)
 
 		bootSettings = redfish.Boot{
-			// Set target to UEFI Target. This tells the system to boot the path specified
-			// in UefiTargetBootSourceOverride.
-			BootSourceOverrideTarget: redfish.UefiTargetBootSourceOverrideTarget,
-			// Enable for one boot only
-			BootSourceOverrideEnabled: redfish.OnceBootSourceOverrideEnabled,
-			// Set the actual UEFI target path + parameters
+			BootSourceOverrideTarget:     redfish.UefiTargetBootSourceOverrideTarget,
+			BootSourceOverrideEnabled:    redfish.OnceBootSourceOverrideEnabled,
 			UefiTargetBootSourceOverride: fullBootString,
 		}
 	}
 
-	// Apply the boot settings
+	log.Info("Applying boot settings", "Target", bootSettings.BootSourceOverrideTarget, "Enabled", bootSettings.BootSourceOverrideEnabled, "UEFITarget", bootSettings.UefiTargetBootSourceOverride)
 	err = system.SetBoot(bootSettings)
 	if err != nil {
-		// Check if the error indicates UefiTarget is not supported
-		// Example: Check for specific error strings or types if gofish provides them.
-		// if errors.Is(err, someGofishErrorIndicatingUnsupportedFeature) { ... }
-		log.Error(err, "Failed to set boot settings", "Target", bootSettings.BootSourceOverrideTarget, "Enabled", bootSettings.BootSourceOverrideEnabled, "UEFI Target", bootSettings.UefiTargetBootSourceOverride)
+		log.Error(err, "Failed to set boot settings via system.SetBoot.",
+			"Target", bootSettings.BootSourceOverrideTarget,
+			"Enabled", bootSettings.BootSourceOverrideEnabled,
+			"UEFITarget", bootSettings.UefiTargetBootSourceOverride)
 
-		// As a fallback, maybe try setting JUST the boot target to CD without params?
-		// This depends on whether SetBootSourceISO already handles this sufficiently.
-		// For now, just return the error.
-		return fmt.Errorf("failed to set boot settings: %w", err)
+		// TODO: Add more sophisticated error checking here.
+		// Some BMCs might return specific errors if UefiTargetBootSourceOverride is not supported
+		// or if parameters cannot be appended this way.
+		// Consider adding fallback attempts or specific error parsing.
+
+		// TODO: Investigate using BIOS Attributes as an alternative if this fails.
+		// bios, bioErr := system.Bios()
+		// if bioErr == nil {
+		//   attributes, _ := bios.Attributes() // map[string]interface{}
+		//   log.Info("Available BIOS Attributes", "Attributes", attributes)
+		//   // Look for relevant attributes like "KernelArgs", "ProcArgs", "BootString" etc.
+		//   // if found: bios.SetAttributes(map[string]interface{}{"AttributeName": strings.Join(params, " ")})
+		// }
+		return fmt.Errorf("failed to set boot settings on system: %w", err)
 	}
 
-	log.Info("Successfully set boot settings", "Target", bootSettings.BootSourceOverrideTarget, "Enabled", bootSettings.BootSourceOverrideEnabled, "UEFI Target", bootSettings.UefiTargetBootSourceOverride)
+	log.Info("Successfully applied boot settings.")
 	return nil
 }

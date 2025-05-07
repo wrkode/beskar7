@@ -166,6 +166,11 @@ kubectl get physicalhost server-01 -o wide
 
 This example assumes you have an ISO image (`http://example.com/my-kairos-prebaked.iso`) that has Kairos OS and its configuration already embedded using Kairos's own tooling.
 
+**Important Note for Pre-Baked ISO Mode:**
+When using `provisioningMode: "PreBakedISO"`, you are responsible for ensuring the ISO specified in `imageURL` is:
+1.  **Self-sufficient:** It must contain all necessary OS installation files and configuration for a complete, unattended installation.
+2.  **Bootable:** It must be bootable in the desired firmware mode (Legacy BIOS or UEFI) of your target hardware. Beskar7 will set the virtual media as the boot target, but the ISO itself must handle the rest.
+
 <details>
 <summary>Example: `b7machine-prebaked.yaml`</summary>
 
@@ -237,14 +242,15 @@ The following key areas are planned or in progress:
 *   [x] `Beskar7Machine` deletion/finalizer handling (releasing the `PhysicalHost`).
 *   [x] BDD Testing setup (`envtest`, Ginkgo/Gomega).
 *   [x] Basic UserData handling (`Beskar7Machine` spec changes for OS-specific remote config).
-*   [ ] Implement `PhysicalHost` Deprovisioning (Power off, eject media on delete).
-*   [ ] Full implementation of `SetBootParameters` in Redfish client (robustly handling various BMCs).
+*   [x] Implement `PhysicalHost` Deprovisioning (Power off, eject media on delete).
+*   [x] Initial `SetBootParameters` implementation in Redfish client (UEFI target attempt).
+*   [ ] Full implementation of `SetBootParameters` in Redfish client (robustly handling various BMCs and BIOS attributes).
 *   [ ] Implement `Beskar7Cluster` Reconciliation (ControlPlaneEndpoint, status).
-*   [ ] Refine Status Reporting (CAPI Conditions throughout all controllers).
-*   [ ] Comprehensive BDD Tests for all controllers and provisioning modes.
-*   [ ] Real-world testing with physical hardware and Redfish implementations.
+*   [x] Refine Status Reporting (CAPI Conditions throughout all controllers).
+*   [ ] Comprehensive BDD Tests for all controllers and provisioning modes (RemoteConfig, error cases).
+*   [ ] Real-world testing with physical hardware and Redfish implementations (especially `SetBootParameters`).
 *   [ ] Documentation (Advanced Usage, Troubleshooting).
 
 ## Contributing
 
-Contributions are welcome! Please refer to the contribution guidelines (to be added). 
+Contributions are welcome! Please refer to the contribution guidelines (to be added).
