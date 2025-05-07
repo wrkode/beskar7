@@ -1,4 +1,4 @@
-# Beskar7: Cluster API Infrastructure Provider for Bare Metal
+# Beskar7: Cluster API Infrastructure Provider for Immutable Bare Metal
 
 Beskar7 is a Kubernetes operator that implements the Cluster API infrastructure provider contract for managing bare-metal machines using the Redfish API. It allows you to provision and manage the lifecycle of Kubernetes clusters on physical hardware directly through Kubernetes-native APIs.
 
@@ -26,8 +26,8 @@ Beskar7 consists of several custom controllers that work together:
 
 1.  **Clone the repository:**
     ```bash
-    git clone <repository-url>
-    cd projectbeskar/beskar7
+    git clone https://github.com/wrkode/beskar7.git
+    cd beskar7 
     ```
 
 2.  **Install Development Tools:**
@@ -35,77 +35,65 @@ Beskar7 consists of several custom controllers that work together:
     make install-controller-gen
     ```
 
-3.  **Build and Push Container Image (Optional, if deploying to a real cluster):**
-    If you plan to deploy to a Kubernetes cluster other than a local `kind` cluster set up by `make deploy`, you'll need to build and push the manager image to a container registry accessible by your cluster.
+3.  **Build and Push Container Image (Required for deployment):**
+    You need to push the manager image to a container registry accessible by your Kubernetes cluster.
     ```bash
-    # Replace with your registry
-    export IMG_REGISTRY=your-registry.com
-    export IMG_REPO=your-repo/beskar7-manager
-    export IMG_TAG=latest 
+    # Login to GitHub Container Registry (or your chosen registry)
+    # export CR_PAT=YOUR_GITHUB_PAT # Use a PAT with write:packages scope
+    # echo $CR_PAT | docker login ghcr.io -u USERNAME --password-stdin
 
-    make docker-build docker-push IMG="${IMG_REGISTRY}/${IMG_REPO}:${IMG_TAG}"
+    # Build and push the image (uses values from Makefile: ghcr.io/wrkode/beskar7:v0.1.0-dev)
+    make docker-build docker-push 
     ```
-    Then, update `config/manager/manager.yaml` to use this image, or set it via Kustomize when deploying.
+    *(Note: If using a different registry/repo/tag, override Makefile variables: `make docker-push IMG=my-registry/my-repo:my-tag`)*
 
-4.  **Generate Code & Manifests:**
+4.  **Generate Code & Manifests (If you made code changes):**
     ```bash
     make manifests
     ```
 
-5.  **Build the Manager (Local Binary):**
+5.  **Build the Manager (Local Binary - Optional):**
     ```bash
     make build
     ```
-    The manager binary will be located at `bin/manager`.
 
 6.  **Run Tests:**
     ```bash
-    make test # Runs unit/integration tests using envtest
+    make test
     ```
 
 ## Installation / Deployment
 
-### To a local `kind` cluster (for development):
+### Using Pre-built Manifests (Recommended)
 
-This is the quickest way to get a development environment running.
-
-1.  **Ensure `kind` is installed.**
-2.  **Deploy:**
-    ```bash
-    make deploy IMG_REGISTRY= # Use local image loaded by kind
-    ```
-    This will:
-    *   Create a `kind` cluster (if one named `kind` doesn't already exist).
-    *   Build the manager image and load it into the `kind` cluster.
-    *   Install the CRDs and deploy the Beskar7 controller manager.
-
-### To an existing Kubernetes cluster:
-
-1.  **Build and push the manager image** to a registry accessible by your cluster (see "Getting Started" step 3).
+1.  **Ensure prerequisites are met:** `kubectl` configured for your target cluster.
 2.  **Install CRDs:**
     ```bash
     make install
     ```
-3.  **Deploy the Controller:**
-    You'll need to customize the deployment manifests. The easiest way is to use `kustomize`.
-    Create a `kustomization.yaml` in your deployment overlay:
-    ```yaml
-    # my-beskar7-deployment/kustomization.yaml
-    apiVersion: kustomize.config.k8s.io/v1beta1
-    kind: Kustomization
-    resources:
-    - ../../config/default # Or point to the checked-out repo's config/default
-
-    # Replace with your image
-    images:
-    - name: controller
-      newName: your-registry.com/your-repo/beskar7-manager
-      newTag: latest 
-    ```
-    Then apply it:
+3.  **Deploy the Controller Manager:**
+    This will deploy the controller using the image defined in the Makefile (`ghcr.io/wrkode/beskar7:v0.1.0-dev` by default).
     ```bash
-    kubectl apply -k my-beskar7-deployment/
+    make deploy
     ```
+    *(Note: If you pushed the image to a different location, you MUST either override `IMG` in the Makefile and re-run `make manifests` before `make deploy`, or manually edit the deployment manifest in `config/manager/manager.yaml` before running `make deploy`.)*
+
+### Manual Deployment using Kustomize:
+
+This provides more control if you need to customize the deployment.
+
+1.  **Build and push the manager image** as described in "Getting Started" step 3.
+2.  **Install CRDs:**
+    ```bash
+    make install
+    ```
+3.  **Apply Base Manifests using Kustomize:**
+    Navigate to the directory containing the checked-out code.
+    ```bash
+    # Apply the default configuration (ensure IMG in Makefile is correct or customize)
+    kustomize build config/default | kubectl apply -f -
+    ```
+    *Alternatively, create your own Kustomize overlay pointing to `config/default` and set the image there.* 
 
 ## Usage Examples
 

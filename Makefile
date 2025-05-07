@@ -8,6 +8,15 @@ GO ?= go
 # Controller-gen tool
 CONTROLLER_GEN = $(GOBIN)/controller-gen
 
+# Image URL to use all building/pushing image targets
+VERSION ?= v0.1.0-dev
+IMAGE_REGISTRY ?= ghcr.io/wrkode
+IMAGE_REPO ?= beskar7
+IMG ?= $(IMAGE_REGISTRY)/$(IMAGE_REPO):$(VERSION)
+
+# Produce CRDs that work back to Kubernetes 1.11 (no version conversion)
+CRD_OPTIONS ?= "crd:generateEmbeddedObjectMeta=true,maxDescLen=0"
+
 # Build the manager binary
 build:
 	$(GO) build -o bin/manager cmd/manager/main.go
@@ -29,13 +38,15 @@ manifests: install-controller-gen
 test:
 	$(GO) test ./... -coverprofile cover.out
 
-# Docker build
+# Docker build for linux/amd64
 docker-build:
-	docker build . -t beskar7-manager:latest
+	# Ensure you have a buildx builder configured that supports cross-compilation
+	# e.g., docker buildx create --use
+	docker buildx build --platform linux/amd64 -t $(IMG) --load .
 
-# Docker push (replace with your registry)
-# docker-push:
-# 	docker push your-registry/beskar7-manager:latest
+# Docker push (uses IMG variable defined at the top)
+docker-push:
+	docker push $(IMG)
 
 # Deploy to Kubernetes
 # deploy: manifests

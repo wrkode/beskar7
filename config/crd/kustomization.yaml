@@ -1,0 +1,26 @@
+# This kustomization.yaml is not intended to be run directly,
+# since it depends on service name and namespace that are out of this kustomize package.
+# It should be run by config/default
+resources:
+- bases/infrastructure.cluster.x-k8s.io_beskar7clusters.yaml
+- bases/infrastructure.cluster.x-k8s.io_beskar7machines.yaml
+- bases/infrastructure.cluster.x-k8s.io_beskar7machinetemplates.yaml
+- bases/infrastructure.cluster.x-k8s.io_physicalhosts.yaml
+# +kubebuilder:scaffold:crdkustomizeresource
+
+patchesStrategicMerge:
+# [WEBHOOK] To enable webhook, uncomment all the sections with [WEBHOOK] prefix.
+# patches here are for enabling the conversion webhook for each CRD
+#- patches/webhook_in_beskar7clusters.yaml
+#- patches/webhook_in_beskar7machines.yaml
+#- patches/webhook_in_beskar7machinetemplates.yaml
+#- patches/webhook_in_physicalhosts.yaml
+# +kubebuilder:scaffold:crdkustomizewebhookpatch
+
+# [CERTMANAGER] To enable cert-manager, uncomment all the sections with [CERTMANAGER] prefix.
+# patches here are for enabling the CA injection for each CRD
+#- patches/cainjection_in_beskar7clusters.yaml
+#- patches/cainjection_in_beskar7machines.yaml
+#- patches/cainjection_in_beskar7machinetemplates.yaml
+#- patches/cainjection_in_physicalhosts.yaml
+# +kubebuilder:scaffold:crdkustomizecainjectionpatch 

@@ -1,0 +1,41 @@
+# Adds namespace to all resources.
+namespace: system
+
+# Value of this field is prepended to the
+# names of all resources, e.g. a deployment named
+# "controller-manager" becomes "my-deployment-controller-manager".
+# namePrefix: my-deployment-
+
+# Labels to add to all resources and selectors.
+#commonLabels:
+#  someName: someValue
+
+bases:
+- ../crd
+- ../rbac
+- ../manager
+# [WEBHOOK] To enable webhook, uncomment all the sections with [WEBHOOK] prefix including the one in
+# crd/kustomization.yaml
+#- ../webhook
+# [CERTMANAGER] To enable cert-manager, uncomment all sections with 'CERTMANAGER'. 'WEBHOOK' components are required.
+#- ../certmanager
+
+patchesStrategicMerge:
+# Protect the /metrics endpoint by putting it behind auth.
+# If you want your controller-manager to expose the /metrics
+# endpoint w/o any authn/z, please comment the following line.
+- manager_auth_proxy_patch.yaml
+
+# Mount the controller config file for loading manager configurations
+# through a ComponentConfig type
+#- manager_config_patch.yaml
+
+# TODO(user): Add transformations like Annotations, Labels, ConfigMapReplacements
+
+
+# Images for the Beskar7 manager. The image name `controller` must match
+# the name used in config/manager/manager.yaml.
+images:
+- name: beskar-controller
+  newName: ghcr.io/wrkode/beskar7/ # Uses Makefile vars by default
+  newTag: v0.1.0-dev         # Uses Makefile vars by default 
