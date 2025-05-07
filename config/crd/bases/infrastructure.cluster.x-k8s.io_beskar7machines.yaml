@@ -38,43 +38,20 @@ spec:
     name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: Beskar7Machine is the Schema for the beskar7machines API
         properties:
           apiVersion:
-            description: |-
-              APIVersion defines the versioned schema of this representation of an object.
-              Servers should convert recognized schemas to the latest internal value, and
-              may reject unrecognized values.
-              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
             type: string
           kind:
-            description: |-
-              Kind is a string value representing the REST resource this object represents.
-              Servers may infer this from the endpoint the client submits requests to.
-              Cannot be updated.
-              In CamelCase.
-              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
             type: string
           metadata:
             type: object
           spec:
-            description: Beskar7MachineSpec defines the desired state of Beskar7Machine
             properties:
               configURL:
-                description: |-
-                  ConfigURL is the URL from which the OS should fetch its configuration file.
-                  Required if ProvisioningMode is "RemoteConfig".
                 type: string
               imageURL:
-                description: |-
-                  ImageURL specifies the URL of the boot ISO image.
-                  This can be a generic installer ISO (for remote config) or a pre-baked ISO.
                 type: string
               osFamily:
-                description: |-
-                  OSFamily specifies the target operating system family for this machine.
-                  This determines how provisioning is handled (e.g., kernel parameters for config).
-                  Examples: "kairos", "talos", "flatcar", "microos".
                 enum:
                 - kairos
                 - talos
@@ -82,16 +59,8 @@ spec:
                 - microos
                 type: string
               providerID:
-                description: ProviderID is the unique identifier for the instance
-                  assigned by the provider.
                 type: string
               provisioningMode:
-                description: |-
-                  ProvisioningMode specifies how the OS should be provisioned.
-                  "RemoteConfig": The OS will fetch its configuration from ConfigURL.
-                  "PreBakedISO": The ImageURL points to an ISO that already has the configuration embedded.
-                  If omitted and ConfigURL is provided, "RemoteConfig" is assumed.
-                  If omitted and ConfigURL is not provided, "PreBakedISO" is assumed (though an image without config might not be useful).
                 enum:
                 - RemoteConfig
                 - PreBakedISO
@@ -101,22 +70,15 @@ spec:
             - osFamily
             type: object
           status:
-            description: Beskar7MachineStatus defines the observed state of Beskar7Machine
             properties:
               addresses:
-                description: Addresses contains the associated addresses for the machine.
                 items:
-                  description: MachineAddress contains information for the node's
-                    address.
                   properties:
                     address:
-                      description: address is the machine address.
                       maxLength: 256
                       minLength: 1
                       type: string
                     type:
-                      description: type is the machine address type, one of Hostname,
-                        ExternalIP, InternalIP, ExternalDNS or InternalDNS.
                       enum:
                       - Hostname
                       - ExternalIP
@@ -130,48 +92,25 @@ spec:
                   type: object
                 type: array
               conditions:
-                description: Conditions defines current service state of the Beskar7Machine.
                 items:
-                  description: Condition defines an observation of a Cluster API resource
-                    operational state.
                   properties:
                     lastTransitionTime:
-                      description: |-
-                        lastTransitionTime is the last time the condition transitioned from one status to another.
-                        This should be when the underlying condition changed. If that is not known, then using the time when
-                        the API field changed is acceptable.
                       format: date-time
                       type: string
                     message:
-                      description: |-
-                        message is a human readable message indicating details about the transition.
-                        This field may be empty.
                       maxLength: 10240
                       minLength: 1
                       type: string
                     reason:
-                      description: |-
-                        reason is the reason for the condition's last transition in CamelCase.
-                        The specific API may choose whether or not this field is considered a guaranteed API.
-                        This field may be empty.
                       maxLength: 256
                       minLength: 1
                       type: string
                     severity:
-                      description: |-
-                        severity provides an explicit classification of Reason code, so the users or machines can immediately
-                        understand the current situation and act accordingly.
-                        The Severity field MUST be set only when Status=False.
                       maxLength: 32
                       type: string
                     status:
-                      description: status of the condition, one of True, False, Unknown.
                       type: string
                     type:
-                      description: |-
-                        type of condition in CamelCase or in foo.example.com/CamelCase.
-                        Many .condition.type values are consistent across resources like Available, but because arbitrary conditions
-                        can be useful (see .node.status.conditions), the ability to deconflict is important.
                       maxLength: 256
                       minLength: 1
                       type: string
@@ -182,24 +121,12 @@ spec:
                   type: object
                 type: array
               failureMessage:
-                description: |-
-                  FailureMessage will be set in the case when there is a terminal problem
-                  reconciling the Machine and will contain a more verbose string suitable
-                  for logging and human consumption.
                 type: string
               failureReason:
-                description: |-
-                  FailureReason will be set in the case when there is a terminal problem
-                  reconciling the Machine and will contain a succinct value suitable
-                  for machine interpretation.
                 type: string
               phase:
-                description: |-
-                  Phase represents the current phase of machine provisioning.
-                  E.g., Pending, Provisioning, Provisioned, Failed, Deleting
                 type: string
               ready:
-                description: Ready indicates the machine is ready.
                 type: boolean
             type: object
         type: object

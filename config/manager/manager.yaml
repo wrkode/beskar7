@@ -33,6 +33,7 @@ spec:
         args:
         - --leader-elect
         image: controller:latest # This will be patched by Kustomize
+        imagePullPolicy: Always # Ensure image is always pulled
         name: manager
         securityContext:
           allowPrivilegeEscalation: false

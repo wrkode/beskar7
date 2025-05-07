@@ -21,52 +21,24 @@ spec:
   - name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: Beskar7MachineTemplate is the Schema for the beskar7machinetemplates
-          API
         properties:
           apiVersion:
-            description: |-
-              APIVersion defines the versioned schema of this representation of an object.
-              Servers should convert recognized schemas to the latest internal value, and
-              may reject unrecognized values.
-              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
             type: string
           kind:
-            description: |-
-              Kind is a string value representing the REST resource this object represents.
-              Servers may infer this from the endpoint the client submits requests to.
-              Cannot be updated.
-              In CamelCase.
-              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
             type: string
           metadata:
             type: object
           spec:
-            description: Beskar7MachineTemplateSpec defines the desired state of Beskar7MachineTemplate
             properties:
               template:
-                description: Beskar7MachineTemplateResource describes the data needed
-                  to create a Beskar7Machine from a template
                 properties:
                   spec:
-                    description: Spec is the specification of the desired behavior
-                      of the machine.
                     properties:
                       configURL:
-                        description: |-
-                          ConfigURL is the URL from which the OS should fetch its configuration file.
-                          Required if ProvisioningMode is "RemoteConfig".
                         type: string
                       imageURL:
-                        description: |-
-                          ImageURL specifies the URL of the boot ISO image.
-                          This can be a generic installer ISO (for remote config) or a pre-baked ISO.
                         type: string
                       osFamily:
-                        description: |-
-                          OSFamily specifies the target operating system family for this machine.
-                          This determines how provisioning is handled (e.g., kernel parameters for config).
-                          Examples: "kairos", "talos", "flatcar", "microos".
                         enum:
                         - kairos
                         - talos
@@ -74,16 +46,8 @@ spec:
                         - microos
                         type: string
                       providerID:
-                        description: ProviderID is the unique identifier for the instance
-                          assigned by the provider.
                         type: string
                       provisioningMode:
-                        description: |-
-                          ProvisioningMode specifies how the OS should be provisioned.
-                          "RemoteConfig": The OS will fetch its configuration from ConfigURL.
-                          "PreBakedISO": The ImageURL points to an ISO that already has the configuration embedded.
-                          If omitted and ConfigURL is provided, "RemoteConfig" is assumed.
-                          If omitted and ConfigURL is not provided, "PreBakedISO" is assumed (though an image without config might not be useful).
                         enum:
                         - RemoteConfig
                         - PreBakedISO

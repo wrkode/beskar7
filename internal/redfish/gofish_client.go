@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 
 	"github.com/stmcginnis/gofish"
@@ -22,30 +23,58 @@ var log = logf.Log.WithName("redfish-client")
 
 // NewClient creates a new Redfish client.
 func NewClient(ctx context.Context, address, username, password string, insecure bool) (Client, error) {
-	log.Info("Creating new Redfish client", "address", address, "insecure", insecure)
+	log := logf.Log.WithName("redfish-client")
+	log.Info("Creating new Redfish client", "rawAddress", address, "username", username, "insecure", insecure)
 
-	// Ensure address has a scheme
-	if !strings.HasPrefix(address, "http://") && !strings.HasPrefix(address, "https://") {
-		address = "https://" + address // Default to https
+	// Parse and validate the address URL
+	parsedURL, err := url.Parse(address)
+	if err != nil {
+		log.Error(err, "Failed to parse provided Redfish address", "rawAddress", address)
+		// If parsing fails, try adding https and parse again
+		parsedURL, err = url.Parse("https://" + address)
+		if err != nil {
+			log.Error(err, "Failed to parse Redfish address even after adding https scheme", "address", address)
+			return nil, fmt.Errorf("invalid Redfish address format: %s: %w", address, err)
+		}
 	}
+
+	// Ensure scheme is present
+	if parsedURL.Scheme == "" {
+		parsedURL.Scheme = "https" // Default to https
+		log.Info("Defaulted address scheme to https", "processedAddress", parsedURL.String())
+	}
+
+	// Use the validated and cleaned URL string
+	endpointURL := parsedURL.String()
 
 	config := gofish.ClientConfig{
-		Endpoint: address,
-		Username: username,
-		Password: password,
-		Insecure: insecure,
+		Endpoint:  endpointURL, // Use the processed URL
+		Username:  username,
+		Password:  password,
+		Insecure:  insecure,
+		BasicAuth: true,
+		// Cannot pass httpClient directly, gofish creates its own based on these settings.
 	}
 
-	c, err := gofish.ConnectContext(ctx, config)
+	// Log the final config before connecting
+	log.Info("Attempting gofish.ConnectContext with config",
+		"Endpoint", config.Endpoint,
+		"Username", config.Username,
+		"PasswordProvided", (config.Password != ""),
+		"Insecure", config.Insecure,
+		"BasicAuth", config.BasicAuth)
+
+	c, err := gofish.ConnectContext(ctx, config) // gofish uses the config fields internally
 	if err != nil {
-		log.Error(err, "Failed to connect to Redfish endpoint", "address", address)
-		return nil, fmt.Errorf("failed to connect to Redfish endpoint %s: %w", address, err)
+		log.Error(err, "Failed to connect to Redfish endpoint", "address", endpointURL) // Log the processed URL
+		return nil, fmt.Errorf("failed to connect to Redfish endpoint %s: %w", endpointURL, err)
 	}
 
-	log.Info("Successfully connected to Redfish endpoint", "address", address)
+	log.Info("Successfully connected to Redfish endpoint", "address", endpointURL)
+
 	return &gofishClient{
 		gofishClient: c,
-		apiEndpoint:  address, // Use the processed address
+		apiEndpoint:  endpointURL, // Store the processed URL
 	}, nil
 }
 
@@ -141,49 +170,81 @@ func (c *gofishClient) SetPowerState(ctx context.Context, state redfish.PowerSta
 }
 
 // findFirstVirtualMedia finds the first available virtual media device (CD or DVD type).
+// It tries finding the manager via the system's ManagedBy links first, then falls back
+// to searching all managers from the service root.
 func (c *gofishClient) findFirstVirtualMedia(ctx context.Context) (*redfish.VirtualMedia, error) {
 	if c.gofishClient == nil {
 		return nil, fmt.Errorf("Redfish client is not connected")
 	}
-	// Find the manager associated with the system
+	log := logf.FromContext(ctx)
+
+	// Helper function to search virtual media within a specific manager
+	searchManagerVM := func(mgr *redfish.Manager) (*redfish.VirtualMedia, error) {
+		virtualMedia, err := mgr.VirtualMedia()
+		if err != nil {
+			log.Error(err, "Failed to retrieve virtual media collection", "manager", mgr.ID)
+			// Don't return error, just skip this manager
+			return nil, nil
+		}
+		for _, vm := range virtualMedia {
+			for _, mediaType := range vm.MediaTypes {
+				if mediaType == redfish.CDMediaType || mediaType == redfish.DVDMediaType {
+					log.Info("Found suitable virtual media device via manager", "vmID", vm.ID, "managerID", mgr.ID)
+					return vm, nil
+				}
+			}
+		}
+		return nil, nil // Not found in this manager
+	}
+
+	// Attempt 1: Via System.ManagedBy
+	log.V(1).Info("Attempting to find manager via System.ManagedBy")
 	system, err := c.getSystemService(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get system to find manager: %w", err)
-	}
-	// Call the ManagedBy() method to get manager links
-	mgrLinks, err := system.ManagedBy()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get managers for system %s: %w", system.ID, err)
-	}
-	if len(mgrLinks) == 0 {
-		return nil, fmt.Errorf("system %s has no manager links", system.ID)
-	}
-
-	// Assume the first manager is the relevant one
-	mgr, err := redfish.GetManager(c.gofishClient, mgrLinks[0].ODataID) // Use ODataID from the link
-	if err != nil {
-		return nil, fmt.Errorf("failed to get manager %s: %w", mgrLinks[0].ODataID, err)
-	}
-
-	// Get Virtual Media collection
-	virtualMedia, err := mgr.VirtualMedia()
-	if err != nil {
-		log.Error(err, "Failed to retrieve virtual media collection", "manager", mgr.ID)
-		return nil, fmt.Errorf("failed to get virtual media for manager %s: %w", mgr.ID, err)
-	}
-
-	// Find the first CD/DVD type virtual media
-	for _, vm := range virtualMedia {
-		for _, mediaType := range vm.MediaTypes {
-			if mediaType == redfish.CDMediaType || mediaType == redfish.DVDMediaType {
-				log.Info("Found suitable virtual media device", "vmID", vm.ID)
-				return vm, nil
+		log.Error(err, "Failed to get system when searching for virtual media manager")
+		// Fallback to searching all managers if getting system fails
+	} else {
+		mgrLinks, err := system.ManagedBy()
+		if err != nil {
+			log.Error(err, "Failed to get ManagedBy links from system", "systemID", system.ID)
+		} else if len(mgrLinks) == 0 {
+			log.Info("System reported no ManagedBy links", "systemID", system.ID)
+		} else {
+			for _, link := range mgrLinks {
+				mgr, err := redfish.GetManager(c.gofishClient, link.ODataID)
+				if err != nil {
+					log.Error(err, "Failed to get manager from ManagedBy link", "link", link.ODataID)
+					continue
+				}
+				vm, _ := searchManagerVM(mgr) // Error already logged in helper
+				if vm != nil {
+					return vm, nil // Found it!
+				}
 			}
 		}
 	}
 
-	log.Error(nil, "No suitable virtual media device (CD/DVD) found", "manager", mgr.ID)
-	return nil, fmt.Errorf("no suitable virtual media (CD/DVD) found for manager %s", mgr.ID)
+	// Attempt 2: Via ServiceRoot.Managers
+	log.Info("Falling back to searching all managers from service root for virtual media")
+	managers, err := c.gofishClient.Service.Managers()
+	if err != nil {
+		log.Error(err, "Failed to retrieve managers from service root")
+		return nil, fmt.Errorf("failed to get managers from service root: %w", err)
+	}
+	if len(managers) == 0 {
+		log.Error(nil, "No managers found at service root")
+		return nil, fmt.Errorf("no managers found at service root")
+	}
+
+	for _, mgr := range managers {
+		vm, _ := searchManagerVM(mgr) // Error already logged in helper
+		if vm != nil {
+			return vm, nil // Found it!
+		}
+	}
+
+	log.Error(nil, "No suitable virtual media device (CD/DVD) found after checking all managers.")
+	return nil, fmt.Errorf("no suitable virtual media (CD/DVD) found")
 }
 
 // SetBootSourceISO configures the system to boot from a given ISO URL via VirtualMedia.

@@ -1,0 +1,12 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: manager-rolebinding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: manager-role # Must match ClusterRole name
+subjects:
+- kind: ServiceAccount
+  name: controller-manager # Must match ServiceAccount name
+  namespace: system # Must match the namespace 
