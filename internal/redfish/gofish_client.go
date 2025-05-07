@@ -2,10 +2,12 @@ package redfish
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/stmcginnis/gofish"
+	"github.com/stmcginnis/gofish/common"
 	"github.com/stmcginnis/gofish/redfish"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 )
@@ -271,8 +273,6 @@ func (c *gofishClient) EjectVirtualMedia(ctx context.Context) error {
 }
 
 // SetBootParameters configures kernel command line parameters for the next boot.
-// These are typically applied when booting from an ISO via VirtualMedia.
-// The parameters are for one-time boot.
 func (c *gofishClient) SetBootParameters(ctx context.Context, params []string) error {
 	log := logf.FromContext(ctx)
 	log.Info("Attempting to set boot parameters", "Params", params)
@@ -285,19 +285,18 @@ func (c *gofishClient) SetBootParameters(ctx context.Context, params []string) e
 	var bootSettings redfish.Boot
 
 	if len(params) == 0 {
-		log.Info("Clearing one-time UEFI boot parameters by disabling override.")
+		log.Info("Clearing one-time UEFI boot parameters via UefiTargetBootSourceOverride by disabling override.")
 		bootSettings = redfish.Boot{
-			BootSourceOverrideEnabled: redfish.DisabledBootSourceOverrideEnabled,
-			BootSourceOverrideTarget:  redfish.NoneBootSourceOverrideTarget,
-			// UefiTargetBootSourceOverride should ideally be cleared or not present
-			// when disabling. Gofish might handle sending an empty string if the field is empty.
-			// For explicit clear, one might need to fetch current boot settings first if supported.
+			BootSourceOverrideEnabled:    redfish.DisabledBootSourceOverrideEnabled,
+			BootSourceOverrideTarget:     redfish.NoneBootSourceOverrideTarget,
 			UefiTargetBootSourceOverride: "", // Explicitly try to clear it
 		}
 	} else {
-		// Default EFI bootloader path. This is a guess and might need to be configurable
-		// or discovered for different ISOs/OSes.
-		// Common for many Linux ISOs. Some systems might use /efi/boot/bootx64.efi (forward slashes).
+		// Default EFI bootloader path. This is a common path but might need to be configurable
+		// or discovered for different ISOs/OSes. Examples:
+		// - "\\EFI\\BOOT\\BOOTX64.EFI"
+		// - "/efi/boot/bootx64.efi"
+		// - Path to shimx64.efi for Secure Boot systems, then grubx64.efi
 		efiBootloaderPath := "\\EFI\\BOOT\\BOOTX64.EFI"
 
 		fullBootString := efiBootloaderPath + " " + strings.Join(params, " ")
@@ -310,30 +309,33 @@ func (c *gofishClient) SetBootParameters(ctx context.Context, params []string) e
 		}
 	}
 
-	log.Info("Applying boot settings", "Target", bootSettings.BootSourceOverrideTarget, "Enabled", bootSettings.BootSourceOverrideEnabled, "UEFITarget", bootSettings.UefiTargetBootSourceOverride)
+	log.Info("Applying boot settings via UefiTargetBootSourceOverride", "Settings", bootSettings)
 	err = system.SetBoot(bootSettings)
 	if err != nil {
-		log.Error(err, "Failed to set boot settings via system.SetBoot.",
-			"Target", bootSettings.BootSourceOverrideTarget,
-			"Enabled", bootSettings.BootSourceOverrideEnabled,
-			"UEFITarget", bootSettings.UefiTargetBootSourceOverride)
+		// If this fails, it could be due to several reasons:
+		// 1. The BMC does not support UefiTargetBootSourceOverride.
+		// 2. The BMC does not allow appending parameters to the UefiTargetBootSourceOverride string.
+		// 3. The provided efiBootloaderPath is incorrect for the target ISO.
+		// 4. A transient communication error with the BMC.
+		//
+		// Setting kernel parameters via Redfish is highly vendor-dependent.
+		// Another approach involves setting specific BIOS attributes, but these are not standardized
+		// and would require vendor-specific knowledge and likely configuration by the user.
+		// For now, we rely on UefiTargetBootSourceOverride and log failures clearly.
+		// Users may need to use the "PreBakedISO" provisioningMode if this method is unreliable for their hardware.
 
-		// TODO: Add more sophisticated error checking here.
-		// Some BMCs might return specific errors if UefiTargetBootSourceOverride is not supported
-		// or if parameters cannot be appended this way.
-		// Consider adding fallback attempts or specific error parsing.
-
-		// TODO: Investigate using BIOS Attributes as an alternative if this fails.
-		// bios, bioErr := system.Bios()
-		// if bioErr == nil {
-		//   attributes, _ := bios.Attributes() // map[string]interface{}
-		//   log.Info("Available BIOS Attributes", "Attributes", attributes)
-		//   // Look for relevant attributes like "KernelArgs", "ProcArgs", "BootString" etc.
-		//   // if found: bios.SetAttributes(map[string]interface{}{"AttributeName": strings.Join(params, " ")})
-		// }
-		return fmt.Errorf("failed to set boot settings on system: %w", err)
+		// Attempt to get more detailed error information if it's a common.Error
+		var redfishError *common.Error
+		if errors.As(err, &redfishError) {
+			log.Error(redfishError, "Failed to set boot settings via UefiTargetBootSourceOverride (Redfish error)",
+				"Settings", bootSettings)
+		} else {
+			log.Error(err, "Failed to set boot settings via UefiTargetBootSourceOverride (non-Redfish error)",
+				"Settings", bootSettings)
+		}
+		return fmt.Errorf("failed to set boot settings on system using UefiTargetBootSourceOverride: %w", err)
 	}
 
-	log.Info("Successfully applied boot settings.")
+	log.Info("Successfully applied boot settings via UefiTargetBootSourceOverride.")
 	return nil
 }

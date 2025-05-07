@@ -400,9 +400,8 @@ func (r *Beskar7MachineReconciler) findAndClaimOrGetAssociatedHost(ctx context.C
 	// If no associated host, but found an available one, claim it
 	if availableHost != nil {
 		logger.Info("Claiming available PhysicalHost", "PhysicalHost", availableHost.Name)
-		originalHost := availableHost.DeepCopy()
-
 		// Set ConsumerRef first
+		originalHost := availableHost.DeepCopy()
 		availableHost.Spec.ConsumerRef = &corev1.ObjectReference{
 			Kind:       b7machine.Kind,
 			APIVersion: b7machine.APIVersion,
@@ -410,21 +409,24 @@ func (r *Beskar7MachineReconciler) findAndClaimOrGetAssociatedHost(ctx context.C
 			Namespace:  b7machine.Namespace,
 			UID:        b7machine.UID,
 		}
+		// Also set the BootISOSource on the PhysicalHost spec when claiming
+		// This is what the PhysicalHostReconciler will look for.
+		isoURLForPHSpec := b7machine.Spec.ImageURL // Default to ImageURL
+		availableHost.Spec.BootISOSource = &isoURLForPHSpec
 
-		// Patch the ConsumerRef update immediately
+		// Patch the ConsumerRef and BootISOSource update immediately
 		hostPatchHelper, err := patch.NewHelper(originalHost, r.Client)
 		if err != nil {
 			logger.Error(err, "Failed to init patch helper for PhysicalHost", "PhysicalHost", availableHost.Name)
 			return nil, ctrl.Result{}, err
 		}
 		if err := hostPatchHelper.Patch(ctx, availableHost); err != nil {
-			logger.Error(err, "Failed to patch PhysicalHost to claim it", "PhysicalHost", availableHost.Name)
+			logger.Error(err, "Failed to patch PhysicalHost to set ConsumerRef and BootISOSource", "PhysicalHost", availableHost.Name)
 			return nil, ctrl.Result{}, err
 		}
+		logger.Info("Successfully patched PhysicalHost with ConsumerRef and BootISOSource in Spec")
 
-		logger.Info("Successfully patched PhysicalHost with ConsumerRef")
-
-		// Determine provisioning mode and configure boot
+		// Determine provisioning mode and configure boot on the BMC
 		provisioningMode := b7machine.Spec.ProvisioningMode
 		if provisioningMode == "" {
 			if b7machine.Spec.ConfigURL != "" {
@@ -502,7 +504,7 @@ func (r *Beskar7MachineReconciler) findAndClaimOrGetAssociatedHost(ctx context.C
 			return nil, ctrl.Result{}, err
 		}
 
-		logger.Info("Successfully claimed PhysicalHost by setting ConsumerRef and BootISOSource", "PhysicalHost", availableHost.Name)
+		logger.Info("Successfully claimed PhysicalHost and initiated boot configuration on BMC", "PhysicalHost", availableHost.Name)
 		// Return the claimed host, but controller should requeue to wait for PhysicalHost reconcile
 		return availableHost, ctrl.Result{RequeueAfter: 15 * time.Second}, nil
 	}
