@@ -244,12 +244,17 @@ The following key areas are planned or in progress:
 *   [x] Basic UserData handling (`Beskar7Machine` spec changes for OS-specific remote config).
 *   [x] Implement `PhysicalHost` Deprovisioning (Power off, eject media on delete).
 *   [x] Initial `SetBootParameters` implementation in Redfish client (UEFI target attempt).
-*   [ ] Full implementation of `SetBootParameters` in Redfish client (robustly handling various BMCs and BIOS attributes).
-*   [ ] Implement `Beskar7Cluster` Reconciliation (ControlPlaneEndpoint, status).
-*   [x] Refine Status Reporting (CAPI Conditions throughout all controllers).
-*   [ ] Comprehensive BDD Tests for all controllers and provisioning modes (RemoteConfig, error cases).
-*   [ ] Real-world testing with physical hardware and Redfish implementations (especially `SetBootParameters`).
-*   [ ] Documentation (Advanced Usage, Troubleshooting).
+*   [x] Basic `Beskar7Cluster` reconciliation (handles finalizer and `ControlPlaneEndpointReady` based on spec).
+*   [x] Refine Status Reporting (CAPI Conditions for Beskar7Machine, PhysicalHost, Beskar7Cluster types and basic `Status.Ready` logic).
+*   [ ] **`SetBootParameters` Full Implementation:** Robustly handle setting boot parameters via Redfish across various BMCs, investigating `UefiTargetBootSourceOverride`, BIOS attributes, and other vendor-specific mechanisms. This is crucial for reliable "RemoteConfig" provisioning.
+*   [ ] **`Beskar7Cluster` Enhancements:**
+    *   Derive `ControlPlaneEndpoint` in `Status` from control plane `Beskar7Machine`s (this will first require `Beskar7MachineStatus` to include IP address information).
+    *   Implement `FailureDomains` reporting in `Beskar7ClusterStatus` if applicable to the target bare-metal environments.
+    *   Add comprehensive tests for `Beskar7ClusterReconciler`.
+*   [ ] **Testing & Validation:**
+    *   Comprehensive BDD Tests for all controllers and provisioning modes (especially "RemoteConfig" error cases and different OS families).
+    *   Real-world testing with a variety of physical hardware and Redfish implementations.
+*   [ ] **Documentation:** Advanced Usage, Troubleshooting, Contribution Guidelines.
 
 ## Contributing
 

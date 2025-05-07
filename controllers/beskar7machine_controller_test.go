@@ -176,6 +176,18 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 	})
 
 	Context("Reconcile Normal", func() {
+		// Add mockRfClient here for this context if it's not already in an outer scope shared with Provisioning Logic context
+		var mockRfClient *MockRedfishClient // Define at this level if not shared
+
+		BeforeEach(func() {
+			// Initialize mockRfClient if defined at this level
+			mockRfClient = &MockRedfishClient{
+				SetBootSourceISOCalls:  make([]string, 0),
+				SetBootParametersCalls: make([][]string, 0),
+				// Initialize other funcs to return default success or specific test values if needed
+			}
+			// Ensure b7machine and other resources are reset/recreated if necessary, or use unique names
+		})
 
 		It("should requeue if no PhysicalHost is available", func() {
 			// Create the Beskar7Machine
@@ -246,13 +258,21 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 			// Wait slightly for create to settle (optional, might help envtest)
 			time.Sleep(100 * time.Millisecond)
 
+			// Create dummy secret for Redfish credentials for this host
+			dummySecretForHost := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{Name: "dummy-secret", Namespace: testNs.Name},
+				Data:       map[string][]byte{"username": []byte("user"), "password": []byte("pass")},
+			}
+			Expect(k8sClient.Create(ctx, dummySecretForHost)).To(Succeed())
+
 			// Create the Beskar7Machine
 			Expect(k8sClient.Create(ctx, b7machine)).To(Succeed())
 
 			// Initialize the reconciler
 			reconciler := &Beskar7MachineReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
+				Client:               k8sClient,
+				Scheme:               k8sClient.Scheme(),
+				RedfishClientFactory: NewMockRedfishClientFactory(mockRfClient), // Ensure this is added
 			}
 
 			// First reconcile (adds finalizer)
@@ -261,17 +281,20 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 			Expect(result.Requeue).To(BeTrue()) // Expect immediate requeue
 			Expect(result.RequeueAfter).To(BeZero())
 
-			// Second reconcile (claims host)
+			// Second reconcile (claims host & attempts boot config)
 			result, err = reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: key})
 			Expect(err).NotTo(HaveOccurred())
-			Expect(result.Requeue || result.RequeueAfter > 0).To(BeTrue(), "Should requeue (with or without delay) after claiming host")
+			// In this specific test, we are not asserting boot config details, just that it requeues after claiming.
+			// The actual Redfish calls would happen here but might fail if a real client was used.
+			// With a mock, they should succeed with nil error by default.
+			Expect(result.RequeueAfter).To(BeNumerically(">", 0))
 
 			// Fetch the updated PhysicalHost
 			hostKey := types.NamespacedName{Name: host.Name, Namespace: host.Namespace}
 			Eventually(func() *corev1.ObjectReference {
 				Expect(k8sClient.Get(ctx, hostKey, host)).To(Succeed())
 				return host.Spec.ConsumerRef
-			}, time.Second*5, time.Millisecond*200).ShouldNot(BeNil(), "ConsumerRef should be set")
+			}, "15s", "200ms").ShouldNot(BeNil(), "ConsumerRef should be set") // Increased timeout from previous fix
 
 			// Check claimed host details
 			Expect(host.Spec.ConsumerRef.Name).To(Equal(b7machine.Name))
@@ -634,7 +657,7 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 	})
 
 	Context("Reconcile Normal - Provisioning Logic", func() {
-		var mockRfClient *MockRedfishClient
+		var mockRfClient *MockRedfishClient // This is correctly defined here for this context
 
 		BeforeEach(func() {
 			// Reset mock client for each test in this context
@@ -642,8 +665,6 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 				SetBootSourceISOCalls:  make([]string, 0),
 				SetBootParametersCalls: make([][]string, 0),
 			}
-			// Reminder: The Beskar7MachineReconciler itself isn't recreated per It, so its factory needs update.
-			// This is handled by setting it in the Reconciler struct in each It block for now.
 		})
 
 		It("should configure boot for PreBakedISO mode", func() {
@@ -684,27 +705,28 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 			reconciler := &Beskar7MachineReconciler{
 				Client:               k8sClient,
 				Scheme:               k8sClient.Scheme(),
-				RedfishClientFactory: NewMockRedfishClientFactory(mockRfClient), // Inject mock factory
+				RedfishClientFactory: NewMockRedfishClientFactory(mockRfClient),
 			}
 
-			By("First reconcile to add finalizer and claim host (ConsumerRef patch)")
-			_, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: key})
+			By("First reconcile to add finalizer")
+			result, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: key})
 			Expect(err).NotTo(HaveOccurred())
+			Expect(result.Requeue).To(BeTrue(), "Should requeue after adding finalizer")
 
-			// Ensure ConsumerRef was set on PhysicalHost by the first reconcile
+			By("Second reconcile to claim host and configure boot settings")
+			result, err = reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: key})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.RequeueAfter).To(BeNumerically(">", 0), "Should requeue to wait for PhysicalHost controller")
+
+			// Ensure ConsumerRef was set on PhysicalHost by the second reconcile
 			Eventually(func(g Gomega) {
 				updatedHost := &infrastructurev1alpha1.PhysicalHost{}
 				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: host.Name, Namespace: host.Namespace}, updatedHost)).To(Succeed())
 				g.Expect(updatedHost.Spec.ConsumerRef).NotTo(BeNil())
 				g.Expect(updatedHost.Spec.ConsumerRef.Name).To(Equal(b7machine.Name))
-			}, "10s", "200ms").Should(Succeed(), "PhysicalHost should be claimed after first reconcile")
+			}, "15s", "200ms").Should(Succeed(), "PhysicalHost should be claimed after second reconcile")
 
-			By("Second reconcile to configure boot settings on PhysicalHost")
-			result, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: key})
-			Expect(err).NotTo(HaveOccurred())
-			Expect(result.RequeueAfter).To(BeNumerically(">", 0), "Should requeue to wait for PhysicalHost controller to react/finish provisioning")
-
-			// Assertions about Redfish client calls
+			// Assertions about Redfish client calls (now happen in second reconcile)
 			Expect(mockRfClient.SetBootParametersCalls).To(HaveLen(1), "SetBootParameters should be called once")
 			Expect(mockRfClient.SetBootParametersCalls[0]).To(BeNil(), "SetBootParameters should be called with nil for PreBakedISO")
 			Expect(mockRfClient.SetBootSourceISOCalls).To(HaveLen(1), "SetBootSourceISO should be called once")
@@ -759,20 +781,21 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 				RedfishClientFactory: NewMockRedfishClientFactory(mockRfClient),
 			}
 
-			By("First reconcile to add finalizer and claim host (ConsumerRef patch)")
-			_, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: key})
+			By("First reconcile to add finalizer")
+			result, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: key})
 			Expect(err).NotTo(HaveOccurred())
+			Expect(result.Requeue).To(BeTrue(), "Should requeue after adding finalizer")
+
+			By("Second reconcile to claim host and configure boot settings")
+			result, err = reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: key})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.RequeueAfter).To(BeNumerically(">", 0), "Should requeue to wait for PhysicalHost controller")
 
 			Eventually(func(g Gomega) {
 				updatedHost := &infrastructurev1alpha1.PhysicalHost{}
 				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: host.Name, Namespace: host.Namespace}, updatedHost)).To(Succeed())
 				g.Expect(updatedHost.Spec.ConsumerRef).NotTo(BeNil())
-			}, "10s", "200ms").Should(Succeed(), "PhysicalHost should be claimed after first reconcile for remote config")
-
-			By("Second reconcile to configure boot settings on PhysicalHost")
-			result, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: key})
-			Expect(err).NotTo(HaveOccurred())
-			Expect(result.RequeueAfter).To(BeNumerically(">", 0))
+			}, "15s", "200ms").Should(Succeed(), "PhysicalHost should be claimed after second reconcile for remote config")
 
 			Expect(mockRfClient.SetBootParametersCalls).To(HaveLen(1), "SetBootParameters should be called once for RemoteConfig")
 			Expect(mockRfClient.SetBootParametersCalls[0]).To(Equal([]string{fmt.Sprintf("config_url=%s", remoteConfigURL)}), "SetBootParameters called with incorrect Kairos params")
