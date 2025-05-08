@@ -36,7 +36,8 @@ graph TD
     I -- Redfish API --> K;
     I -- Redfish API --> L;
     I -- Redfish API --> M;
-    G -- Redfish API --- K; # Via internal client, for boot config
+    G -- Redfish API --- K;
+    %% Comment: G (Beskar7Machine Controller) uses Redfish client for boot config
 ```
 *   Users or higher-level controllers (like CAPBK or CAPD) create CAPI `Cluster` and `Machine` resources.
 *   These trigger the creation of corresponding `Beskar7Cluster` and `Beskar7Machine` resources.

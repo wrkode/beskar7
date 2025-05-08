@@ -1,15 +1,92 @@
 # Troubleshooting
 
-This document provides guidance on troubleshooting common issues with Beskar7.
+This document provides guidance on troubleshooting common issues encountered when using Beskar7.
 
-*(To be added)*
+## Controller Logs
 
-Potential topics:
+The first place to look for issues is the logs of the Beskar7 controller manager pod, usually running in the `system` namespace.
 
-*   Debugging controller logs.
-*   Common Redfish connection errors (timeouts, authentication, no target).
-*   Virtual media mounting issues.
-*   Boot parameter (`SetBootParameters`) failures.
-*   `PhysicalHost` stuck in a state.
-*   `Beskar7Machine` not finding/claiming hosts.
-*   Interpreting conditions and events. 
+```bash
+# Find the pod name
+kubectl get pods -n system -l control-plane=controller-manager
+
+# Stream logs
+kubectl logs -n system -f <pod-name> -c manager 
+```
+
+Increase verbosity by editing the manager Deployment (`config/manager/manager.yaml` or via `kubectl edit deployment -n system controller-manager`) and adding a `-v=X` argument (e.g., `-v=5`) to the manager container's args list, then restart the pod.
+
+## Common Issues & Solutions
+
+### `PhysicalHost` Reconciliation Errors
+
+*   **Error: "Failed to connect to Redfish endpoint ... dial tcp ... i/o timeout"**
+    *   **Cause:** Network connectivity issue between the controller manager pod and the BMC IP address.
+    *   **Troubleshooting:**
+        *   Verify the BMC IP address in the `PhysicalHost.spec.redfishConnection.address` is correct.
+        *   Check network routes and firewalls between your Kubernetes nodes and the BMC network.
+        *   Verify the Redfish service is enabled and running on the BMC (usually port 443 for HTTPS).
+        *   Try pinging or connecting (`nc -vz <bmc_ip> 443`) from a Kubernetes node.
+        *   Try connecting from a debug pod within the cluster.
+
+*   **Error: "Failed to connect to Redfish endpoint ... unable to execute request, no target provided"**
+    *   **Cause:** Often indicates an issue within the underlying HTTP client or `gofish` library when parsing or preparing the request for the specified endpoint URL, even if basic connectivity exists.
+    *   **Troubleshooting:**
+        *   Ensure the `address` in `PhysicalHost.spec.redfishConnection` is correctly formatted (e.g., `https://1.2.3.4` or just `1.2.3.4`).
+        *   Check the version of the `gofish` library being used (`go.mod`) and consider updating.
+        *   Verify DNS resolution within the controller pod if using hostnames.
+
+*   **Error: "Failed to connect to Redfish endpoint ... authentication failed"** (or similar relating to auth)
+    *   **Cause:** Incorrect username or password in the referenced credentials Secret.
+    *   **Troubleshooting:**
+        *   Verify the `credentialsSecretRef` in `PhysicalHost.spec.redfishConnection` points to the correct Secret name.
+        *   Check the content of the Secret (`kubectl get secret <secret-name> -o yaml`) ensures the `username` and `password` keys exist and contain the correct base64-encoded credentials.
+        *   Verify the user account is enabled and has appropriate privileges on the BMC.
+
+*   **Error: "Failed to connect to Redfish endpoint ... x509: certificate signed by unknown authority"** (or similar TLS errors)
+    *   **Cause:** The BMC is using a self-signed or untrusted TLS certificate, and Beskar7 is configured to verify certificates.
+    *   **Troubleshooting:**
+        *   **Recommended:** Configure the BMC with a certificate signed by a trusted CA.
+        *   **Less Secure:** Set `insecureSkipVerify: true` in the `PhysicalHost.spec.redfishConnection` block. Use this with caution.
+
+*   **`PhysicalHost` Stuck in `Enrolling` or `Error` State:**
+    *   Check controller logs for connection or query errors as described above.
+    *   Verify Redfish service health on the BMC itself.
+
+### `Beskar7Machine` Reconciliation Errors
+
+*   **Machine Stuck Waiting for `PhysicalHost`:**
+    *   **Log:** `No associated or available PhysicalHost found, requeuing`
+    *   **Cause:** No `PhysicalHost` resources in the `Available` state exist in the same namespace as the `Beskar7Machine`.
+    *   **Troubleshooting:**
+        *   Ensure `PhysicalHost` resources for your hardware exist.
+        *   Check the status of existing `PhysicalHost`s (`kubectl get physicalhost -o wide`). Are they `Available`? If not, check their logs/conditions to see why.
+        *   Ensure `PhysicalHost`s are in the same namespace as the `Beskar7Machine`.
+
+*   **Machine Stuck Claiming Host / Configuring Boot:**
+    *   **Log:** `Failed to get Redfish client for host provisioning...`, `Failed to set boot parameters...`, `Failed to set boot source ISO...`
+    *   **Cause:** Errors occurred during the second phase of reconciliation where the `Beskar7MachineController` connects to the claimed `PhysicalHost`'s BMC to configure boot settings.
+    *   **Troubleshooting:** Check the specific error message. It often relates back to Redfish connectivity, authentication (same checks as for `PhysicalHost`), or BMC capability issues.
+
+*   **RemoteConfig Fails - `SetBootParameters` Error:**
+    *   **Log:** `Failed to set boot settings via UefiTargetBootSourceOverride...`
+    *   **Cause:** As noted in Advanced Usage, setting kernel parameters via Redfish (`UefiTargetBootSourceOverride`) is vendor-dependent and may not be supported or may require specific EFI paths.
+    *   **Troubleshooting:**
+        *   Check BMC documentation for Redfish boot override capabilities.
+        *   Inspect the target ISO to verify the EFI bootloader path (`\EFI\BOOT\BOOTX64.EFI` is a guess).
+        *   Consider using the `PreBakedISO` mode as an alternative if `RemoteConfig` is unreliable for your hardware.
+        *   Check for more detailed Redfish error messages in the logs (if available via `common.Error`).
+
+*   **Virtual Media / ISO Boot Issues:**
+    *   **Log:** `Failed to insert virtual media...`, `Failed to set boot source override...`
+    *   **Cause:** Problems with the BMC's virtual media service.
+    *   **Troubleshooting:**
+        *   Verify the `imageURL` in the `Beskar7MachineSpec` is correct and accessible from the network where the BMC resides.
+        *   Check BMC logs/status for virtual media errors.
+        *   Ensure the BMC supports mounting ISOs from the specified URL type (e.g., HTTP, HTTPS, NFS - Beskar7 currently assumes HTTP/S via `gofish`).
+
+### General Tips
+
+*   **Check CRD Status:** `kubectl get crd physicalhosts.infrastructure.cluster.x-k8s.io -o yaml`, etc. Ensure they are established.
+*   **Check Resource Status:** Use `kubectl get physicalhost <name> -o yaml` and `kubectl get beskar7machine <name> -o yaml` to inspect the full status, including conditions and reported states.
+*   **Check BMC:** Log in directly to the BMC (Web UI, SSH) to verify its status, Redfish service state, virtual media status, and power state. 
