@@ -125,28 +125,7 @@ func (r *Beskar7ClusterReconciler) reconcileNormal(ctx context.Context, logger l
 
 	// TODO: Check if paused
 
-	// --- Reconcile ControlPlaneEndpoint ---
-	// Derive endpoint from control plane machines instead of spec.
-	cpEndpoint, err := r.findControlPlaneEndpoint(ctx, logger, cluster)
-	if err != nil {
-		return ctrl.Result{}, errors.Wrapf(err, "failed to find control plane endpoint for cluster %s/%s", cluster.Namespace, cluster.Name)
-	}
-
-	if cpEndpoint == nil {
-		logger.Info("Control plane endpoint not yet available, waiting for control plane machines.")
-		conditions.MarkFalse(b7cluster, infrastructurev1alpha1.ControlPlaneEndpointReady, infrastructurev1alpha1.ControlPlaneEndpointNotSetReason, clusterv1.ConditionSeverityInfo, "Waiting for control plane Beskar7Machine(s) to have IP addresses")
-		b7cluster.Status.Ready = false
-		// Requeue after a delay to check again
-		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
-	}
-
-	// Endpoint found, update status
-	logger.Info("Control plane endpoint found", "host", cpEndpoint.Host, "port", cpEndpoint.Port)
-	b7cluster.Status.ControlPlaneEndpoint = *cpEndpoint
-	conditions.MarkTrue(b7cluster, infrastructurev1alpha1.ControlPlaneEndpointReady)
-	b7cluster.Status.Ready = true
-
-	// --- Reconcile Failure Domains (Placeholder) ---
+	// --- Reconcile Failure Domains ---
 	// Discover available failure domains from PhysicalHosts in the same namespace.
 	// Assumes hosts are labeled with `topology.kubernetes.io/zone=<zone-name>`.
 	phList := &infrastructurev1alpha1.PhysicalHostList{}
@@ -154,7 +133,7 @@ func (r *Beskar7ClusterReconciler) reconcileNormal(ctx context.Context, logger l
 	if err := r.List(ctx, phList, listOpts...); err != nil {
 		logger.Error(err, "Failed to list PhysicalHosts to determine failure domains")
 		// Continue reconciliation without failure domains if listing fails?
-		// Or return error? For now, log and continue.
+		// Or return error? For now, log and continue, but consider returning err.
 	} else {
 		failureDomains := make(clusterv1.FailureDomains)
 		zoneLabel := "topology.kubernetes.io/zone" // Standard zone label
@@ -181,8 +160,28 @@ func (r *Beskar7ClusterReconciler) reconcileNormal(ctx context.Context, logger l
 			logger.Info("No PhysicalHosts with zone labels found in namespace")
 		}
 	}
-
 	// --- End Reconcile Failure Domains ---
+
+	// --- Reconcile ControlPlaneEndpoint ---
+	// Derive endpoint from control plane machines instead of spec.
+	cpEndpoint, err := r.findControlPlaneEndpoint(ctx, logger, cluster)
+	if err != nil {
+		return ctrl.Result{}, errors.Wrapf(err, "failed to find control plane endpoint for cluster %s/%s", cluster.Namespace, cluster.Name)
+	}
+
+	if cpEndpoint == nil {
+		logger.Info("Control plane endpoint not yet available, waiting for control plane machines.")
+		conditions.MarkFalse(b7cluster, infrastructurev1alpha1.ControlPlaneEndpointReady, infrastructurev1alpha1.ControlPlaneEndpointNotSetReason, clusterv1.ConditionSeverityInfo, "Waiting for control plane Beskar7Machine(s) to have IP addresses")
+		b7cluster.Status.Ready = false
+		// Requeue after a delay to check again
+		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+	}
+
+	// Endpoint found, update status
+	logger.Info("Control plane endpoint found", "host", cpEndpoint.Host, "port", cpEndpoint.Port)
+	b7cluster.Status.ControlPlaneEndpoint = *cpEndpoint
+	conditions.MarkTrue(b7cluster, infrastructurev1alpha1.ControlPlaneEndpointReady)
+	b7cluster.Status.Ready = true
 
 	logger.Info("Beskar7Cluster reconciliation complete")
 	return ctrl.Result{}, nil

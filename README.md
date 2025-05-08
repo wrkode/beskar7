@@ -247,3 +247,10 @@ The following key areas are planned or in progress:
 ## Contributing
 
 Contributions are welcome! Please refer to the contribution guidelines (to be added).
+
+## Some testing notes
+
+```
+export KUBEBUILDER_ASSETS=$(/Users/wrizzo/go/bin/setup-envtest use 1.29.x -p path)
+go clean -testcache && go test ./controllers/... -v -ginkgo.v
+```

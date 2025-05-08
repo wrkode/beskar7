@@ -75,10 +75,18 @@ graph TD
 *   **Owned By:** CAPI `Cluster` resource.
 *   **Responsibilities:**
     *   Represents cluster-wide infrastructure concerns.
-    *   Currently, its primary role is to report readiness based on the `spec.controlPlaneEndpoint` being set (usually by the control plane provider like KubeadmControlPlane).
-    *   Sets the `ControlPlaneEndpointReady` condition.
-    *   **(Future):** May potentially derive the control plane endpoint by inspecting control plane `Beskar7Machine` resources.
-    *   **(Future):** May manage other cluster-scoped resources or report aggregated status like `FailureDomains`.
+    *   **Derives the `ControlPlaneEndpoint`** by:
+        *   Listing CAPI `Machine` resources belonging to the cluster with the control plane label (`cluster.x-k8s.io/control-plane`).
+        *   Finding a `Machine` that is marked as `InfrastructureReady`.
+        *   Extracting an IP address from the `Machine`'s `status.addresses` (preferring `InternalIP`).
+        *   Populating the `Beskar7Cluster`'s `status.controlPlaneEndpoint` field.
+    *   Sets the `ControlPlaneEndpointReady` condition based on whether an endpoint could be derived.
+    *   Sets the overall `status.ready` field.
+    *   **(Future):** May manage other cluster-scoped resources.
+    *   **Discovers Failure Domains** by:
+        *   Listing `PhysicalHost` resources in the same namespace.
+        *   Extracting unique values from the `topology.kubernetes.io/zone` label on the `PhysicalHost` resources.
+        *   Populating the `Beskar7Cluster`'s `status.failureDomains` field.
 
 ## Redfish Interaction
 
