@@ -463,7 +463,7 @@ func (r *Beskar7MachineReconciler) findAndClaimOrGetAssociatedHost(ctx context.C
 				kernelParams = []string{fmt.Sprintf("talos.config=%s", b7machine.Spec.ConfigURL)}
 			case "flatcar":
 				kernelParams = []string{fmt.Sprintf("flatcar.ignition.config.url=%s", b7machine.Spec.ConfigURL)}
-			case "microos":
+			case "LeapMicro":
 				kernelParams = []string{fmt.Sprintf("combustion.path=%s", b7machine.Spec.ConfigURL)}
 			default:
 				err := errors.Errorf("unsupported OSFamily for RemoteConfig: %s", b7machine.Spec.OSFamily)
