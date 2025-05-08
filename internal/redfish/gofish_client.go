@@ -2,13 +2,11 @@ package redfish
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/url"
 	"strings"
 
 	"github.com/stmcginnis/gofish"
-	"github.com/stmcginnis/gofish/common"
 	"github.com/stmcginnis/gofish/redfish"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 )
@@ -334,6 +332,8 @@ func (c *gofishClient) EjectVirtualMedia(ctx context.Context) error {
 }
 
 // SetBootParameters configures kernel command line parameters for the next boot.
+// It first attempts the standard UefiTargetBootSourceOverride method.
+// If that fails, it includes placeholders for vendor-specific methods like BIOS attribute setting.
 func (c *gofishClient) SetBootParameters(ctx context.Context, params []string) error {
 	log := logf.FromContext(ctx)
 	log.Info("Attempting to set boot parameters", "Params", params)
@@ -343,60 +343,79 @@ func (c *gofishClient) SetBootParameters(ctx context.Context, params []string) e
 		return fmt.Errorf("failed to get system to set boot parameters: %w", err)
 	}
 
-	var bootSettings redfish.Boot
-
+	// --- Attempt 1: Using UefiTargetBootSourceOverride (Most standard approach) ---
+	log.V(1).Info("Attempting boot parameter setting via UefiTargetBootSourceOverride")
+	var uefiBootSettings redfish.Boot
 	if len(params) == 0 {
-		log.Info("Clearing one-time UEFI boot parameters via UefiTargetBootSourceOverride by disabling override.")
-		bootSettings = redfish.Boot{
+		// Clear parameters: Disable override and set target to None.
+		uefiBootSettings = redfish.Boot{
 			BootSourceOverrideEnabled:    redfish.DisabledBootSourceOverrideEnabled,
 			BootSourceOverrideTarget:     redfish.NoneBootSourceOverrideTarget,
-			UefiTargetBootSourceOverride: "", // Explicitly try to clear it
+			UefiTargetBootSourceOverride: "",
 		}
 	} else {
-		// Default EFI bootloader path. This is a common path but might need to be configurable
-		// or discovered for different ISOs/OSes. Examples:
-		// - "\\EFI\\BOOT\\BOOTX64.EFI"
-		// - "/efi/boot/bootx64.efi"
-		// - Path to shimx64.efi for Secure Boot systems, then grubx64.efi
+		// Default EFI bootloader path. This is a guess and might need to be configurable.
 		efiBootloaderPath := "\\EFI\\BOOT\\BOOTX64.EFI"
-
 		fullBootString := efiBootloaderPath + " " + strings.Join(params, " ")
-		log.Info("Attempting to set UEFI boot target with parameters", "UefiTarget", fullBootString)
-
-		bootSettings = redfish.Boot{
+		uefiBootSettings = redfish.Boot{
 			BootSourceOverrideTarget:     redfish.UefiTargetBootSourceOverrideTarget,
 			BootSourceOverrideEnabled:    redfish.OnceBootSourceOverrideEnabled,
 			UefiTargetBootSourceOverride: fullBootString,
 		}
 	}
 
-	log.Info("Applying boot settings via UefiTargetBootSourceOverride", "Settings", bootSettings)
-	err = system.SetBoot(bootSettings)
-	if err != nil {
-		// If this fails, it could be due to several reasons:
-		// 1. The BMC does not support UefiTargetBootSourceOverride.
-		// 2. The BMC does not allow appending parameters to the UefiTargetBootSourceOverride string.
-		// 3. The provided efiBootloaderPath is incorrect for the target ISO.
-		// 4. A transient communication error with the BMC.
-		//
-		// Setting kernel parameters via Redfish is highly vendor-dependent.
-		// Another approach involves setting specific BIOS attributes, but these are not standardized
-		// and would require vendor-specific knowledge and likely configuration by the user.
-		// For now, we rely on UefiTargetBootSourceOverride and log failures clearly.
-		// Users may need to use the "PreBakedISO" provisioningMode if this method is unreliable for their hardware.
-
-		// Attempt to get more detailed error information if it's a common.Error
-		var redfishError *common.Error
-		if errors.As(err, &redfishError) {
-			log.Error(redfishError, "Failed to set boot settings via UefiTargetBootSourceOverride (Redfish error)",
-				"Settings", bootSettings)
-		} else {
-			log.Error(err, "Failed to set boot settings via UefiTargetBootSourceOverride (non-Redfish error)",
-				"Settings", bootSettings)
-		}
-		return fmt.Errorf("failed to set boot settings on system using UefiTargetBootSourceOverride: %w", err)
+	log.Info("Applying boot settings via UefiTargetBootSourceOverride", "Settings", uefiBootSettings)
+	uerr := system.SetBoot(uefiBootSettings)
+	if uerr == nil {
+		log.Info("Successfully applied boot settings via UefiTargetBootSourceOverride.")
+		return nil // Success!
 	}
 
-	log.Info("Successfully applied boot settings via UefiTargetBootSourceOverride.")
-	return nil
+	// UEFI Target method failed, log details and consider alternatives.
+	log = log.WithValues("InitialUefiError", uerr.Error()) // Reassign log with extra context
+	log.Error(uerr, "Failed to set boot settings via UefiTargetBootSourceOverride", "Settings", uefiBootSettings)
+
+	// --- Potential Alternative: Using BIOS Attributes (Placeholder) ---
+	// This section requires vendor-specific knowledge or configuration (e.g., via annotations).
+	log.Info("UefiTargetBootSourceOverride failed, investigating BIOS attributes as fallback (currently placeholder).")
+
+	// TODO: Implement logic to check PhysicalHost annotations or other config
+	//       for vendor-specific instructions (e.g., BIOS attribute name).
+	biosAttributeName := "" // Example: Get this from annotation
+
+	if biosAttributeName != "" {
+		log.Info("Attempting to set boot parameters via configured BIOS attribute", "AttributeName", biosAttributeName)
+		// bios, biosErr := system.Bios() // Fetching BIOS is commented out as setting is not implemented
+		// if biosErr != nil {
+		// 	log.Error(biosErr, "Failed to get BIOS resource while attempting attribute fallback.")
+		// 	// Return the original UEFI error as it was the primary method failure.
+		// 	return fmt.Errorf("UefiTargetBootSourceOverride failed (%v) and BIOS fallback failed (get BIOS error: %w)", uerr, biosErr)
+		// }
+
+		bootParamsString := strings.Join(params, " ")
+		if len(params) == 0 {
+			bootParamsString = ""
+		}
+
+		attrsToSet := map[string]interface{}{biosAttributeName: bootParamsString}
+		log.Info("Attempting to call bios.SetAttributes", "AttributesToSet", attrsToSet)
+
+		// NOTE: bios.SetAttributes does not exist in gofish. Setting BIOS attributes is vendor-specific.
+		// Actual implementation would require using specific gofish methods if available for the vendor
+		// or potentially using raw Redfish requests.
+		// setAttrErr := bios.SetAttributes(attrsToSet) // This is conceptual pseudo-code
+		setAttrErr := fmt.Errorf("BIOS attribute setting for '%s' not implemented", biosAttributeName)
+
+		if setAttrErr == nil {
+			log.Info("Successfully set boot parameters via BIOS attribute (placeholder success)", "AttributeName", biosAttributeName)
+			// WARNING: This likely sets a *persistent* parameter, not one-time!
+			return nil // Hypothetical success
+		}
+		log.Error(setAttrErr, "Failed to set BIOS attribute", "AttributeName", biosAttributeName)
+		// Fall through if attribute setting failed
+	}
+
+	// If we reach here, both UefiTarget and configured BIOS attribute methods failed.
+	log.Error(uerr, "All attempts to set boot parameters failed.")
+	return fmt.Errorf("failed to set boot parameters using UefiTargetBootSourceOverride and no alternative method succeeded: %w", uerr)
 }

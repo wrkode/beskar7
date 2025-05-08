@@ -558,6 +558,24 @@ func (r *Beskar7MachineReconciler) getRedfishClientForHost(ctx context.Context, 
 	password := string(passwordBytes)
 	// --- End Fetch Redfish Credentials ---
 
+	// --- Read Vendor-Specific Configuration (Example: Annotation for BIOS Attribute) ---
+	// Check for an annotation on the PhysicalHost that might specify a vendor-specific
+	// BIOS attribute to use for setting kernel parameters if the standard UEFI method fails.
+	var biosKernelArgAttribute string
+	if physicalHost.Annotations != nil {
+		biosKernelArgAttribute = physicalHost.Annotations["beskar7.infrastructure.cluster.x-k8s.io/bios-kernel-arg-attribute"]
+	}
+	if biosKernelArgAttribute != "" {
+		log.Info("Found annotation for BIOS kernel argument attribute", "attributeName", biosKernelArgAttribute)
+		// TODO: Pass this attribute name to the Redfish client implementation somehow.
+		// This might involve modifying the RedfishClientFactory signature or having a
+		// dedicated method on the client interface like `SetVendorOptions(...)`.
+		// For now, we just log its presence.
+	} else {
+		log.V(1).Info("No specific BIOS kernel argument attribute annotation found.")
+	}
+	// --- End Vendor-Specific Configuration ---
+
 	// --- Connect to Redfish ---
 	clientFactory := r.RedfishClientFactory
 	if clientFactory == nil {
