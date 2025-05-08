@@ -27,7 +27,7 @@ rules:
   verbs:
   - get
   - list
-  - watch // Needed to interact with Cluster object
+  - watch
 - apiGroups:
   - cluster.x-k8s.io
   resources:
@@ -36,6 +36,7 @@ rules:
   verbs:
   - get
   - list
+  - watch // Needed to find control plane machine addresses
   - watch // Needed to interact with Machine object
 - apiGroups:
   - infrastructure.cluster.x-k8s.io
@@ -81,6 +82,7 @@ rules:
   - patch // Needed to find and claim/patch PhysicalHost
   - update
   - watch
+  - watch // Needed to discover failure domains
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role

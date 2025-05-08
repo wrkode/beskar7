@@ -37,6 +37,11 @@ type Beskar7ClusterStatus struct {
 	// +optional
 	Ready bool `json:"ready,omitempty"`
 
+	// ControlPlaneEndpoint represents the endpoint used to communicate with the control plane.
+	// Populated by the Beskar7Cluster controller.
+	// +optional
+	ControlPlaneEndpoint clusterv1.APIEndpoint `json:"controlPlaneEndpoint,omitempty"`
+
 	// Conditions defines current service state of the Beskar7Cluster.
 	// +optional
 	Conditions clusterv1.Conditions `json:"conditions,omitempty"`
