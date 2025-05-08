@@ -215,9 +215,9 @@ kubectl apply -f b7machine-kairos-remote.yaml
 **Note on `configURL` for RemoteConfig:**
 *   Ensure the URL is accessible from the bare-metal server during its boot process.
 *   For Kairos, the parameter `config_url=<ConfigURL>` will be passed to the kernel.
-*   For Talos, it would be `talos.config=<ConfigURL>`.
+*   For Talos, `talos.config=<ConfigURL>`.
 *   For Flatcar, `flatcar.ignition.config.url=<ConfigURL>`.
-*   For openSUSE MicroOS, `combustion.path=<ConfigURL>`.
+*   For openSUSE Leap Micro, `combustion.path=<ConfigURL>`.
 
 *(This README will be updated as more features are implemented, including CAPI `Machine` and `Cluster` examples.)*
 

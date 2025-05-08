@@ -43,7 +43,7 @@ spec:
                         - kairos
                         - talos
                         - flatcar
-                        - microos
+                        - LeapMicro
                         type: string
                       providerID:
                         type: string

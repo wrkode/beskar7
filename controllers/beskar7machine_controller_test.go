@@ -874,6 +874,136 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 			Expect(mockRfClient.SetBootSourceISOCalls[0]).To(Equal(genericIsoURL), "SetBootSourceISO called with incorrect ImageURL for Flatcar")
 		})
 
+		It("should configure boot for RemoteConfig mode with LeapMicro", func() {
+			remoteConfigURL := "https://example.com/leap-micro-combustion.script"
+			genericIsoURL := "http://example.com/leap-micro-generic.iso"
+
+			b7machine.Spec.OSFamily = "LeapMicro"
+			b7machine.Spec.ImageURL = genericIsoURL
+			b7machine.Spec.ProvisioningMode = "RemoteConfig"
+			b7machine.Spec.ConfigURL = remoteConfigURL
+
+			// Create a PhysicalHost that the reconciler will find and claim
+			host = &infrastructurev1alpha1.PhysicalHost{
+				ObjectMeta: metav1.ObjectMeta{Name: "available-host-leapmicro", Namespace: testNs.Name},
+				Spec: infrastructurev1alpha1.PhysicalHostSpec{
+					RedfishConnection: infrastructurev1alpha1.RedfishConnectionInfo{
+						Address:              "redfish://dummy-leapmicro",
+						CredentialsSecretRef: "dummy-secret-leapmicro",
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, host)).To(Succeed())
+			Eventually(func(g Gomega) {
+				createdHost := &infrastructurev1alpha1.PhysicalHost{}
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: host.Name, Namespace: host.Namespace}, createdHost)).To(Succeed())
+				createdHost.Status = infrastructurev1alpha1.PhysicalHostStatus{State: infrastructurev1alpha1.StateAvailable, Ready: true}
+				g.Expect(k8sClient.Status().Update(ctx, createdHost)).To(Succeed())
+			}, "10s", "100ms").Should(Succeed(), "Failed to update PhysicalHost status for leapmicro test")
+
+			// Create dummy secret for Redfish credentials
+			dummySecret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{Name: "dummy-secret-leapmicro", Namespace: testNs.Name},
+				Data:       map[string][]byte{"username": []byte("user"), "password": []byte("pass")},
+			}
+			Expect(k8sClient.Create(ctx, dummySecret)).To(Succeed())
+
+			Expect(k8sClient.Create(ctx, b7machine)).To(Succeed())
+
+			reconciler := &Beskar7MachineReconciler{
+				Client:               k8sClient,
+				Scheme:               k8sClient.Scheme(),
+				RedfishClientFactory: NewMockRedfishClientFactory(mockRfClient),
+			}
+
+			By("First reconcile to add finalizer")
+			result, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: key})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.Requeue).To(BeTrue(), "Should requeue after adding finalizer")
+
+			By("Second reconcile to claim host and configure boot settings")
+			result, err = reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: key})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.RequeueAfter).To(BeNumerically(">", 0), "Should requeue to wait for PhysicalHost controller")
+
+			Eventually(func(g Gomega) {
+				updatedHost := &infrastructurev1alpha1.PhysicalHost{}
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: host.Name, Namespace: host.Namespace}, updatedHost)).To(Succeed())
+				g.Expect(updatedHost.Spec.ConsumerRef).NotTo(BeNil())
+			}, "15s", "200ms").Should(Succeed(), "PhysicalHost should be claimed after second reconcile for leapmicro")
+
+			// Assert Redfish calls
+			Expect(mockRfClient.SetBootParametersCalls).To(HaveLen(1), "SetBootParameters should be called once for LeapMicro")
+			Expect(mockRfClient.SetBootParametersCalls[0]).To(Equal([]string{fmt.Sprintf("combustion.path=%s", remoteConfigURL)}), "SetBootParameters called with incorrect LeapMicro params")
+			Expect(mockRfClient.SetBootSourceISOCalls).To(HaveLen(1), "SetBootSourceISO should be called once for LeapMicro")
+			Expect(mockRfClient.SetBootSourceISOCalls[0]).To(Equal(genericIsoURL), "SetBootSourceISO called with incorrect ImageURL for LeapMicro")
+		})
+
+		It("should configure boot for RemoteConfig mode with Talos", func() {
+			remoteConfigURL := "https://example.com/talos-machineconfig.yaml"
+			genericIsoURL := "http://example.com/talos-generic.iso"
+
+			b7machine.Spec.OSFamily = "talos"
+			b7machine.Spec.ImageURL = genericIsoURL
+			b7machine.Spec.ProvisioningMode = "RemoteConfig"
+			b7machine.Spec.ConfigURL = remoteConfigURL
+
+			// Create a PhysicalHost that the reconciler will find and claim
+			host = &infrastructurev1alpha1.PhysicalHost{
+				ObjectMeta: metav1.ObjectMeta{Name: "available-host-talos", Namespace: testNs.Name},
+				Spec: infrastructurev1alpha1.PhysicalHostSpec{
+					RedfishConnection: infrastructurev1alpha1.RedfishConnectionInfo{
+						Address:              "redfish://dummy-talos",
+						CredentialsSecretRef: "dummy-secret-talos",
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, host)).To(Succeed())
+			Eventually(func(g Gomega) {
+				createdHost := &infrastructurev1alpha1.PhysicalHost{}
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: host.Name, Namespace: host.Namespace}, createdHost)).To(Succeed())
+				createdHost.Status = infrastructurev1alpha1.PhysicalHostStatus{State: infrastructurev1alpha1.StateAvailable, Ready: true}
+				g.Expect(k8sClient.Status().Update(ctx, createdHost)).To(Succeed())
+			}, "10s", "100ms").Should(Succeed(), "Failed to update PhysicalHost status for talos test")
+
+			// Create dummy secret for Redfish credentials
+			dummySecret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{Name: "dummy-secret-talos", Namespace: testNs.Name},
+				Data:       map[string][]byte{"username": []byte("user"), "password": []byte("pass")},
+			}
+			Expect(k8sClient.Create(ctx, dummySecret)).To(Succeed())
+
+			Expect(k8sClient.Create(ctx, b7machine)).To(Succeed())
+
+			reconciler := &Beskar7MachineReconciler{
+				Client:               k8sClient,
+				Scheme:               k8sClient.Scheme(),
+				RedfishClientFactory: NewMockRedfishClientFactory(mockRfClient),
+			}
+
+			By("First reconcile to add finalizer")
+			result, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: key})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.Requeue).To(BeTrue(), "Should requeue after adding finalizer")
+
+			By("Second reconcile to claim host and configure boot settings")
+			result, err = reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: key})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.RequeueAfter).To(BeNumerically(">", 0), "Should requeue to wait for PhysicalHost controller")
+
+			Eventually(func(g Gomega) {
+				updatedHost := &infrastructurev1alpha1.PhysicalHost{}
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: host.Name, Namespace: host.Namespace}, updatedHost)).To(Succeed())
+				g.Expect(updatedHost.Spec.ConsumerRef).NotTo(BeNil())
+			}, "15s", "200ms").Should(Succeed(), "PhysicalHost should be claimed after second reconcile for talos")
+
+			// Assert Redfish calls
+			Expect(mockRfClient.SetBootParametersCalls).To(HaveLen(1), "SetBootParameters should be called once for Talos")
+			Expect(mockRfClient.SetBootParametersCalls[0]).To(Equal([]string{fmt.Sprintf("talos.config=%s", remoteConfigURL)}), "SetBootParameters called with incorrect Talos params")
+			Expect(mockRfClient.SetBootSourceISOCalls).To(HaveLen(1), "SetBootSourceISO should be called once for Talos")
+			Expect(mockRfClient.SetBootSourceISOCalls[0]).To(Equal(genericIsoURL), "SetBootSourceISO called with incorrect ImageURL for Talos")
+		})
+
 		// TODO: Add test for "RemoteConfig" mode with missing ConfigURL (error expected)
 		// TODO: Add test for "RemoteConfig" mode with unsupported OSFamily (error expected)
 

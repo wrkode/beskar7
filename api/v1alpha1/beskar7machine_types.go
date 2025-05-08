@@ -40,8 +40,8 @@ type Beskar7MachineSpec struct {
 
 	// OSFamily specifies the target operating system family for this machine.
 	// This determines how provisioning is handled (e.g., kernel parameters for config).
-	// Examples: "kairos", "talos", "flatcar", "microos".
-	// +kubebuilder:validation:Enum=kairos;talos;flatcar;microos
+	// Examples: "kairos", "talos", "flatcar", "LeapMicro".
+	// +kubebuilder:validation:Enum=kairos;talos;flatcar;LeapMicro
 	OSFamily string `json:"osFamily"`
 
 	// ImageURL specifies the URL of the boot ISO image.
