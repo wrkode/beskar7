@@ -13,7 +13,7 @@ KUSTOMIZE ?= kustomize
 
 # Image URL to use all building/pushing image targets
 VERSION ?= v0.1.0-dev
-IMAGE_REGISTRY ?= ghcr.io/wrkode
+IMAGE_REGISTRY ?= ghcr.io/wrkode/beskar7
 IMAGE_REPO ?= beskar7
 IMG ?= $(IMAGE_REGISTRY)/$(IMAGE_REPO):$(VERSION)
 
@@ -83,4 +83,10 @@ deploy:
 undeploy:
 	$(KUSTOMIZE) build config/default | kubectl delete -f -
 
-.PHONY: build generate manifests test docker-build docker-push deploy install-controller-gen install uninstall undeploy rbac crd 
+# Generate a single manifest file for a release
+release-manifests:
+	$(MAKE) manifests # Ensure CRDs and RBAC are up-to-date
+	$(KUSTOMIZE) build config/default > beskar7-manifests-$(VERSION).yaml
+	@echo "Release manifests generated: beskar7-manifests-$(VERSION).yaml"
+
+.PHONY: build generate manifests test docker-build docker-push deploy install-controller-gen install uninstall undeploy rbac crd release-manifests 
