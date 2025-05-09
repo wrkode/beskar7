@@ -95,6 +95,17 @@ This provides more control if you need to customize the deployment.
     ```
     *Alternatively, create your own Kustomize overlay pointing to `config/default` and set the image there.* 
 
+### Deploying from a Release Manifest Bundle:
+
+Each GitHub release will include a `beskar7-manifests-$(VERSION).yaml` file. This bundle contains all necessary CRDs, RBAC, and the Deployment for the controller manager, pre-configured with the correct image for that release.
+
+1.  **Download the release manifest** (e.g., `beskar7-manifests-v0.1.0-dev.yaml`) from the [GitHub Releases page](https://github.com/wrkode/beskar7/releases).
+2.  **Apply the manifest to your cluster:**
+    ```bash
+    kubectl apply -f beskar7-manifests-v0.1.0-dev.yaml
+    ```
+    This will create the `system` namespace and all required Beskar7 components.
+
 ## Usage Examples
 
 ### 1. Create Redfish Credentials Secret
