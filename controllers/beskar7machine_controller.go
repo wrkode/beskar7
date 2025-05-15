@@ -24,10 +24,12 @@ import (
 
 	"github.com/go-logr/logr"
 	"github.com/pkg/errors"
+	"github.com/stmcginnis/gofish/redfish"
 	infrastructurev1alpha1 "github.com/wrkode/beskar7/api/v1alpha1"
 	internalredfish "github.com/wrkode/beskar7/internal/redfish"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/utils/pointer"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	"sigs.k8s.io/cluster-api/util"
 	conditions "sigs.k8s.io/cluster-api/util/conditions"
@@ -51,7 +53,6 @@ type Beskar7MachineReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
 	// RedfishClientFactory allows overriding the Redfish client creation for testing.
-	// If nil, internalredfish.NewClient will be used by default in getRedfishClientForHost.
 	RedfishClientFactory internalredfish.RedfishClientFactory
 }
 
@@ -126,93 +127,112 @@ func (r *Beskar7MachineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 func (r *Beskar7MachineReconciler) reconcileNormal(ctx context.Context, logger logr.Logger, b7machine *infrastructurev1alpha1.Beskar7Machine, machine *clusterv1.Machine) (ctrl.Result, error) {
 	logger.Info("Reconciling Beskar7Machine create/update")
 
-	// If the Beskar7Machine doesn't have our finalizer, add it.
+	// Ensure the object has a finalizer for cleanup
 	if controllerutil.AddFinalizer(b7machine, Beskar7MachineFinalizer) {
-		logger.Info("Adding finalizer")
+		logger.Info("Adding Finalizer")
+		// Let the deferred patch handle saving.
 		return ctrl.Result{Requeue: true}, nil
 	}
 
-	// TODO: Check if paused
-
-	// Find or retrieve the associated PhysicalHost.
+	// Use findAndClaimOrGetAssociatedHost to get or claim a PhysicalHost
 	physicalHost, result, err := r.findAndClaimOrGetAssociatedHost(ctx, logger, b7machine)
 	if err != nil {
 		logger.Error(err, "Failed to find, claim, or get associated PhysicalHost")
 		conditions.MarkFalse(b7machine, infrastructurev1alpha1.PhysicalHostAssociatedCondition, infrastructurev1alpha1.PhysicalHostAssociationFailedReason, clusterv1.ConditionSeverityWarning, "Failed to associate with PhysicalHost: %v", err.Error())
 		return ctrl.Result{}, err
 	}
-
-	// ---> Set Condition True if host is found/claimed, even if requeuing <---
-	if physicalHost != nil {
-		logger.Info("Successfully associated with PhysicalHost", "physicalhost", physicalHost.Name)
-		conditions.MarkTrue(b7machine, infrastructurev1alpha1.PhysicalHostAssociatedCondition)
-	} else {
-		// No host found yet
-		conditions.MarkFalse(b7machine, infrastructurev1alpha1.PhysicalHostAssociatedCondition, infrastructurev1alpha1.WaitingForPhysicalHostReason, clusterv1.ConditionSeverityInfo, "No available PhysicalHost found")
-		// If result is also zero here, it's an unexpected state, but the later check handles it.
-	}
-
 	if !result.IsZero() {
 		logger.Info("Requeuing requested by findAndClaimOrGetAssociatedHost")
-		// Condition is already set based on whether physicalHost was nil or not above
 		return result, nil
 	}
 	if physicalHost == nil {
-		// Should not happen if result is zero and err is nil, but check defensively.
-		logger.Info("No associated or available PhysicalHost found (unexpected state after check), requeuing")
+		logger.Info("No associated or available PhysicalHost found, requeuing")
 		conditions.MarkFalse(b7machine, infrastructurev1alpha1.PhysicalHostAssociatedCondition, infrastructurev1alpha1.WaitingForPhysicalHostReason, clusterv1.ConditionSeverityInfo, "No available PhysicalHost found")
 		return ctrl.Result{RequeueAfter: time.Minute}, nil
 	}
 
-	logger = logger.WithValues("physicalhost", physicalHost.Name)
-	// logger.Info("Successfully associated with PhysicalHost") // Moved up
-	// conditions.MarkTrue(b7machine, infrastructurev1alpha1.PhysicalHostAssociatedCondition) // Moved up
-
-	// Reconcile based on PhysicalHost status
-	switch physicalHost.Status.State {
-	case infrastructurev1alpha1.StateProvisioned:
-		logger.Info("Associated PhysicalHost is Provisioned")
-		currentProviderID := providerID(physicalHost.Namespace, physicalHost.Name)
-		if b7machine.Spec.ProviderID == nil || *b7machine.Spec.ProviderID != currentProviderID {
-			logger.Info("Setting ProviderID", "ProviderID", currentProviderID)
-			b7machine.Spec.ProviderID = &currentProviderID
+	// Set PhysicalHostRef if not already set
+	if b7machine.Spec.PhysicalHostRef == nil ||
+		b7machine.Spec.PhysicalHostRef.Name != physicalHost.Name ||
+		b7machine.Spec.PhysicalHostRef.Namespace != physicalHost.Namespace {
+		b7machine.Spec.PhysicalHostRef = &corev1.ObjectReference{
+			Kind:       physicalHost.Kind,
+			APIVersion: physicalHost.APIVersion,
+			Name:       physicalHost.Name,
+			Namespace:  physicalHost.Namespace,
+			UID:        physicalHost.UID,
 		}
-		conditions.MarkTrue(b7machine, infrastructurev1alpha1.InfrastructureReadyCondition)
-		phase := "Provisioned"
-		b7machine.Status.Phase = &phase
-		logger.Info("Beskar7Machine infrastructure is Ready")
-
-	case infrastructurev1alpha1.StateProvisioning:
-		logger.Info("Waiting for associated PhysicalHost to finish provisioning")
-		conditions.MarkFalse(b7machine, infrastructurev1alpha1.InfrastructureReadyCondition, infrastructurev1alpha1.PhysicalHostNotReadyReason, clusterv1.ConditionSeverityInfo, "PhysicalHost %q is still provisioning", physicalHost.Name)
-		phase := "Provisioning"
-		b7machine.Status.Phase = &phase
-		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
-
-	case infrastructurev1alpha1.StateAvailable, infrastructurev1alpha1.StateClaimed, infrastructurev1alpha1.StateEnrolling:
-		logger.Info("Waiting for associated PhysicalHost to start/complete provisioning", "hostState", physicalHost.Status.State)
-		conditions.MarkFalse(b7machine, infrastructurev1alpha1.InfrastructureReadyCondition, infrastructurev1alpha1.PhysicalHostNotReadyReason, clusterv1.ConditionSeverityInfo, "PhysicalHost %q is not yet provisioned (state: %s)", physicalHost.Name, physicalHost.Status.State)
-		phase := "Associating"
-		b7machine.Status.Phase = &phase
-		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
-
-	case infrastructurev1alpha1.StateError:
-		errMsg := fmt.Sprintf("PhysicalHost %q is in error state: %s", physicalHost.Name, physicalHost.Status.ErrorMessage)
-		logger.Error(nil, errMsg)
-		// Temporarily use a hardcoded string for testing build issue
-		conditions.MarkFalse(b7machine, infrastructurev1alpha1.InfrastructureReadyCondition, infrastructurev1alpha1.PhysicalHostErrorReason, clusterv1.ConditionSeverityError, "Associated host in error")
-		phase := "Failed"
-		b7machine.Status.Phase = &phase
-		return ctrl.Result{}, nil // No automatic requeue
-
-	default:
-		logger.Info("Associated PhysicalHost is in unknown or intermediate state", "hostState", physicalHost.Status.State)
-		conditions.MarkFalse(b7machine, infrastructurev1alpha1.InfrastructureReadyCondition, infrastructurev1alpha1.PhysicalHostNotReadyReason, clusterv1.ConditionSeverityInfo, "PhysicalHost %q is in state: %s", physicalHost.Name, physicalHost.Status.State)
-		phase := "Pending"
-		b7machine.Status.Phase = &phase
-		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 	}
 
+	// Get Redfish client for the host
+	rfClient, err := r.getRedfishClientForHost(ctx, logger, physicalHost)
+	if err != nil {
+		logger.Error(err, "Failed to get Redfish client")
+		// Check for specific error types
+		if strings.Contains(err.Error(), "connection") {
+			conditions.MarkFalse(b7machine, infrastructurev1alpha1.PhysicalHostAssociatedCondition, infrastructurev1alpha1.ConnectionErrorReason, clusterv1.ConditionSeverityError, "Failed to connect to Redfish endpoint: %v", err)
+			b7machine.Status.FailureMessage = pointer.String(fmt.Sprintf("Connection error: %v", err))
+		} else if strings.Contains(err.Error(), "authentication") {
+			conditions.MarkFalse(b7machine, infrastructurev1alpha1.PhysicalHostAssociatedCondition, infrastructurev1alpha1.AuthenticationErrorReason, clusterv1.ConditionSeverityError, "Authentication failed: %v", err)
+			b7machine.Status.FailureMessage = pointer.String(fmt.Sprintf("Authentication error: %v", err))
+		} else {
+			conditions.MarkFalse(b7machine, infrastructurev1alpha1.PhysicalHostAssociatedCondition, infrastructurev1alpha1.RedfishConnectionFailedReason, clusterv1.ConditionSeverityError, "Failed to connect to Redfish endpoint: %v", err)
+			b7machine.Status.FailureMessage = pointer.String(fmt.Sprintf("Redfish connection error: %v", err))
+		}
+		return ctrl.Result{RequeueAfter: time.Minute * 2}, nil
+	}
+	defer rfClient.Close(ctx)
+
+	// Get current power state
+	powerState, err := rfClient.GetPowerState(ctx)
+	if err != nil {
+		logger.Error(err, "Failed to get power state")
+		conditions.MarkFalse(b7machine, infrastructurev1alpha1.PhysicalHostAssociatedCondition, infrastructurev1alpha1.RedfishOperationFailedReason, clusterv1.ConditionSeverityError, "Failed to get power state: %v", err)
+		return ctrl.Result{RequeueAfter: time.Minute}, nil
+	}
+
+	// Configure boot settings based on mode
+	if b7machine.Spec.BootMode == infrastructurev1alpha1.PreBakedISO {
+		// For PreBakedISO mode, set boot parameters to nil and use the ImageURL
+		if err := rfClient.SetBootParameters(ctx, nil); err != nil {
+			logger.Error(err, "Failed to set boot parameters for PreBakedISO mode")
+			conditions.MarkFalse(b7machine, infrastructurev1alpha1.PhysicalHostAssociatedCondition, infrastructurev1alpha1.RedfishOperationFailedReason, clusterv1.ConditionSeverityError, "Failed to set boot parameters: %v", err)
+			return ctrl.Result{RequeueAfter: time.Minute}, nil
+		}
+		if err := rfClient.SetBootSourceISO(ctx, b7machine.Spec.ImageURL); err != nil {
+			logger.Error(err, "Failed to set boot source ISO for PreBakedISO mode")
+			conditions.MarkFalse(b7machine, infrastructurev1alpha1.PhysicalHostAssociatedCondition, infrastructurev1alpha1.RedfishOperationFailedReason, clusterv1.ConditionSeverityError, "Failed to set boot source ISO: %v", err)
+			return ctrl.Result{RequeueAfter: time.Minute}, nil
+		}
+	} else if b7machine.Spec.BootMode == infrastructurev1alpha1.RemoteConfig {
+		// For RemoteConfig mode, set Kairos config URL and use generic ISO
+		configURL := fmt.Sprintf("config_url=%s", b7machine.Spec.RemoteConfigURL)
+		if err := rfClient.SetBootParameters(ctx, []string{configURL}); err != nil {
+			logger.Error(err, "Failed to set boot parameters for RemoteConfig mode")
+			conditions.MarkFalse(b7machine, infrastructurev1alpha1.PhysicalHostAssociatedCondition, infrastructurev1alpha1.RedfishOperationFailedReason, clusterv1.ConditionSeverityError, "Failed to set boot parameters: %v", err)
+			return ctrl.Result{RequeueAfter: time.Minute}, nil
+		}
+		if err := rfClient.SetBootSourceISO(ctx, b7machine.Spec.ImageURL); err != nil {
+			logger.Error(err, "Failed to set boot source ISO for RemoteConfig mode")
+			conditions.MarkFalse(b7machine, infrastructurev1alpha1.PhysicalHostAssociatedCondition, infrastructurev1alpha1.RedfishOperationFailedReason, clusterv1.ConditionSeverityError, "Failed to set boot source ISO: %v", err)
+			return ctrl.Result{RequeueAfter: time.Minute}, nil
+		}
+	}
+
+	// Power on if needed
+	if powerState != redfish.OnPowerState {
+		if err := rfClient.SetPowerState(ctx, redfish.OnPowerState); err != nil {
+			logger.Error(err, "Failed to set power state to On")
+			conditions.MarkFalse(b7machine, infrastructurev1alpha1.PhysicalHostAssociatedCondition, infrastructurev1alpha1.PowerOperationErrorReason, clusterv1.ConditionSeverityError, "Failed to power on host: %v", err)
+			return ctrl.Result{RequeueAfter: time.Minute}, nil
+		}
+		// Requeue to check power state after transition
+		return ctrl.Result{RequeueAfter: time.Second * 10}, nil
+	}
+
+	// If we get here, the machine is in the desired state
+	conditions.MarkTrue(b7machine, infrastructurev1alpha1.PhysicalHostAssociatedCondition)
+	b7machine.Status.FailureMessage = nil
 	return ctrl.Result{}, nil
 }
 

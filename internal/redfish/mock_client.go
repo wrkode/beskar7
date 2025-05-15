@@ -19,6 +19,11 @@ type MockClient struct {
 	ShouldFail      map[string]error // Map method name to error to simulate failures
 	InsertedISO     string
 	BootSourceIsISO bool
+	Insecure        bool // Track whether TLS verification is disabled
+
+	// Credential tracking
+	Username string
+	Password string
 
 	// Counters (optional, for verification)
 	CloseCalled         bool
@@ -44,6 +49,7 @@ func NewMockClient() *MockClient {
 		},
 		PowerState: redfish.OffPowerState,
 		ShouldFail: make(map[string]error),
+		Insecure:   false, // Default to secure
 		// Initialize new fields
 		StoredBootParams: nil,
 	}
@@ -64,9 +70,22 @@ func (m *MockClient) GetSystemInfo(ctx context.Context) (*SystemInfo, error) {
 	m.mu.Lock()
 	m.GetSystemInfoCalled = true
 	m.mu.Unlock()
-	if err := m.failIfNeeded("GetSystemInfo"); err != nil {
-		return nil, err
+
+	// Check for TLS certificate error if not insecure
+	if !m.Insecure {
+		if err := m.failIfNeeded("GetSystemInfo"); err != nil {
+			if err.Error() == "x509: certificate signed by unknown authority" {
+				return nil, fmt.Errorf("TLS certificate validation failed: %w", err)
+			}
+			return nil, err
+		}
 	}
+
+	// Check for authentication error
+	if m.Username == "invalid" || m.Password == "invalid" {
+		return nil, fmt.Errorf("authentication failed: invalid credentials")
+	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.SystemInfo, nil
@@ -159,4 +178,12 @@ func (m *MockClient) Close(ctx context.Context) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.CloseCalled = true
+}
+
+// SetCredentials sets the credentials for the mock client.
+func (m *MockClient) SetCredentials(username, password string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.Username = username
+	m.Password = password
 }

@@ -23,6 +23,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"k8s.io/utils/ptr"
 
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
@@ -72,6 +73,12 @@ var _ = BeforeSuite(func() {
 		},
 		// Remove CRDInstallOptions as we use CRDDirectoryPaths explicitly
 		ErrorIfCRDPathMissing: true,
+		// Use a simpler test environment without requiring the full control plane
+		UseExistingCluster: ptr.To(true),
+		// Disable webhook server
+		WebhookInstallOptions: envtest.WebhookInstallOptions{
+			IgnoreErrorIfPathMissing: true,
+		},
 	}
 
 	var err error

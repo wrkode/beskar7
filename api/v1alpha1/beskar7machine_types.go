@@ -1,6 +1,7 @@
 package v1alpha1
 
 import (
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 )
@@ -11,6 +12,12 @@ const (
 	// PhysicalHostAssociatedCondition indicates whether the Beskar7Machine has
 	// successfully associated with a PhysicalHost.
 	PhysicalHostAssociatedCondition clusterv1.ConditionType = "PhysicalHostAssociated"
+
+	// --- Add missing error reason constants ---
+	ConnectionErrorReason        string = "ConnectionError"
+	AuthenticationErrorReason    string = "AuthenticationError"
+	PowerOperationErrorReason    string = "PowerOperationError"
+	RedfishOperationFailedReason string = "RedfishOperationFailed"
 )
 
 // Reasons for condition failures
@@ -30,6 +37,8 @@ const (
 	// ReleasePhysicalHostFailedReason (Severity=Warning) indicates that releasing the
 	// associated PhysicalHost failed during deletion.
 	ReleasePhysicalHostFailedReason string = "ReleasePhysicalHostFailed"
+	// MachineStatusError indicates that the machine is in an error state.
+	MachineStatusError string = "Error"
 )
 
 // Beskar7MachineSpec defines the desired state of Beskar7Machine
@@ -61,7 +70,34 @@ type Beskar7MachineSpec struct {
 	// Required if ProvisioningMode is "RemoteConfig".
 	// +optional
 	ConfigURL string `json:"configURL,omitempty"`
+
+	// PhysicalHostRef references the PhysicalHost resource associated with this machine.
+	// +optional
+	PhysicalHostRef *corev1.ObjectReference `json:"physicalHostRef,omitempty"`
+
+	// PowerState is the desired power state for the machine ("On", "Off").
+	// +optional
+	PowerState *string `json:"powerState,omitempty"`
+
+	// BootMode specifies how the machine should be booted
+	// +kubebuilder:validation:Enum=PreBakedISO;RemoteConfig
+	// +optional
+	BootMode BootMode `json:"bootMode,omitempty"`
+
+	// RemoteConfigURL is the URL of the remote configuration to use when BootMode is RemoteConfig
+	// +optional
+	RemoteConfigURL string `json:"remoteConfigURL,omitempty"`
 }
+
+// BootMode defines how a machine should be booted
+type BootMode string
+
+const (
+	// PreBakedISO indicates the machine should boot from a pre-baked ISO image
+	PreBakedISO BootMode = "PreBakedISO"
+	// RemoteConfig indicates the machine should boot with remote configuration
+	RemoteConfig BootMode = "RemoteConfig"
+)
 
 // Beskar7MachineStatus defines the observed state of Beskar7Machine
 type Beskar7MachineStatus struct {
@@ -89,6 +125,10 @@ type Beskar7MachineStatus struct {
 	// for logging and human consumption.
 	// +optional
 	FailureMessage *string `json:"failureMessage,omitempty"`
+
+	// PowerState is the observed power state of the machine ("On", "Off").
+	// +optional
+	PowerState string `json:"powerState,omitempty"`
 
 	// Conditions defines current service state of the Beskar7Machine.
 	// +optional

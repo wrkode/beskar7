@@ -19,6 +19,8 @@ package controllers
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -40,6 +42,10 @@ import (
 const (
 	// PhysicalHostFinalizer allows PhysicalHostReconciler to clean up resources associated with PhysicalHost before removing it from the apiserver.
 	PhysicalHostFinalizer = "physicalhost.infrastructure.cluster.x-k8s.io"
+
+	// Condition reasons
+	InvalidCredentialsReason = "InvalidCredentials"
+	TLSErrorReason           = "TLSError"
 )
 
 // PhysicalHostReconciler reconciles a PhysicalHost object
@@ -150,39 +156,32 @@ func (r *PhysicalHostReconciler) reconcileNormal(ctx context.Context, logger log
 	usernameBytes, okUser := credentialsSecret.Data["username"]
 	passwordBytes, okPass := credentialsSecret.Data["password"]
 	if !okUser || !okPass {
-		errMsg := "Username or password missing in credentials secret data"
-		logger.Error(nil, errMsg, "SecretName", secretName)
-		conditions.MarkFalse(physicalHost, infrastructurev1alpha1.RedfishConnectionReadyCondition, infrastructurev1alpha1.MissingSecretDataReason, clusterv1.ConditionSeverityError, "Username or password missing in credentials secret data")
-		return ctrl.Result{}, errors.New(errMsg)
+		err := errors.New("username or password missing in credentials secret data")
+		logger.Error(err, "Invalid credentials secret format", "SecretName", secretName)
+		conditions.MarkFalse(physicalHost, infrastructurev1alpha1.RedfishConnectionReadyCondition, InvalidCredentialsReason, clusterv1.ConditionSeverityError, "Invalid credentials secret format: missing username or password")
+		return ctrl.Result{}, err
 	}
-	username := string(usernameBytes)
-	password := string(passwordBytes)
-	// --- End Fetch Redfish Credentials ---
 
 	// --- Connect to Redfish ---
-	// Use the factory to create the client
-	clientFactory := r.RedfishClientFactory
-	if clientFactory == nil { // Default to real client if factory not set (should be set in main)
-		clientFactory = internalredfish.NewClient
-	}
+	username := string(usernameBytes)
+	password := string(passwordBytes)
 	insecure := physicalHost.Spec.RedfishConnection.InsecureSkipVerify != nil && *physicalHost.Spec.RedfishConnection.InsecureSkipVerify
-	rfClient, err := clientFactory(ctx, physicalHost.Spec.RedfishConnection.Address, username, password, insecure)
+
+	rfClient, err := r.RedfishClientFactory(ctx, physicalHost.Spec.RedfishConnection.Address, username, password, insecure)
 	if err != nil {
 		logger.Error(err, "Failed to create Redfish client")
-		conditions.MarkFalse(physicalHost, infrastructurev1alpha1.RedfishConnectionReadyCondition, infrastructurev1alpha1.RedfishConnectionFailedReason, clusterv1.ConditionSeverityError, "Failed to connect: %v", err.Error())
+		conditions.MarkFalse(physicalHost, infrastructurev1alpha1.RedfishConnectionReadyCondition, infrastructurev1alpha1.RedfishConnectionFailedReason, clusterv1.ConditionSeverityError, "Failed to create Redfish client: %v", err)
 		physicalHost.Status.State = infrastructurev1alpha1.StateError
-		return ctrl.Result{RequeueAfter: time.Minute * 2}, nil
+		physicalHost.Status.ErrorMessage = err.Error()
+		return ctrl.Result{RequeueAfter: time.Minute}, nil
 	}
 	defer rfClient.Close(ctx)
-	logger.Info("Successfully connected to Redfish endpoint")
-	conditions.MarkTrue(physicalHost, infrastructurev1alpha1.RedfishConnectionReadyCondition)
-	// --- End Connect to Redfish ---
 
-	// --- Reconcile State ---
+	// --- Query Redfish for System Info and Power State ---
 	systemInfo, rfErr := rfClient.GetSystemInfo(ctx)
 	powerState, psErr := rfClient.GetPowerState(ctx)
 
-	// Update status with observed info first
+	// Update hardware details if available
 	if systemInfo != nil {
 		physicalHost.Status.HardwareDetails = &infrastructurev1alpha1.HardwareDetails{
 			Manufacturer: systemInfo.Manufacturer,
@@ -200,18 +199,31 @@ func (r *PhysicalHostReconciler) reconcileNormal(ctx context.Context, logger log
 	// Check for Redfish query errors
 	if rfErr != nil {
 		logger.Error(rfErr, "Failed to get system info from Redfish")
-		conditions.MarkFalse(physicalHost, infrastructurev1alpha1.HostAvailableCondition, infrastructurev1alpha1.RedfishQueryFailedReason, clusterv1.ConditionSeverityWarning, "Failed to get system info: %v", rfErr.Error())
-		conditions.MarkFalse(physicalHost, infrastructurev1alpha1.HostProvisionedCondition, infrastructurev1alpha1.RedfishQueryFailedReason, clusterv1.ConditionSeverityWarning, "Failed to get system info: %v", rfErr.Error())
+		// Check for specific error types
+		if strings.Contains(rfErr.Error(), "certificate") {
+			conditions.MarkFalse(physicalHost, infrastructurev1alpha1.RedfishConnectionReadyCondition, TLSErrorReason, clusterv1.ConditionSeverityError, "TLS certificate validation failed: %v", rfErr.Error())
+			physicalHost.Status.ErrorMessage = fmt.Sprintf("TLS certificate validation failed: %v", rfErr.Error())
+		} else if strings.Contains(rfErr.Error(), "authentication") {
+			conditions.MarkFalse(physicalHost, infrastructurev1alpha1.RedfishConnectionReadyCondition, infrastructurev1alpha1.AuthenticationErrorReason, clusterv1.ConditionSeverityError, "Authentication failed: %v", rfErr.Error())
+			physicalHost.Status.ErrorMessage = fmt.Sprintf("Authentication failed: %v", rfErr.Error())
+		} else {
+			conditions.MarkFalse(physicalHost, infrastructurev1alpha1.RedfishConnectionReadyCondition, infrastructurev1alpha1.RedfishQueryFailedReason, clusterv1.ConditionSeverityError, "Failed to get system info: %v", rfErr.Error())
+			physicalHost.Status.ErrorMessage = fmt.Sprintf("Redfish query failed: %v", rfErr.Error())
+		}
 		physicalHost.Status.State = infrastructurev1alpha1.StateError
 		return ctrl.Result{RequeueAfter: time.Minute}, nil
 	}
 	if psErr != nil {
 		logger.Error(psErr, "Failed to get power state from Redfish")
-		conditions.MarkFalse(physicalHost, infrastructurev1alpha1.HostAvailableCondition, infrastructurev1alpha1.RedfishQueryFailedReason, clusterv1.ConditionSeverityWarning, "Failed to get power state: %v", psErr.Error())
-		conditions.MarkFalse(physicalHost, infrastructurev1alpha1.HostProvisionedCondition, infrastructurev1alpha1.RedfishQueryFailedReason, clusterv1.ConditionSeverityWarning, "Failed to get power state: %v", psErr.Error())
+		conditions.MarkFalse(physicalHost, infrastructurev1alpha1.RedfishConnectionReadyCondition, infrastructurev1alpha1.RedfishQueryFailedReason, clusterv1.ConditionSeverityError, "Failed to get power state: %v", psErr.Error())
+		physicalHost.Status.ErrorMessage = fmt.Sprintf("Failed to get power state: %v", psErr.Error())
 		physicalHost.Status.State = infrastructurev1alpha1.StateError
 		return ctrl.Result{RequeueAfter: time.Minute}, nil
 	}
+
+	// Clear any previous error message since we successfully connected
+	physicalHost.Status.ErrorMessage = ""
+	conditions.MarkTrue(physicalHost, infrastructurev1alpha1.RedfishConnectionReadyCondition)
 
 	// Determine desired state and update conditions
 	if physicalHost.Spec.ConsumerRef == nil {
@@ -219,7 +231,6 @@ func (r *PhysicalHostReconciler) reconcileNormal(ctx context.Context, logger log
 		physicalHost.Status.State = infrastructurev1alpha1.StateAvailable
 		conditions.MarkTrue(physicalHost, infrastructurev1alpha1.HostAvailableCondition)
 		conditions.Delete(physicalHost, infrastructurev1alpha1.HostProvisionedCondition) // No longer provisioned for a consumer
-		// TODO: Optionally power off / eject media
 	} else {
 		conditions.Delete(physicalHost, infrastructurev1alpha1.HostAvailableCondition) // No longer available
 		if physicalHost.Spec.BootISOSource == nil || *physicalHost.Spec.BootISOSource == "" {
@@ -237,6 +248,7 @@ func (r *PhysicalHostReconciler) reconcileNormal(ctx context.Context, logger log
 				logger.Error(err, "Failed to set boot source ISO")
 				conditions.MarkFalse(physicalHost, infrastructurev1alpha1.HostProvisionedCondition, infrastructurev1alpha1.SetBootISOFailedReason, clusterv1.ConditionSeverityError, "Failed to set boot source ISO: %v", err.Error())
 				physicalHost.Status.State = infrastructurev1alpha1.StateError
+				physicalHost.Status.ErrorMessage = fmt.Sprintf("Failed to set boot source ISO: %v", err.Error())
 				return ctrl.Result{}, err
 			}
 
@@ -246,6 +258,7 @@ func (r *PhysicalHostReconciler) reconcileNormal(ctx context.Context, logger log
 					logger.Error(err, "Failed to set power state to On")
 					conditions.MarkFalse(physicalHost, infrastructurev1alpha1.HostProvisionedCondition, infrastructurev1alpha1.PowerOnFailedReason, clusterv1.ConditionSeverityError, "Failed to power on host: %v", err.Error())
 					physicalHost.Status.State = infrastructurev1alpha1.StateError
+					physicalHost.Status.ErrorMessage = fmt.Sprintf("Failed to power on host: %v", err.Error())
 					return ctrl.Result{}, err
 				}
 				physicalHost.Status.ObservedPowerState = redfish.OnPowerState // Optimistic update
@@ -257,7 +270,6 @@ func (r *PhysicalHostReconciler) reconcileNormal(ctx context.Context, logger log
 			logger.Info("Host provisioning initiated successfully, state set to Provisioned")
 		}
 	}
-	// --- End Reconcile State ---
 
 	return ctrl.Result{}, nil
 }

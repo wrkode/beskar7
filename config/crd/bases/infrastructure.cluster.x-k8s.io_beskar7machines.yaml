@@ -47,6 +47,11 @@ spec:
             type: object
           spec:
             properties:
+              bootMode:
+                enum:
+                - PreBakedISO
+                - RemoteConfig
+                type: string
               configURL:
                 type: string
               imageURL:
@@ -58,12 +63,34 @@ spec:
                 - flatcar
                 - LeapMicro
                 type: string
+              physicalHostRef:
+                properties:
+                  apiVersion:
+                    type: string
+                  fieldPath:
+                    type: string
+                  kind:
+                    type: string
+                  name:
+                    type: string
+                  namespace:
+                    type: string
+                  resourceVersion:
+                    type: string
+                  uid:
+                    type: string
+                type: object
+                x-kubernetes-map-type: atomic
+              powerState:
+                type: string
               providerID:
                 type: string
               provisioningMode:
                 enum:
                 - RemoteConfig
                 - PreBakedISO
+                type: string
+              remoteConfigURL:
                 type: string
             required:
             - imageURL
@@ -125,6 +152,8 @@ spec:
               failureReason:
                 type: string
               phase:
+                type: string
+              powerState:
                 type: string
               ready:
                 type: boolean

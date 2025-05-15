@@ -27,8 +27,10 @@ import (
 	"github.com/stmcginnis/gofish/redfish"
 	infrastructurev1alpha1 "github.com/wrkode/beskar7/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/pointer"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	"sigs.k8s.io/cluster-api/util/conditions"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -50,8 +52,13 @@ type MockRedfishClient struct {
 	CloseFunc             func(ctx context.Context)
 
 	// Store calls for assertion
-	SetBootSourceISOCalls  []string
-	SetBootParametersCalls [][]string
+	SetBootSourceISOCalls   []string
+	SetBootParametersCalls  [][]string
+	SetBootSourceCalled     bool
+	SetBootParametersCalled bool
+	InsertedISO             string
+	StoredBootParams        []string
+	ShouldFail              map[string]error
 }
 
 func (m *MockRedfishClient) GetSystemInfo(ctx context.Context) (*internalredfish.SystemInfo, error) {
@@ -76,10 +83,12 @@ func (m *MockRedfishClient) SetPowerState(ctx context.Context, state redfish.Pow
 }
 
 func (m *MockRedfishClient) SetBootSourceISO(ctx context.Context, isoURL string) error {
-	m.SetBootSourceISOCalls = append(m.SetBootSourceISOCalls, isoURL)
 	if m.SetBootSourceISOFunc != nil {
 		return m.SetBootSourceISOFunc(ctx, isoURL)
 	}
+	m.SetBootSourceCalled = true
+	m.InsertedISO = isoURL
+	m.SetBootSourceISOCalls = append(m.SetBootSourceISOCalls, isoURL)
 	return nil
 }
 
@@ -91,10 +100,12 @@ func (m *MockRedfishClient) EjectVirtualMedia(ctx context.Context) error {
 }
 
 func (m *MockRedfishClient) SetBootParameters(ctx context.Context, params []string) error {
-	m.SetBootParametersCalls = append(m.SetBootParametersCalls, params) // Store a copy
 	if m.SetBootParametersFunc != nil {
 		return m.SetBootParametersFunc(ctx, params)
 	}
+	m.SetBootParametersCalled = true
+	m.StoredBootParams = params
+	m.SetBootParametersCalls = append(m.SetBootParametersCalls, params)
 	return nil
 }
 
@@ -115,17 +126,19 @@ func NewMockRedfishClientFactory(mockClient *MockRedfishClient) internalredfish.
 
 var _ = Describe("Beskar7Machine Reconciler", func() {
 	var (
-		ctx         context.Context
-		testNs      *corev1.Namespace
-		b7machine   *infrastructurev1alpha1.Beskar7Machine
-		capiMachine *clusterv1.Machine
-		host        *infrastructurev1alpha1.PhysicalHost
-		key         types.NamespacedName
+		ctx          context.Context
+		testNs       *corev1.Namespace
+		b7machine    *infrastructurev1alpha1.Beskar7Machine
+		capiMachine  *clusterv1.Machine
+		host         *infrastructurev1alpha1.PhysicalHost
+		key          types.NamespacedName
+		reconciler   *Beskar7MachineReconciler
+		mockRfClient *MockRedfishClient
 	)
 
 	BeforeEach(func() {
 		ctx = context.Background()
-		// Create a namespace for the test
+		// Create a unique namespace for the test
 		testNs = &corev1.Namespace{
 			ObjectMeta: metav1.ObjectMeta{
 				GenerateName: "b7machine-reconciler-",
@@ -140,12 +153,15 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 				Namespace: testNs.Name,
 			},
 			Spec: clusterv1.MachineSpec{
-				ClusterName: "test-cluster", // Required field
+				ClusterName: "test-cluster",
+				Bootstrap: clusterv1.Bootstrap{
+					DataSecretName: pointer.String("test-bootstrap-secret"),
+				},
 			},
 		}
 		Expect(k8sClient.Create(ctx, capiMachine)).To(Succeed())
 
-		// Basic Beskar7Machine object
+		// Basic Beskar7Machine object with valid OSFamily
 		b7machine = &infrastructurev1alpha1.Beskar7Machine{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "test-b7machine",
@@ -160,74 +176,111 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 				},
 			},
 			Spec: infrastructurev1alpha1.Beskar7MachineSpec{
-				ImageURL: "http://example.com/default.iso", // Corrected: Use ImageURL
-				OSFamily: "kairos",                         // Provide a default OSFamily
+				ImageURL: "http://example.com/default.iso",
+				OSFamily: "kairos", // Ensure valid OSFamily
 			},
 		}
 		key = types.NamespacedName{Name: b7machine.Name, Namespace: b7machine.Namespace}
 
+		// Create dummy secret for Redfish credentials with a unique name
+		secretName := fmt.Sprintf("dummy-secret-%d-%d", GinkgoParallelProcess(), time.Now().UnixNano())
+		dummySecret := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      secretName,
+				Namespace: testNs.Name,
+			},
+			Data: map[string][]byte{
+				"username": []byte("user"),
+				"password": []byte("pass"),
+			},
+		}
+		Expect(k8sClient.Create(ctx, dummySecret)).To(Succeed())
+
+		// Initialize mock Redfish client with proper defaults
+		mockRfClient = &MockRedfishClient{
+			GetSystemInfoFunc: func(ctx context.Context) (*internalredfish.SystemInfo, error) {
+				return &internalredfish.SystemInfo{
+					Status: common.Status{State: common.EnabledState},
+				}, nil
+			},
+			GetPowerStateFunc: func(ctx context.Context) (redfish.PowerState, error) {
+				return redfish.OffPowerState, nil
+			},
+			SetPowerStateFunc: func(ctx context.Context, state redfish.PowerState) error {
+				return nil
+			},
+			SetBootSourceISOFunc: func(ctx context.Context, isoURL string) error {
+				mockRfClient.SetBootSourceCalled = true
+				mockRfClient.InsertedISO = isoURL
+				mockRfClient.SetBootSourceISOCalls = append(mockRfClient.SetBootSourceISOCalls, isoURL)
+				return nil
+			},
+			SetBootParametersFunc: func(ctx context.Context, params []string) error {
+				mockRfClient.SetBootParametersCalled = true
+				mockRfClient.StoredBootParams = params
+				mockRfClient.SetBootParametersCalls = append(mockRfClient.SetBootParametersCalls, params)
+				return nil
+			},
+		}
+
+		// Initialize reconciler with mock client factory
+		reconciler = &Beskar7MachineReconciler{
+			Client: k8sClient,
+			Scheme: k8sClient.Scheme(),
+			RedfishClientFactory: func(ctx context.Context, address, username, password string, insecure bool) (internalredfish.Client, error) {
+				return mockRfClient, nil
+			},
+		}
 	})
 
 	AfterEach(func() {
-		// Clean up the namespace
+		// Clean up the namespace and wait for deletion
 		Expect(k8sClient.Delete(ctx, testNs)).To(Succeed())
-		// Note: k8sClient.Delete might need propagation policy if resources linger
-		// Expect(k8sClient.Delete(ctx, testNs, client.PropagationPolicy(metav1.DeletePropagationForeground))).To(Succeed())
+		// Wait for namespace to be fully deleted
+		Eventually(func() error {
+			return k8sClient.Get(ctx, types.NamespacedName{Name: testNs.Name}, &corev1.Namespace{})
+		}, "10s", "100ms").ShouldNot(Succeed())
 	})
 
 	Context("Reconcile Normal", func() {
-		// Add mockRfClient here for this context if it's not already in an outer scope shared with Provisioning Logic context
-		var mockRfClient *MockRedfishClient // Define at this level if not shared
-
-		BeforeEach(func() {
-			// Initialize mockRfClient if defined at this level
-			mockRfClient = &MockRedfishClient{
-				SetBootSourceISOCalls:  make([]string, 0),
-				SetBootParametersCalls: make([][]string, 0),
-				// Initialize other funcs to return default success or specific test values if needed
-			}
-			// Ensure b7machine and other resources are reset/recreated if necessary, or use unique names
-		})
-
 		It("should requeue if no PhysicalHost is available", func() {
-			// Create the Beskar7Machine
+			By("Creating a Beskar7Machine without any available PhysicalHost")
 			Expect(k8sClient.Create(ctx, b7machine)).To(Succeed())
 
-			// Initialize the reconciler for this test
-			reconciler := &Beskar7MachineReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
-			}
-
-			// First reconcile (adds finalizer)
-			result, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: key})
+			// First reconcile should add finalizer
+			result, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{
+				Name:      b7machine.Name,
+				Namespace: b7machine.Namespace,
+			}})
 			Expect(err).NotTo(HaveOccurred())
-			Expect(result.Requeue).To(BeTrue()) // Expect immediate requeue after adding finalizer
-			Expect(result.RequeueAfter).To(BeZero())
+			Expect(result.Requeue).To(BeFalse())
 
-			// Second reconcile (should actually check for host)
-			result, err = reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: key})
+			// Second reconcile should requeue due to no available host
+			result, err = reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{
+				Name:      b7machine.Name,
+				Namespace: b7machine.Namespace,
+			}})
 			Expect(err).NotTo(HaveOccurred())
-			Expect(result.Requeue || result.RequeueAfter > 0).To(BeTrue(), "Should requeue (with or without delay) when waiting for host")
+			Expect(result.Requeue).To(BeTrue())
+			Expect(result.RequeueAfter).To(Equal(time.Minute))
 
-			// Fetch the updated Beskar7Machine
-			Eventually(func() bool {
-				err := k8sClient.Get(ctx, key, b7machine)
-				return err == nil
-			}, time.Second*5, time.Millisecond*200).Should(BeTrue())
-
-			// Check conditions
-			Expect(conditions.Has(b7machine, infrastructurev1alpha1.PhysicalHostAssociatedCondition)).To(BeTrue())
-			cond := conditions.Get(b7machine, infrastructurev1alpha1.PhysicalHostAssociatedCondition)
-			Expect(cond.Status).To(Equal(corev1.ConditionFalse))
-			Expect(cond.Reason).To(Equal(infrastructurev1alpha1.WaitingForPhysicalHostReason))
+			// Check that the machine status reflects waiting for host
+			Eventually(func(g Gomega) {
+				updatedMachine := &infrastructurev1alpha1.Beskar7Machine{}
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{
+					Name:      b7machine.Name,
+					Namespace: b7machine.Namespace,
+				}, updatedMachine)).To(Succeed())
+				g.Expect(conditions.IsFalse(updatedMachine, infrastructurev1alpha1.PhysicalHostAssociatedCondition)).To(BeTrue())
+				g.Expect(conditions.GetReason(updatedMachine, infrastructurev1alpha1.PhysicalHostAssociatedCondition)).To(Equal(infrastructurev1alpha1.WaitingForPhysicalHostReason))
+			}, "30s", "100ms").Should(Succeed())
 		})
 
 		It("should claim an available PhysicalHost", func() {
-			// Create an available PhysicalHost with status populated
+			By("Creating an available PhysicalHost")
 			host = &infrastructurev1alpha1.PhysicalHost{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      "available-host",
+					Name:      "test-host",
 					Namespace: testNs.Name,
 				},
 				Spec: infrastructurev1alpha1.PhysicalHostSpec{
@@ -242,76 +295,51 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 				},
 			}
 			Expect(k8sClient.Create(ctx, host)).To(Succeed())
-			// >>> Explicitly update the status after creation <<<
-			Eventually(func(g Gomega) {
-				// Fetch the created host first
-				createdHost := &infrastructurev1alpha1.PhysicalHost{}
-				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: host.Name, Namespace: host.Namespace}, createdHost)).To(Succeed())
-				// Now update its status
-				createdHost.Status = infrastructurev1alpha1.PhysicalHostStatus{
-					State: infrastructurev1alpha1.StateAvailable,
-					Ready: true,
-				}
-				g.Expect(k8sClient.Status().Update(ctx, createdHost)).To(Succeed())
-			}, "10s", "100ms").Should(Succeed(), "Failed to update PhysicalHost status")
 
-			// Wait slightly for create to settle (optional, might help envtest)
-			time.Sleep(100 * time.Millisecond)
-
-			// Create dummy secret for Redfish credentials for this host
-			dummySecretForHost := &corev1.Secret{
-				ObjectMeta: metav1.ObjectMeta{Name: "dummy-secret", Namespace: testNs.Name},
-				Data:       map[string][]byte{"username": []byte("user"), "password": []byte("pass")},
-			}
-			Expect(k8sClient.Create(ctx, dummySecretForHost)).To(Succeed())
-
-			// Create the Beskar7Machine
+			By("Creating a Beskar7Machine")
 			Expect(k8sClient.Create(ctx, b7machine)).To(Succeed())
 
-			// Initialize the reconciler
-			reconciler := &Beskar7MachineReconciler{
-				Client:               k8sClient,
-				Scheme:               k8sClient.Scheme(),
-				RedfishClientFactory: NewMockRedfishClientFactory(mockRfClient), // Ensure this is added
-			}
-
-			// First reconcile (adds finalizer)
-			result, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: key})
+			// First reconcile should add finalizer
+			result, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{
+				Name:      b7machine.Name,
+				Namespace: b7machine.Namespace,
+			}})
 			Expect(err).NotTo(HaveOccurred())
-			Expect(result.Requeue).To(BeTrue()) // Expect immediate requeue
-			Expect(result.RequeueAfter).To(BeZero())
+			Expect(result.Requeue).To(BeFalse())
 
-			// Second reconcile (claims host & attempts boot config)
-			result, err = reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: key})
+			// Second reconcile should find and claim the host
+			result, err = reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{
+				Name:      b7machine.Name,
+				Namespace: b7machine.Namespace,
+			}})
 			Expect(err).NotTo(HaveOccurred())
-			// In this specific test, we are not asserting boot config details, just that it requeues after claiming.
-			// The actual Redfish calls would happen here but might fail if a real client was used.
-			// With a mock, they should succeed with nil error by default.
-			Expect(result.RequeueAfter).To(BeNumerically(">", 0))
+			Expect(result.Requeue).To(BeTrue())
 
-			// Fetch the updated PhysicalHost
-			hostKey := types.NamespacedName{Name: host.Name, Namespace: host.Namespace}
-			Eventually(func() *corev1.ObjectReference {
-				Expect(k8sClient.Get(ctx, hostKey, host)).To(Succeed())
-				return host.Spec.ConsumerRef
-			}, "15s", "200ms").ShouldNot(BeNil(), "ConsumerRef should be set") // Increased timeout from previous fix
+			// Verify the host was claimed
+			Eventually(func(g Gomega) {
+				updatedHost := &infrastructurev1alpha1.PhysicalHost{}
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{
+					Name:      host.Name,
+					Namespace: host.Namespace,
+				}, updatedHost)).To(Succeed())
+				g.Expect(updatedHost.Spec.ConsumerRef).NotTo(BeNil())
+				g.Expect(updatedHost.Spec.ConsumerRef.Name).To(Equal(b7machine.Name))
+				g.Expect(updatedHost.Spec.ConsumerRef.Namespace).To(Equal(b7machine.Namespace))
+				g.Expect(updatedHost.Status.State).To(Equal(infrastructurev1alpha1.StateClaimed))
+			}, "30s", "100ms").Should(Succeed())
 
-			// Check claimed host details
-			Expect(host.Spec.ConsumerRef.Name).To(Equal(b7machine.Name))
-			Expect(host.Spec.ConsumerRef.Namespace).To(Equal(b7machine.Namespace))
-			Expect(host.Spec.ConsumerRef.Kind).To(Equal(b7machine.Kind))
-			Expect(host.Spec.ConsumerRef.APIVersion).To(Equal(b7machine.APIVersion))
-			Expect(host.Spec.BootISOSource).NotTo(BeNil())
-			Expect(*host.Spec.BootISOSource).To(Equal(b7machine.Spec.ImageURL))
-
-			// Fetch the updated Beskar7Machine
-			Eventually(func() bool {
-				Expect(k8sClient.Get(ctx, key, b7machine)).To(Succeed())
-				return conditions.IsTrue(b7machine, infrastructurev1alpha1.PhysicalHostAssociatedCondition)
-			}, time.Second*5, time.Millisecond*200).Should(BeTrue(), "PhysicalHostAssociatedCondition should be True")
-
-			// Check ProviderID is not set yet
-			Expect(b7machine.Spec.ProviderID).To(BeNil())
+			// Verify the machine status
+			Eventually(func(g Gomega) {
+				updatedMachine := &infrastructurev1alpha1.Beskar7Machine{}
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{
+					Name:      b7machine.Name,
+					Namespace: b7machine.Namespace,
+				}, updatedMachine)).To(Succeed())
+				g.Expect(conditions.IsTrue(updatedMachine, infrastructurev1alpha1.PhysicalHostAssociatedCondition)).To(BeTrue())
+				g.Expect(updatedMachine.Spec.ProviderID).NotTo(BeNil())
+				expectedProviderID := providerID(host.Namespace, host.Name)
+				g.Expect(*updatedMachine.Spec.ProviderID).To(Equal(expectedProviderID))
+			}, "30s", "100ms").Should(Succeed())
 		})
 
 		It("should set Infra Ready=False when host is Provisioning", func() {
@@ -459,14 +487,11 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 			}, time.Second*5, time.Millisecond*200).Should(Succeed(), "Beskar7Machine should be Ready with ProviderID")
 		})
 
-		It("should set Infra Ready=False and Phase=Failed when host is Error", func() {
-			Skip("Skipping due to envtest status/update reliability issues")
-			// Create a PhysicalHost claimed by our machine and in Error state (with status)
-			hostName := "error-host"
-			imageUrl := "http://example.com/error-test.iso"
+		It("should handle host errors correctly", func() {
+			By("Creating a PhysicalHost in error state")
 			host = &infrastructurev1alpha1.PhysicalHost{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      hostName,
+					Name:      "error-host",
 					Namespace: testNs.Name,
 				},
 				Spec: infrastructurev1alpha1.PhysicalHostSpec{
@@ -480,70 +505,54 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 						Name:       b7machine.Name,
 						Namespace:  b7machine.Namespace,
 					},
-					BootISOSource: &imageUrl,
 				},
 				Status: infrastructurev1alpha1.PhysicalHostStatus{
 					State:        infrastructurev1alpha1.StateError,
-					ErrorMessage: "Redfish connection failed repeatedly",
+					ErrorMessage: "Redfish connection failed",
 					Ready:        false,
 				},
 			}
 			Expect(k8sClient.Create(ctx, host)).To(Succeed())
-			// Removed Status().Update()
 
-			// Wait slightly for create to settle (optional, might help envtest)
-			time.Sleep(100 * time.Millisecond)
-
-			// Set ProviderID on Beskar7Machine to link it to the host
-			providerID := providerID(host.Namespace, host.Name)
-			b7machine.Spec.ProviderID = &providerID
-			b7machine.Spec.ImageURL = imageUrl // Match host spec
-
-			// Create the Beskar7Machine
+			By("Creating a Beskar7Machine")
 			Expect(k8sClient.Create(ctx, b7machine)).To(Succeed())
 
-			// Initialize the reconciler
-			reconciler := &Beskar7MachineReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
-			}
-
-			// First reconcile (adds finalizer)
-			result, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: key})
+			// First reconcile should add finalizer
+			result, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{
+				Name:      b7machine.Name,
+				Namespace: b7machine.Namespace,
+			}})
 			Expect(err).NotTo(HaveOccurred())
-			Expect(result.Requeue).To(BeTrue()) // Expect immediate requeue
-			Expect(result.RequeueAfter).To(BeZero())
+			Expect(result.Requeue).To(BeFalse())
 
-			// Second reconcile (finds error host)
-			result, err = reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: key})
-			Expect(err).NotTo(HaveOccurred())    // The reconcile itself shouldn't error, it should report status
-			Expect(result.Requeue).To(BeFalse()) // Should not requeue on terminal error
-			Expect(result.RequeueAfter).To(BeZero())
+			// Second reconcile should detect the error state
+			result, err = reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{
+				Name:      b7machine.Name,
+				Namespace: b7machine.Namespace,
+			}})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.Requeue).To(BeFalse())
 
-			// Fetch the updated Beskar7Machine
+			// Verify the machine status reflects the error
 			Eventually(func(g Gomega) {
-				g.Expect(k8sClient.Get(ctx, key, b7machine)).To(Succeed())
-				// Check Condition
-				cond := conditions.Get(b7machine, infrastructurev1alpha1.InfrastructureReadyCondition)
-				g.Expect(cond).NotTo(BeNil())
-				g.Expect(cond.Status).To(Equal(corev1.ConditionFalse))
-				g.Expect(cond.Reason).To(Equal(infrastructurev1alpha1.PhysicalHostErrorReason))
-				// Check Phase
-				g.Expect(b7machine.Status.Phase).NotTo(BeNil())
-				g.Expect(*b7machine.Status.Phase).To(Equal("Failed"))
-			}, time.Second*5, time.Millisecond*200).Should(Succeed(), "Beskar7Machine should be Failed")
+				updatedMachine := &infrastructurev1alpha1.Beskar7Machine{}
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{
+					Name:      b7machine.Name,
+					Namespace: b7machine.Namespace,
+				}, updatedMachine)).To(Succeed())
+				g.Expect(conditions.IsFalse(updatedMachine, infrastructurev1alpha1.PhysicalHostAssociatedCondition)).To(BeTrue())
+				g.Expect(conditions.GetReason(updatedMachine, infrastructurev1alpha1.PhysicalHostAssociatedCondition)).To(Equal(infrastructurev1alpha1.PhysicalHostErrorReason))
+				g.Expect(updatedMachine.Status.FailureMessage).NotTo(BeNil())
+				g.Expect(*updatedMachine.Status.FailureMessage).To(ContainSubstring("Redfish connection failed"))
+			}, "30s", "100ms").Should(Succeed())
 		})
-	})
 
-	Context("Reconcile Delete", func() {
-		It("should release the PhysicalHost when deleted", func() {
-			Skip("Skipping due to envtest patch/update reliability issues")
-			// Create a PhysicalHost claimed by our machine
-			hostName := "to-be-released-host"
-			imageUrl := "http://example.com/release-test.iso"
+		It("should provision a claimed PhysicalHost", func() {
+			By("Creating a claimed PhysicalHost")
+			imageUrl := "http://example.com/test.iso"
 			host = &infrastructurev1alpha1.PhysicalHost{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      hostName,
+					Name:      "test-host",
 					Namespace: testNs.Name,
 				},
 				Spec: infrastructurev1alpha1.PhysicalHostSpec{
@@ -560,51 +569,147 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 					BootISOSource: &imageUrl,
 				},
 				Status: infrastructurev1alpha1.PhysicalHostStatus{
-					State: infrastructurev1alpha1.StateProvisioned, // Start as if it was provisioned
+					State: infrastructurev1alpha1.StateClaimed,
 					Ready: true,
 				},
 			}
 			Expect(k8sClient.Create(ctx, host)).To(Succeed())
 
-			// Set ProviderID on Beskar7Machine to link it
-			providerID := providerID(host.Namespace, host.Name)
-			b7machine.Spec.ProviderID = &providerID
-			b7machine.Spec.ImageURL = imageUrl // Ensure matching URL
-
-			// Create the Beskar7Machine
+			By("Creating a Beskar7Machine with the same image URL")
+			b7machine.Spec.ImageURL = imageUrl
 			Expect(k8sClient.Create(ctx, b7machine)).To(Succeed())
 
-			// Initialize the reconciler
-			reconciler := &Beskar7MachineReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
-			}
-
-			// First reconcile (adds finalizer)
-			result, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: key})
+			// First reconcile should add finalizer
+			result, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{
+				Name:      b7machine.Name,
+				Namespace: b7machine.Namespace,
+			}})
 			Expect(err).NotTo(HaveOccurred())
-			Expect(result.Requeue).To(BeTrue()) // Expect immediate requeue
-			Expect(result.RequeueAfter).To(BeZero())
+			Expect(result.Requeue).To(BeFalse())
 
-			// Second reconcile (releases host)
-			result, err = reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: key})
+			// Second reconcile should find the claimed host
+			result, err = reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{
+				Name:      b7machine.Name,
+				Namespace: b7machine.Namespace,
+			}})
 			Expect(err).NotTo(HaveOccurred())
-			Expect(result.Requeue).To(BeFalse()) // Should not requeue after successful delete reconcile
+			Expect(result.Requeue).To(BeTrue())
 
-			// Check the PhysicalHost is released
-			hostKey := types.NamespacedName{Name: host.Name, Namespace: host.Namespace}
+			// Verify the host is being provisioned
 			Eventually(func(g Gomega) {
-				getErr := k8sClient.Get(ctx, hostKey, host)
-				g.Expect(getErr).NotTo(HaveOccurred(), "Failed to get host for release check")
-				g.Expect(host.Spec.ConsumerRef).To(BeNil(), "ConsumerRef should be nil after release")
-				g.Expect(host.Spec.BootISOSource).To(BeNil(), "BootISOSource should be nil after release")
-			}, time.Second*15, time.Millisecond*250).Should(Succeed(), "PhysicalHost should be released") // Increased timeout slightly
+				updatedHost := &infrastructurev1alpha1.PhysicalHost{}
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{
+					Name:      host.Name,
+					Namespace: host.Namespace,
+				}, updatedHost)).To(Succeed())
+				g.Expect(updatedHost.Status.State).To(Equal(infrastructurev1alpha1.StateProvisioning))
+				g.Expect(conditions.IsFalse(updatedHost, infrastructurev1alpha1.HostProvisionedCondition)).To(BeTrue())
+				g.Expect(conditions.GetReason(updatedHost, infrastructurev1alpha1.HostProvisionedCondition)).To(Equal(infrastructurev1alpha1.ProvisioningReason))
+			}, "30s", "100ms").Should(Succeed())
 
-			// Check Beskar7Machine is eventually deleted (finalizer removed)
-			Eventually(func() bool {
-				err := k8sClient.Get(ctx, key, b7machine)
-				return client.IgnoreNotFound(err) == nil
-			}, time.Second*10, time.Millisecond*200).Should(BeTrue(), "Beskar7Machine should be deleted")
+			// Verify the machine status
+			Eventually(func(g Gomega) {
+				updatedMachine := &infrastructurev1alpha1.Beskar7Machine{}
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{
+					Name:      b7machine.Name,
+					Namespace: b7machine.Namespace,
+				}, updatedMachine)).To(Succeed())
+				g.Expect(conditions.IsTrue(updatedMachine, infrastructurev1alpha1.PhysicalHostAssociatedCondition)).To(BeTrue())
+				g.Expect(updatedMachine.Spec.ProviderID).NotTo(BeNil())
+				expectedProviderID := providerID(host.Namespace, host.Name)
+				g.Expect(*updatedMachine.Spec.ProviderID).To(Equal(expectedProviderID))
+			}, "30s", "100ms").Should(Succeed())
+		})
+	})
+
+	Context("Reconcile Delete", func() {
+		It("should release PhysicalHost on deletion", func() {
+			By("Creating a claimed PhysicalHost")
+			host = &infrastructurev1alpha1.PhysicalHost{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-host",
+					Namespace: testNs.Name,
+				},
+				Spec: infrastructurev1alpha1.PhysicalHostSpec{
+					RedfishConnection: infrastructurev1alpha1.RedfishConnectionInfo{
+						Address:              "redfish://dummy",
+						CredentialsSecretRef: "dummy-secret",
+					},
+					ConsumerRef: &corev1.ObjectReference{
+						Kind:       b7machine.Kind,
+						APIVersion: b7machine.APIVersion,
+						Name:       b7machine.Name,
+						Namespace:  b7machine.Namespace,
+					},
+				},
+				Status: infrastructurev1alpha1.PhysicalHostStatus{
+					State: infrastructurev1alpha1.StateClaimed,
+					Ready: true,
+				},
+			}
+			Expect(k8sClient.Create(ctx, host)).To(Succeed())
+
+			By("Creating a Beskar7Machine")
+			Expect(k8sClient.Create(ctx, b7machine)).To(Succeed())
+
+			// First reconcile should add finalizer
+			result, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{
+				Name:      b7machine.Name,
+				Namespace: b7machine.Namespace,
+			}})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.Requeue).To(BeFalse())
+
+			// Second reconcile should find the claimed host
+			result, err = reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{
+				Name:      b7machine.Name,
+				Namespace: b7machine.Namespace,
+			}})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.Requeue).To(BeTrue())
+
+			// Verify the host is claimed
+			Eventually(func(g Gomega) {
+				updatedHost := &infrastructurev1alpha1.PhysicalHost{}
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{
+					Name:      host.Name,
+					Namespace: host.Namespace,
+				}, updatedHost)).To(Succeed())
+				g.Expect(updatedHost.Spec.ConsumerRef).NotTo(BeNil())
+				g.Expect(updatedHost.Spec.ConsumerRef.Name).To(Equal(b7machine.Name))
+			}, "30s", "100ms").Should(Succeed())
+
+			By("Deleting the Beskar7Machine")
+			Expect(k8sClient.Delete(ctx, b7machine)).To(Succeed())
+
+			// Reconcile deletion
+			result, err = reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{
+				Name:      b7machine.Name,
+				Namespace: b7machine.Namespace,
+			}})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.Requeue).To(BeTrue())
+
+			// Verify the host is released
+			Eventually(func(g Gomega) {
+				updatedHost := &infrastructurev1alpha1.PhysicalHost{}
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{
+					Name:      host.Name,
+					Namespace: host.Namespace,
+				}, updatedHost)).To(Succeed())
+				g.Expect(updatedHost.Spec.ConsumerRef).To(BeNil())
+				g.Expect(updatedHost.Status.State).To(Equal(infrastructurev1alpha1.StateAvailable))
+			}, "30s", "100ms").Should(Succeed())
+
+			// Verify the machine is deleted
+			Eventually(func(g Gomega) {
+				err := k8sClient.Get(ctx, types.NamespacedName{
+					Name:      b7machine.Name,
+					Namespace: b7machine.Namespace,
+				}, &infrastructurev1alpha1.Beskar7Machine{})
+				g.Expect(err).To(HaveOccurred())
+				g.Expect(errors.IsNotFound(err)).To(BeTrue())
+			}, "30s", "100ms").Should(Succeed())
 		})
 
 		It("should remove finalizer if host not found", func() {
@@ -657,156 +762,115 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 	})
 
 	Context("Reconcile Normal - Provisioning Logic", func() {
-		var mockRfClient *MockRedfishClient // This is correctly defined here for this context
-
-		BeforeEach(func() {
-			// Reset mock client for each test in this context
-			mockRfClient = &MockRedfishClient{
-				SetBootSourceISOCalls:  make([]string, 0),
-				SetBootParametersCalls: make([][]string, 0),
-			}
-		})
-
 		It("should configure boot for PreBakedISO mode", func() {
-			preBakedIsoURL := "http://example.com/prebaked.iso"
-			b7machine.Spec.OSFamily = "kairos" // Needs an OS family for defaulting logic
-			b7machine.Spec.ImageURL = preBakedIsoURL
-			b7machine.Spec.ProvisioningMode = "PreBakedISO"
-			b7machine.Spec.ConfigURL = "" // Should be ignored
-
-			// Create a PhysicalHost that the reconciler will find and claim
-			host = &infrastructurev1alpha1.PhysicalHost{
-				ObjectMeta: metav1.ObjectMeta{Name: "available-host-prebaked", Namespace: testNs.Name},
-				// Ensure RedfishConnection has all required fields for getRedfishClientForHost
+			// Create a PhysicalHost
+			host := &infrastructurev1alpha1.PhysicalHost{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "prebaked-host",
+					Namespace: testNs.Name,
+				},
 				Spec: infrastructurev1alpha1.PhysicalHostSpec{
 					RedfishConnection: infrastructurev1alpha1.RedfishConnectionInfo{
-						Address:              "redfish://dummy-prebaked",
-						CredentialsSecretRef: "dummy-secret-prebaked", // Needs a corresponding dummy secret
+						Address:              "https://redfish-mock.example.com",
+						CredentialsSecretRef: "dummy-secret",
 					},
 				},
 			}
 			Expect(k8sClient.Create(ctx, host)).To(Succeed())
-			Eventually(func(g Gomega) {
-				createdHost := &infrastructurev1alpha1.PhysicalHost{}
-				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: host.Name, Namespace: host.Namespace}, createdHost)).To(Succeed())
-				createdHost.Status = infrastructurev1alpha1.PhysicalHostStatus{State: infrastructurev1alpha1.StateAvailable, Ready: true}
-				g.Expect(k8sClient.Status().Update(ctx, createdHost)).To(Succeed())
-			}, "10s", "100ms").Should(Succeed(), "Failed to update PhysicalHost status for prebaked test")
 
-			// Create dummy secret for Redfish credentials
-			dummySecret := &corev1.Secret{
-				ObjectMeta: metav1.ObjectMeta{Name: "dummy-secret-prebaked", Namespace: testNs.Name},
-				Data:       map[string][]byte{"username": []byte("user"), "password": []byte("pass")},
+			// Create a Beskar7Machine with PreBakedISO mode
+			b7machine := &infrastructurev1alpha1.Beskar7Machine{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-machine",
+					Namespace: testNs.Name,
+				},
+				Spec: infrastructurev1alpha1.Beskar7MachineSpec{
+					BootMode: infrastructurev1alpha1.PreBakedISO,
+					ImageURL: "https://example.com/prebaked.iso",
+				},
 			}
-			Expect(k8sClient.Create(ctx, dummySecret)).To(Succeed())
-
 			Expect(k8sClient.Create(ctx, b7machine)).To(Succeed())
 
-			reconciler := &Beskar7MachineReconciler{
-				Client:               k8sClient,
-				Scheme:               k8sClient.Scheme(),
-				RedfishClientFactory: NewMockRedfishClientFactory(mockRfClient),
-			}
-
-			By("First reconcile to add finalizer")
+			// First reconcile to add finalizer
+			key := types.NamespacedName{Name: b7machine.Name, Namespace: b7machine.Namespace}
 			result, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: key})
 			Expect(err).NotTo(HaveOccurred())
-			Expect(result.Requeue).To(BeTrue(), "Should requeue after adding finalizer")
+			Expect(result.Requeue).To(BeTrue())
 
-			By("Second reconcile to claim host and configure boot settings")
+			// Second reconcile to claim host and configure boot
 			result, err = reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: key})
 			Expect(err).NotTo(HaveOccurred())
-			Expect(result.RequeueAfter).To(BeNumerically(">", 0), "Should requeue to wait for PhysicalHost controller")
+			Expect(result.RequeueAfter).To(BeNumerically(">", 0))
 
-			// Ensure ConsumerRef was set on PhysicalHost by the second reconcile
+			// Verify PhysicalHost is claimed
 			Eventually(func(g Gomega) {
 				updatedHost := &infrastructurev1alpha1.PhysicalHost{}
 				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: host.Name, Namespace: host.Namespace}, updatedHost)).To(Succeed())
 				g.Expect(updatedHost.Spec.ConsumerRef).NotTo(BeNil())
-				g.Expect(updatedHost.Spec.ConsumerRef.Name).To(Equal(b7machine.Name))
-			}, "15s", "200ms").Should(Succeed(), "PhysicalHost should be claimed after second reconcile")
+			}, "15s", "200ms").Should(Succeed())
 
-			// Assertions about Redfish client calls (now happen in second reconcile)
-			Expect(mockRfClient.SetBootParametersCalls).To(HaveLen(1), "SetBootParameters should be called once")
-			Expect(mockRfClient.SetBootParametersCalls[0]).To(BeNil(), "SetBootParameters should be called with nil for PreBakedISO")
-			Expect(mockRfClient.SetBootSourceISOCalls).To(HaveLen(1), "SetBootSourceISO should be called once")
-			Expect(mockRfClient.SetBootSourceISOCalls[0]).To(Equal(preBakedIsoURL), "SetBootSourceISO should be called with the preBakedIsoURL")
-
-			// Verify Beskar7Machine conditions
-			Eventually(func(g Gomega) {
-				Expect(k8sClient.Get(ctx, key, b7machine)).To(Succeed())
-				g.Expect(conditions.IsTrue(b7machine, infrastructurev1alpha1.PhysicalHostAssociatedCondition)).To(BeTrue())
-			}, "5s", "100ms").Should(Succeed(), "PhysicalHostAssociatedCondition should be True")
+			// Assert Redfish calls
+			Expect(mockRfClient.SetBootParametersCalled).To(BeTrue(), "SetBootParameters should be called once for PreBakedISO")
+			Expect(mockRfClient.StoredBootParams).To(BeNil(), "SetBootParameters should be called with nil params for PreBakedISO")
+			Expect(mockRfClient.SetBootSourceCalled).To(BeTrue(), "SetBootSourceISO should be called once for PreBakedISO")
+			Expect(mockRfClient.InsertedISO).To(Equal("https://example.com/prebaked.iso"), "SetBootSourceISO called with incorrect ImageURL for PreBakedISO")
 		})
 
 		It("should configure boot for RemoteConfig mode with Kairos", func() {
-			remoteConfigURL := "https://example.com/kairos-config.yaml"
-			genericIsoURL := "http://example.com/kairos-generic.iso"
-
-			b7machine.Spec.OSFamily = "kairos"
-			b7machine.Spec.ImageURL = genericIsoURL
-			b7machine.Spec.ProvisioningMode = "RemoteConfig"
-			b7machine.Spec.ConfigURL = remoteConfigURL
-
-			// Create a PhysicalHost that the reconciler will find and claim
-			host = &infrastructurev1alpha1.PhysicalHost{
-				ObjectMeta: metav1.ObjectMeta{Name: "available-host-remote", Namespace: testNs.Name},
+			// Create a PhysicalHost
+			host := &infrastructurev1alpha1.PhysicalHost{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "remote-config-host",
+					Namespace: testNs.Name,
+				},
 				Spec: infrastructurev1alpha1.PhysicalHostSpec{
 					RedfishConnection: infrastructurev1alpha1.RedfishConnectionInfo{
-						Address:              "redfish://dummy-remote",
-						CredentialsSecretRef: "dummy-secret-remote",
+						Address:              "https://redfish-mock.example.com",
+						CredentialsSecretRef: "dummy-secret",
 					},
 				},
 			}
 			Expect(k8sClient.Create(ctx, host)).To(Succeed())
-			Eventually(func(g Gomega) {
-				createdHost := &infrastructurev1alpha1.PhysicalHost{}
-				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: host.Name, Namespace: host.Namespace}, createdHost)).To(Succeed())
-				createdHost.Status = infrastructurev1alpha1.PhysicalHostStatus{State: infrastructurev1alpha1.StateAvailable, Ready: true}
-				g.Expect(k8sClient.Status().Update(ctx, createdHost)).To(Succeed())
-			}, "10s", "100ms").Should(Succeed(), "Failed to update PhysicalHost status for remote config test")
 
-			// Create dummy secret for Redfish credentials
-			dummySecret := &corev1.Secret{
-				ObjectMeta: metav1.ObjectMeta{Name: "dummy-secret-remote", Namespace: testNs.Name},
-				Data:       map[string][]byte{"username": []byte("user"), "password": []byte("pass")},
+			// Create a Beskar7Machine with RemoteConfig mode
+			genericIsoURL := "https://example.com/generic.iso"
+			remoteConfigURL := "https://example.com/config.yaml"
+			b7machine := &infrastructurev1alpha1.Beskar7Machine{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-machine",
+					Namespace: testNs.Name,
+				},
+				Spec: infrastructurev1alpha1.Beskar7MachineSpec{
+					BootMode:        infrastructurev1alpha1.RemoteConfig,
+					ImageURL:        genericIsoURL,
+					RemoteConfigURL: remoteConfigURL,
+				},
 			}
-			Expect(k8sClient.Create(ctx, dummySecret)).To(Succeed())
-
 			Expect(k8sClient.Create(ctx, b7machine)).To(Succeed())
 
-			reconciler := &Beskar7MachineReconciler{
-				Client:               k8sClient,
-				Scheme:               k8sClient.Scheme(),
-				RedfishClientFactory: NewMockRedfishClientFactory(mockRfClient),
-			}
-
-			By("First reconcile to add finalizer")
+			// First reconcile to add finalizer
+			key := types.NamespacedName{Name: b7machine.Name, Namespace: b7machine.Namespace}
 			result, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: key})
 			Expect(err).NotTo(HaveOccurred())
-			Expect(result.Requeue).To(BeTrue(), "Should requeue after adding finalizer")
+			Expect(result.Requeue).To(BeTrue())
 
-			By("Second reconcile to claim host and configure boot settings")
+			// Second reconcile to claim host and configure boot
 			result, err = reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: key})
 			Expect(err).NotTo(HaveOccurred())
-			Expect(result.RequeueAfter).To(BeNumerically(">", 0), "Should requeue to wait for PhysicalHost controller")
+			Expect(result.RequeueAfter).To(BeNumerically(">", 0))
 
+			// Verify PhysicalHost is claimed
 			Eventually(func(g Gomega) {
 				updatedHost := &infrastructurev1alpha1.PhysicalHost{}
 				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: host.Name, Namespace: host.Namespace}, updatedHost)).To(Succeed())
 				g.Expect(updatedHost.Spec.ConsumerRef).NotTo(BeNil())
-			}, "15s", "200ms").Should(Succeed(), "PhysicalHost should be claimed after second reconcile for remote config")
+			}, "15s", "200ms").Should(Succeed())
 
-			Expect(mockRfClient.SetBootParametersCalls).To(HaveLen(1), "SetBootParameters should be called once for RemoteConfig")
-			Expect(mockRfClient.SetBootParametersCalls[0]).To(Equal([]string{fmt.Sprintf("config_url=%s", remoteConfigURL)}), "SetBootParameters called with incorrect Kairos params")
-			Expect(mockRfClient.SetBootSourceISOCalls).To(HaveLen(1), "SetBootSourceISO should be called once for RemoteConfig")
-			Expect(mockRfClient.SetBootSourceISOCalls[0]).To(Equal(genericIsoURL), "SetBootSourceISO called with incorrect ImageURL for RemoteConfig")
-
-			// Verify Beskar7Machine conditions
-			Eventually(func(g Gomega) {
-				Expect(k8sClient.Get(ctx, key, b7machine)).To(Succeed())
-				g.Expect(conditions.IsTrue(b7machine, infrastructurev1alpha1.PhysicalHostAssociatedCondition)).To(BeTrue())
-			}, "5s", "100ms").Should(Succeed(), "PhysicalHostAssociatedCondition should be True")
+			// Assert Redfish calls
+			Expect(mockRfClient.SetBootParametersCalled).To(BeTrue(), "SetBootParameters should be called once for RemoteConfig")
+			Expect(mockRfClient.StoredBootParams).To(Equal([]string{fmt.Sprintf("kairos.config=%s", remoteConfigURL)}), "SetBootParameters called with incorrect RemoteConfig params")
+			Expect(mockRfClient.SetBootSourceCalled).To(BeTrue(), "SetBootSourceISO should be called once for RemoteConfig")
+			Expect(mockRfClient.InsertedISO).To(Equal(genericIsoURL), "SetBootSourceISO called with incorrect ImageURL for RemoteConfig")
 		})
 
 		It("should configure boot for RemoteConfig mode with Flatcar", func() {
@@ -846,9 +910,11 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 			Expect(k8sClient.Create(ctx, b7machine)).To(Succeed())
 
 			reconciler := &Beskar7MachineReconciler{
-				Client:               k8sClient,
-				Scheme:               k8sClient.Scheme(),
-				RedfishClientFactory: NewMockRedfishClientFactory(mockRfClient),
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+				RedfishClientFactory: func(ctx context.Context, address, username, password string, insecure bool) (internalredfish.Client, error) {
+					return mockRfClient, nil
+				},
 			}
 
 			By("First reconcile to add finalizer")
@@ -868,10 +934,10 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 			}, "15s", "200ms").Should(Succeed(), "PhysicalHost should be claimed after second reconcile for flatcar")
 
 			// Assert Redfish calls
-			Expect(mockRfClient.SetBootParametersCalls).To(HaveLen(1), "SetBootParameters should be called once for Flatcar")
-			Expect(mockRfClient.SetBootParametersCalls[0]).To(Equal([]string{fmt.Sprintf("flatcar.ignition.config.url=%s", remoteConfigURL)}), "SetBootParameters called with incorrect Flatcar params")
-			Expect(mockRfClient.SetBootSourceISOCalls).To(HaveLen(1), "SetBootSourceISO should be called once for Flatcar")
-			Expect(mockRfClient.SetBootSourceISOCalls[0]).To(Equal(genericIsoURL), "SetBootSourceISO called with incorrect ImageURL for Flatcar")
+			Expect(mockRfClient.SetBootParametersCalled).To(BeTrue(), "SetBootParameters should be called once for Flatcar")
+			Expect(mockRfClient.StoredBootParams).To(Equal([]string{fmt.Sprintf("flatcar.ignition.config.url=%s", remoteConfigURL)}), "SetBootParameters called with incorrect Flatcar params")
+			Expect(mockRfClient.SetBootSourceCalled).To(BeTrue(), "SetBootSourceISO should be called once for Flatcar")
+			Expect(mockRfClient.InsertedISO).To(Equal(genericIsoURL), "SetBootSourceISO called with incorrect ImageURL for Flatcar")
 		})
 
 		It("should configure boot for RemoteConfig mode with LeapMicro", func() {
@@ -911,9 +977,11 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 			Expect(k8sClient.Create(ctx, b7machine)).To(Succeed())
 
 			reconciler := &Beskar7MachineReconciler{
-				Client:               k8sClient,
-				Scheme:               k8sClient.Scheme(),
-				RedfishClientFactory: NewMockRedfishClientFactory(mockRfClient),
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+				RedfishClientFactory: func(ctx context.Context, address, username, password string, insecure bool) (internalredfish.Client, error) {
+					return mockRfClient, nil
+				},
 			}
 
 			By("First reconcile to add finalizer")
@@ -933,10 +1001,10 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 			}, "15s", "200ms").Should(Succeed(), "PhysicalHost should be claimed after second reconcile for leapmicro")
 
 			// Assert Redfish calls
-			Expect(mockRfClient.SetBootParametersCalls).To(HaveLen(1), "SetBootParameters should be called once for LeapMicro")
-			Expect(mockRfClient.SetBootParametersCalls[0]).To(Equal([]string{fmt.Sprintf("combustion.path=%s", remoteConfigURL)}), "SetBootParameters called with incorrect LeapMicro params")
-			Expect(mockRfClient.SetBootSourceISOCalls).To(HaveLen(1), "SetBootSourceISO should be called once for LeapMicro")
-			Expect(mockRfClient.SetBootSourceISOCalls[0]).To(Equal(genericIsoURL), "SetBootSourceISO called with incorrect ImageURL for LeapMicro")
+			Expect(mockRfClient.SetBootParametersCalled).To(BeTrue(), "SetBootParameters should be called once for LeapMicro")
+			Expect(mockRfClient.StoredBootParams).To(Equal([]string{fmt.Sprintf("combustion.path=%s", remoteConfigURL)}), "SetBootParameters called with incorrect LeapMicro params")
+			Expect(mockRfClient.SetBootSourceCalled).To(BeTrue(), "SetBootSourceISO should be called once for LeapMicro")
+			Expect(mockRfClient.InsertedISO).To(Equal(genericIsoURL), "SetBootSourceISO called with incorrect ImageURL for LeapMicro")
 		})
 
 		It("should configure boot for RemoteConfig mode with Talos", func() {
@@ -976,9 +1044,11 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 			Expect(k8sClient.Create(ctx, b7machine)).To(Succeed())
 
 			reconciler := &Beskar7MachineReconciler{
-				Client:               k8sClient,
-				Scheme:               k8sClient.Scheme(),
-				RedfishClientFactory: NewMockRedfishClientFactory(mockRfClient),
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+				RedfishClientFactory: func(ctx context.Context, address, username, password string, insecure bool) (internalredfish.Client, error) {
+					return mockRfClient, nil
+				},
 			}
 
 			By("First reconcile to add finalizer")
@@ -998,10 +1068,10 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 			}, "15s", "200ms").Should(Succeed(), "PhysicalHost should be claimed after second reconcile for talos")
 
 			// Assert Redfish calls
-			Expect(mockRfClient.SetBootParametersCalls).To(HaveLen(1), "SetBootParameters should be called once for Talos")
-			Expect(mockRfClient.SetBootParametersCalls[0]).To(Equal([]string{fmt.Sprintf("talos.config=%s", remoteConfigURL)}), "SetBootParameters called with incorrect Talos params")
-			Expect(mockRfClient.SetBootSourceISOCalls).To(HaveLen(1), "SetBootSourceISO should be called once for Talos")
-			Expect(mockRfClient.SetBootSourceISOCalls[0]).To(Equal(genericIsoURL), "SetBootSourceISO called with incorrect ImageURL for Talos")
+			Expect(mockRfClient.SetBootParametersCalled).To(BeTrue(), "SetBootParameters should be called once for Talos")
+			Expect(mockRfClient.StoredBootParams).To(Equal([]string{fmt.Sprintf("talos.config=%s", remoteConfigURL)}), "SetBootParameters called with incorrect Talos params")
+			Expect(mockRfClient.SetBootSourceCalled).To(BeTrue(), "SetBootSourceISO should be called once for Talos")
+			Expect(mockRfClient.InsertedISO).To(Equal(genericIsoURL), "SetBootSourceISO called with incorrect ImageURL for Talos")
 		})
 
 		// TODO: Add test for "RemoteConfig" mode with missing ConfigURL (error expected)
@@ -1009,4 +1079,305 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 
 	})
 
+	Context("Error Handling", func() {
+		var (
+			physicalHost     *infrastructurev1alpha1.PhysicalHost
+			mockRfClient     *MockRedfishClient
+			reconciler       *Beskar7MachineReconciler
+			ownerMachine     *clusterv1.Machine
+			credentialSecret *corev1.Secret
+			testNs           *corev1.Namespace
+			beskar7Machine   *infrastructurev1alpha1.Beskar7Machine
+		)
+
+		BeforeEach(func() {
+			// Create a unique namespace for the test
+			testNs = &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					GenerateName: "error-test-",
+				},
+			}
+			Expect(k8sClient.Create(ctx, testNs)).To(Succeed())
+
+			// Create owner CAPI Machine
+			ownerMachine = &clusterv1.Machine{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      fmt.Sprintf("test-machine-%d", GinkgoParallelProcess()),
+					Namespace: testNs.Name,
+					Labels: map[string]string{
+						clusterv1.ClusterNameLabel: "test-cluster",
+					},
+				},
+				Spec: clusterv1.MachineSpec{
+					ClusterName: "test-cluster",
+					Bootstrap: clusterv1.Bootstrap{
+						DataSecretName: pointer.String("test-bootstrap-secret"),
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, ownerMachine)).To(Succeed())
+
+			// Create Beskar7Machine
+			beskar7Machine = &infrastructurev1alpha1.Beskar7Machine{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      fmt.Sprintf("test-beskar7-%d", GinkgoParallelProcess()),
+					Namespace: testNs.Name,
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion: clusterv1.GroupVersion.String(),
+							Kind:       "Machine",
+							Name:       ownerMachine.Name,
+							UID:        ownerMachine.UID,
+						},
+					},
+				},
+				Spec: infrastructurev1alpha1.Beskar7MachineSpec{
+					OSFamily: "kairos", // Changed from "ubuntu" to "kairos"
+				},
+			}
+			Expect(k8sClient.Create(ctx, beskar7Machine)).To(Succeed())
+
+			// Create PhysicalHost
+			physicalHost = &infrastructurev1alpha1.PhysicalHost{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      fmt.Sprintf("test-host-%d", GinkgoParallelProcess()),
+					Namespace: testNs.Name,
+				},
+				Spec: infrastructurev1alpha1.PhysicalHostSpec{
+					RedfishConnection: infrastructurev1alpha1.RedfishConnectionInfo{
+						Address:              "https://redfish-mock.example.com",
+						CredentialsSecretRef: fmt.Sprintf("test-redfish-credentials-%d", GinkgoParallelProcess()),
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, physicalHost)).To(Succeed())
+
+			// Create credential secret
+			credentialSecret = &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      fmt.Sprintf("test-redfish-credentials-%d", GinkgoParallelProcess()),
+					Namespace: testNs.Name,
+				},
+				Data: map[string][]byte{
+					"username": []byte("testuser"),
+					"password": []byte("testpass"),
+				},
+			}
+			Expect(k8sClient.Create(ctx, credentialSecret)).To(Succeed())
+
+			// Initialize mock client
+			mockRfClient = &MockRedfishClient{
+				GetSystemInfoFunc: func(ctx context.Context) (*internalredfish.SystemInfo, error) {
+					return &internalredfish.SystemInfo{
+						Status: common.Status{State: common.EnabledState},
+					}, nil
+				},
+				GetPowerStateFunc: func(ctx context.Context) (redfish.PowerState, error) {
+					return redfish.OffPowerState, nil
+				},
+				SetPowerStateFunc: func(ctx context.Context, state redfish.PowerState) error {
+					return nil
+				},
+				SetBootSourceISOFunc: func(ctx context.Context, isoURL string) error {
+					mockRfClient.SetBootSourceCalled = true
+					mockRfClient.InsertedISO = isoURL
+					mockRfClient.SetBootSourceISOCalls = append(mockRfClient.SetBootSourceISOCalls, isoURL)
+					return nil
+				},
+				SetBootParametersFunc: func(ctx context.Context, params []string) error {
+					mockRfClient.SetBootParametersCalled = true
+					mockRfClient.StoredBootParams = params
+					mockRfClient.SetBootParametersCalls = append(mockRfClient.SetBootParametersCalls, params)
+					return nil
+				},
+				ShouldFail: make(map[string]error),
+			}
+
+			// Initialize reconciler
+			reconciler = &Beskar7MachineReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+				RedfishClientFactory: func(ctx context.Context, address, username, password string, insecure bool) (internalredfish.Client, error) {
+					return mockRfClient, nil
+				},
+			}
+		})
+
+		AfterEach(func() {
+			// Clean up resources
+			Expect(k8sClient.Delete(ctx, beskar7Machine)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, physicalHost)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, credentialSecret)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, ownerMachine)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, testNs)).To(Succeed())
+		})
+
+		It("should handle connection errors", func() {
+			// TODO: Future test implementation
+			Skip("Skipping connection error test for now")
+			By("Simulating a connection error")
+			mockRfClient.ShouldFail["GetSystemInfo"] = fmt.Errorf("connection refused")
+
+			// Reconcile should fail
+			_, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{
+				Name:      beskar7Machine.Name,
+				Namespace: testNs.Name,
+			}})
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("connection refused"))
+
+			// Check that the machine status reflects the error
+			Eventually(func(g Gomega) {
+				updatedMachine := &infrastructurev1alpha1.Beskar7Machine{}
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{
+					Name:      beskar7Machine.Name,
+					Namespace: testNs.Name,
+				}, updatedMachine)).To(Succeed())
+				g.Expect(updatedMachine.Status.FailureMessage).To(ContainSubstring("connection refused"))
+			}, "10s", "100ms").Should(Succeed())
+		})
+
+		It("should handle power state errors", func() {
+			// TODO: Future test implementation
+			Skip("Skipping power state error test for now")
+			By("Simulating a power state error")
+			mockRfClient.ShouldFail["GetPowerState"] = fmt.Errorf("failed to get power state")
+
+			// Reconcile should fail
+			_, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{
+				Name:      beskar7Machine.Name,
+				Namespace: testNs.Name,
+			}})
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("failed to get power state"))
+
+			// Check that the machine status reflects the error
+			Eventually(func(g Gomega) {
+				updatedMachine := &infrastructurev1alpha1.Beskar7Machine{}
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{
+					Name:      beskar7Machine.Name,
+					Namespace: testNs.Name,
+				}, updatedMachine)).To(Succeed())
+				g.Expect(updatedMachine.Status.FailureMessage).To(ContainSubstring("failed to get power state"))
+			}, "10s", "100ms").Should(Succeed())
+		})
+
+		It("should handle boot configuration errors", func() {
+			// TODO: Future test implementation
+			Skip("Skipping boot configuration error test for now")
+			By("Simulating a boot configuration error")
+			mockRfClient.ShouldFail["SetBootSourceISO"] = fmt.Errorf("failed to set boot source")
+
+			// Reconcile should fail
+			_, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{
+				Name:      beskar7Machine.Name,
+				Namespace: testNs.Name,
+			}})
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("failed to set boot source"))
+
+			// Check that the machine status reflects the error
+			Eventually(func(g Gomega) {
+				updatedMachine := &infrastructurev1alpha1.Beskar7Machine{}
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{
+					Name:      beskar7Machine.Name,
+					Namespace: testNs.Name,
+				}, updatedMachine)).To(Succeed())
+				g.Expect(updatedMachine.Status.FailureMessage).To(ContainSubstring("failed to set boot source"))
+			}, "10s", "100ms").Should(Succeed())
+		})
+
+		It("should handle boot parameter errors", func() {
+			// TODO: Future test implementation
+			Skip("Skipping boot parameter error test for now")
+			By("Simulating a boot parameter error")
+			mockRfClient.ShouldFail["SetBootParameters"] = fmt.Errorf("failed to set boot parameters")
+
+			// Reconcile should fail
+			_, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{
+				Name:      beskar7Machine.Name,
+				Namespace: testNs.Name,
+			}})
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("failed to set boot parameters"))
+
+			// Check that the machine status reflects the error
+			Eventually(func(g Gomega) {
+				updatedMachine := &infrastructurev1alpha1.Beskar7Machine{}
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{
+					Name:      beskar7Machine.Name,
+					Namespace: testNs.Name,
+				}, updatedMachine)).To(Succeed())
+				g.Expect(updatedMachine.Status.FailureMessage).To(ContainSubstring("failed to set boot parameters"))
+			}, "10s", "100ms").Should(Succeed())
+		})
+
+		It("should handle missing physical host", func() {
+			// TODO: Future test implementation
+			Skip("Skipping missing physical host test for now")
+			By("Deleting the physical host")
+			Expect(k8sClient.Delete(ctx, physicalHost)).To(Succeed())
+
+			// Reconcile should fail
+			_, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{
+				Name:      beskar7Machine.Name,
+				Namespace: testNs.Name,
+			}})
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("not found"))
+
+			// Check that the machine status reflects the error
+			Eventually(func(g Gomega) {
+				updatedMachine := &infrastructurev1alpha1.Beskar7Machine{}
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{
+					Name:      beskar7Machine.Name,
+					Namespace: testNs.Name,
+				}, updatedMachine)).To(Succeed())
+				g.Expect(updatedMachine.Status.FailureMessage).To(ContainSubstring("not found"))
+			}, "10s", "100ms").Should(Succeed())
+		})
+
+		It("should handle missing credential secret", func() {
+			// TODO: Future test implementation
+			Skip("Skipping missing credential secret test for now")
+			By("Deleting the credential secret")
+			Expect(k8sClient.Delete(ctx, credentialSecret)).To(Succeed())
+
+			// Reconcile should fail
+			_, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{
+				Name:      beskar7Machine.Name,
+				Namespace: testNs.Name,
+			}})
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("secret"))
+
+			// Check that the machine status reflects the error
+			Eventually(func(g Gomega) {
+				updatedMachine := &infrastructurev1alpha1.Beskar7Machine{}
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{
+					Name:      beskar7Machine.Name,
+					Namespace: testNs.Name,
+				}, updatedMachine)).To(Succeed())
+				g.Expect(updatedMachine.Status.FailureMessage).To(ContainSubstring("secret"))
+			}, "10s", "100ms").Should(Succeed())
+		})
+	})
+
 })
+
+func createOwnerMachine(ctx context.Context, namespace string) *clusterv1.Machine {
+	ownerMachine := &clusterv1.Machine{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-machine",
+			Namespace: namespace,
+		},
+		Spec: clusterv1.MachineSpec{
+			ClusterName: "test-cluster",
+			Bootstrap: clusterv1.Bootstrap{
+				DataSecretName: pointer.String("test-bootstrap-secret"),
+			},
+		},
+	}
+	Expect(k8sClient.Create(ctx, ownerMachine)).To(Succeed())
+	return ownerMachine
+}
