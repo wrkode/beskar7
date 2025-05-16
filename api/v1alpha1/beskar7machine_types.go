@@ -11,6 +11,9 @@ const (
 	// PhysicalHostAssociatedCondition indicates whether the Beskar7Machine has
 	// successfully associated with a PhysicalHost.
 	PhysicalHostAssociatedCondition clusterv1.ConditionType = "PhysicalHostAssociated"
+	// Beskar7MachineFailedCondition indicates that the Beskar7Machine has failed
+	// to provision or operate correctly.
+	Beskar7MachineFailedCondition clusterv1.ConditionType = "Failed"
 )
 
 // Reasons for condition failures
@@ -30,6 +33,9 @@ const (
 	// ReleasePhysicalHostFailedReason (Severity=Warning) indicates that releasing the
 	// associated PhysicalHost failed during deletion.
 	ReleasePhysicalHostFailedReason string = "ReleasePhysicalHostFailed"
+	// InvalidConfigurationReason (Severity=Error) indicates that the Beskar7Machine
+	// has an invalid configuration (e.g., missing required fields).
+	InvalidConfigurationReason string = "InvalidConfiguration"
 )
 
 // Beskar7MachineSpec defines the desired state of Beskar7Machine

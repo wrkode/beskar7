@@ -1004,9 +1004,131 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 			Expect(mockRfClient.SetBootSourceISOCalls[0]).To(Equal(genericIsoURL), "SetBootSourceISO called with incorrect ImageURL for Talos")
 		})
 
-		// TODO: Add test for "RemoteConfig" mode with missing ConfigURL (error expected)
-		// TODO: Add test for "RemoteConfig" mode with unsupported OSFamily (error expected)
+		It("should fail when ConfigURL is missing in RemoteConfig mode", func() {
+			// Create a PhysicalHost that the reconciler will find and claim
+			host = &infrastructurev1alpha1.PhysicalHost{
+				ObjectMeta: metav1.ObjectMeta{Name: "available-host-missing-config", Namespace: testNs.Name},
+				Spec: infrastructurev1alpha1.PhysicalHostSpec{
+					RedfishConnection: infrastructurev1alpha1.RedfishConnectionInfo{
+						Address:              "redfish://dummy-missing-config",
+						CredentialsSecretRef: "dummy-secret-missing-config",
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, host)).To(Succeed())
+			Eventually(func(g Gomega) {
+				createdHost := &infrastructurev1alpha1.PhysicalHost{}
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: host.Name, Namespace: host.Namespace}, createdHost)).To(Succeed())
+				createdHost.Status = infrastructurev1alpha1.PhysicalHostStatus{State: infrastructurev1alpha1.StateAvailable, Ready: true}
+				g.Expect(k8sClient.Status().Update(ctx, createdHost)).To(Succeed())
+			}, "10s", "100ms").Should(Succeed(), "Failed to update PhysicalHost status for missing config test")
 
+			// Create dummy secret for Redfish credentials
+			dummySecret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{Name: "dummy-secret-missing-config", Namespace: testNs.Name},
+				Data:       map[string][]byte{"username": []byte("user"), "password": []byte("pass")},
+			}
+			Expect(k8sClient.Create(ctx, dummySecret)).To(Succeed())
+
+			// Create Beskar7Machine with RemoteConfig mode but missing ConfigURL
+			b7machine.Spec.OSFamily = "kairos"
+			b7machine.Spec.ImageURL = "http://example.com/kairos-generic.iso"
+			b7machine.Spec.ProvisioningMode = "RemoteConfig"
+			b7machine.Spec.ConfigURL = "" // Intentionally missing
+
+			Expect(k8sClient.Create(ctx, b7machine)).To(Succeed())
+
+			reconciler := &Beskar7MachineReconciler{
+				Client:               k8sClient,
+				Scheme:               k8sClient.Scheme(),
+				RedfishClientFactory: NewMockRedfishClientFactory(mockRfClient),
+			}
+
+			By("First reconcile to add finalizer")
+			result, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: key})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.Requeue).To(BeTrue(), "Should requeue after adding finalizer")
+
+			By("Second reconcile should fail due to missing ConfigURL")
+			result, err = reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: key})
+			Expect(err).To(HaveOccurred(), "Should fail when ConfigURL is missing")
+			Expect(err.Error()).To(Equal("ConfigURL must be set when ProvisioningMode is RemoteConfig"))
+			Expect(result.Requeue).To(BeFalse(), "Should not requeue on validation error")
+
+			// Check that the machine status reflects the error
+			Eventually(func(g Gomega) {
+				g.Expect(k8sClient.Get(ctx, key, b7machine)).To(Succeed())
+				cond := conditions.Get(b7machine, infrastructurev1alpha1.InfrastructureReadyCondition)
+				g.Expect(cond).NotTo(BeNil())
+				g.Expect(cond.Status).To(Equal(corev1.ConditionFalse))
+				g.Expect(cond.Reason).To(Equal(infrastructurev1alpha1.InvalidConfigurationReason))
+				g.Expect(b7machine.Status.Phase).NotTo(BeNil())
+				g.Expect(*b7machine.Status.Phase).To(Equal("Failed"))
+			}, "5s", "100ms").Should(Succeed(), "Beskar7Machine should be marked as Failed")
+		})
+
+		It("should fail when OSFamily is unsupported in RemoteConfig mode", func() {
+			// Create a PhysicalHost that the reconciler will find and claim
+			host = &infrastructurev1alpha1.PhysicalHost{
+				ObjectMeta: metav1.ObjectMeta{Name: "available-host-unsupported-os", Namespace: testNs.Name},
+				Spec: infrastructurev1alpha1.PhysicalHostSpec{
+					RedfishConnection: infrastructurev1alpha1.RedfishConnectionInfo{
+						Address:              "redfish://dummy-unsupported-os",
+						CredentialsSecretRef: "dummy-secret-unsupported-os",
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, host)).To(Succeed())
+			Eventually(func(g Gomega) {
+				createdHost := &infrastructurev1alpha1.PhysicalHost{}
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: host.Name, Namespace: host.Namespace}, createdHost)).To(Succeed())
+				createdHost.Status = infrastructurev1alpha1.PhysicalHostStatus{State: infrastructurev1alpha1.StateAvailable, Ready: true}
+				g.Expect(k8sClient.Status().Update(ctx, createdHost)).To(Succeed())
+			}, "10s", "100ms").Should(Succeed(), "Failed to update PhysicalHost status for unsupported OS test")
+
+			// Create dummy secret for Redfish credentials
+			dummySecret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{Name: "dummy-secret-unsupported-os", Namespace: testNs.Name},
+				Data:       map[string][]byte{"username": []byte("user"), "password": []byte("pass")},
+			}
+			Expect(k8sClient.Create(ctx, dummySecret)).To(Succeed())
+
+			// Create Beskar7Machine with RemoteConfig mode and unsupported OSFamily
+			b7machine.Spec.OSFamily = "unsupported-os" // Intentionally unsupported
+			b7machine.Spec.ImageURL = "http://example.com/generic.iso"
+			b7machine.Spec.ProvisioningMode = "RemoteConfig"
+			b7machine.Spec.ConfigURL = "https://example.com/config.yaml"
+
+			Expect(k8sClient.Create(ctx, b7machine)).To(Succeed())
+
+			reconciler := &Beskar7MachineReconciler{
+				Client:               k8sClient,
+				Scheme:               k8sClient.Scheme(),
+				RedfishClientFactory: NewMockRedfishClientFactory(mockRfClient),
+			}
+
+			By("First reconcile to add finalizer")
+			result, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: key})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.Requeue).To(BeTrue(), "Should requeue after adding finalizer")
+
+			By("Second reconcile should fail due to unsupported OSFamily")
+			result, err = reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: key})
+			Expect(err).To(HaveOccurred(), "Should fail when OSFamily is unsupported")
+			Expect(err.Error()).To(Equal("unsupported OSFamily for RemoteConfig: unsupported-os"))
+			Expect(result.Requeue).To(BeFalse(), "Should not requeue on validation error")
+
+			// Check that the machine status reflects the error
+			Eventually(func(g Gomega) {
+				g.Expect(k8sClient.Get(ctx, key, b7machine)).To(Succeed())
+				cond := conditions.Get(b7machine, infrastructurev1alpha1.InfrastructureReadyCondition)
+				g.Expect(cond).NotTo(BeNil())
+				g.Expect(cond.Status).To(Equal(corev1.ConditionFalse))
+				g.Expect(cond.Reason).To(Equal(infrastructurev1alpha1.InvalidConfigurationReason))
+				g.Expect(b7machine.Status.Phase).NotTo(BeNil())
+				g.Expect(*b7machine.Status.Phase).To(Equal("Failed"))
+			}, "5s", "100ms").Should(Succeed(), "Beskar7Machine should be marked as Failed")
+		})
 	})
 
 })

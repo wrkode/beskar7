@@ -24,9 +24,8 @@ import (
 
 	"github.com/go-logr/logr"
 	"github.com/pkg/errors"
-	infrastructurev1alpha1 "github.com/wrkode/beskar7/api/v1alpha1"
-	internalredfish "github.com/wrkode/beskar7/internal/redfish"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	"sigs.k8s.io/cluster-api/util"
@@ -36,6 +35,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+
+	infrastructurev1alpha1 "github.com/wrkode/beskar7/api/v1alpha1"
+	internalredfish "github.com/wrkode/beskar7/internal/redfish"
 )
 
 const (
@@ -65,18 +67,56 @@ type Beskar7MachineReconciler struct {
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
 func (r *Beskar7MachineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ ctrl.Result, reterr error) {
-	logger := log.FromContext(ctx).WithValues("beskar7machine", req.NamespacedName)
-	logger.Info("Starting reconciliation")
+	logger := log.FromContext(ctx)
+	logger.Info("Reconciling Beskar7Machine")
 
-	// Fetch the Beskar7Machine instance.
+	// Fetch the Beskar7Machine instance
 	b7machine := &infrastructurev1alpha1.Beskar7Machine{}
-	if err := r.Get(ctx, req.NamespacedName, b7machine); err != nil {
-		if client.IgnoreNotFound(err) != nil {
-			logger.Error(err, "Unable to fetch Beskar7Machine")
+	if err := r.Client.Get(ctx, req.NamespacedName, b7machine); err != nil {
+		if apierrors.IsNotFound(err) {
+			return ctrl.Result{}, nil
+		}
+		return ctrl.Result{}, err
+	}
+
+	// Validate RemoteConfig mode requirements before proceeding
+	if b7machine.Spec.ProvisioningMode == "RemoteConfig" {
+		if b7machine.Spec.ConfigURL == "" {
+			err := fmt.Errorf("ConfigURL must be set when ProvisioningMode is RemoteConfig")
+			conditions.MarkFalse(b7machine, infrastructurev1alpha1.InfrastructureReadyCondition, infrastructurev1alpha1.InvalidConfigurationReason, clusterv1.ConditionSeverityError, "%s", err.Error())
+			failedPhase := "Failed"
+			b7machine.Status.Phase = &failedPhase
+			if err := r.Status().Update(ctx, b7machine); err != nil {
+				logger.Error(err, "Failed to update Beskar7Machine status")
+				return ctrl.Result{}, err
+			}
 			return ctrl.Result{}, err
 		}
-		logger.Info("Beskar7Machine resource not found. Ignoring since object must be deleted")
-		return ctrl.Result{}, nil
+
+		// Validate OSFamily
+		switch b7machine.Spec.OSFamily {
+		case "kairos", "talos", "flatcar", "LeapMicro":
+			// Valid OSFamily
+		default:
+			err := fmt.Errorf("unsupported OSFamily for RemoteConfig: %s", b7machine.Spec.OSFamily)
+			conditions.MarkFalse(b7machine, infrastructurev1alpha1.InfrastructureReadyCondition, infrastructurev1alpha1.InvalidConfigurationReason, clusterv1.ConditionSeverityError, "%s", err.Error())
+			failedPhase := "Failed"
+			b7machine.Status.Phase = &failedPhase
+			if err := r.Status().Update(ctx, b7machine); err != nil {
+				logger.Error(err, "Failed to update Beskar7Machine status")
+				return ctrl.Result{}, err
+			}
+			return ctrl.Result{}, err
+		}
+	}
+
+	// Add finalizer if it doesn't exist
+	if !controllerutil.ContainsFinalizer(b7machine, Beskar7MachineFinalizer) {
+		controllerutil.AddFinalizer(b7machine, Beskar7MachineFinalizer)
+		if err := r.Update(ctx, b7machine); err != nil {
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{Requeue: true}, nil
 	}
 
 	// Fetch the Machine instance.
@@ -126,19 +166,13 @@ func (r *Beskar7MachineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 func (r *Beskar7MachineReconciler) reconcileNormal(ctx context.Context, logger logr.Logger, b7machine *infrastructurev1alpha1.Beskar7Machine, machine *clusterv1.Machine) (ctrl.Result, error) {
 	logger.Info("Reconciling Beskar7Machine create/update")
 
-	// If the Beskar7Machine doesn't have our finalizer, add it.
-	if controllerutil.AddFinalizer(b7machine, Beskar7MachineFinalizer) {
-		logger.Info("Adding finalizer")
-		return ctrl.Result{Requeue: true}, nil
-	}
-
 	// TODO: Check if paused
 
 	// Find or retrieve the associated PhysicalHost.
 	physicalHost, result, err := r.findAndClaimOrGetAssociatedHost(ctx, logger, b7machine)
 	if err != nil {
 		logger.Error(err, "Failed to find, claim, or get associated PhysicalHost")
-		conditions.MarkFalse(b7machine, infrastructurev1alpha1.PhysicalHostAssociatedCondition, infrastructurev1alpha1.PhysicalHostAssociationFailedReason, clusterv1.ConditionSeverityWarning, "Failed to associate with PhysicalHost: %v", err.Error())
+		conditions.MarkFalse(b7machine, infrastructurev1alpha1.PhysicalHostAssociatedCondition, infrastructurev1alpha1.PhysicalHostAssociationFailedReason, clusterv1.ConditionSeverityWarning, "%s", err.Error())
 		return ctrl.Result{}, err
 	}
 
@@ -200,7 +234,7 @@ func (r *Beskar7MachineReconciler) reconcileNormal(ctx context.Context, logger l
 		errMsg := fmt.Sprintf("PhysicalHost %q is in error state: %s", physicalHost.Name, physicalHost.Status.ErrorMessage)
 		logger.Error(nil, errMsg)
 		// Temporarily use a hardcoded string for testing build issue
-		conditions.MarkFalse(b7machine, infrastructurev1alpha1.InfrastructureReadyCondition, infrastructurev1alpha1.PhysicalHostErrorReason, clusterv1.ConditionSeverityError, "Associated host in error")
+		conditions.MarkFalse(b7machine, infrastructurev1alpha1.InfrastructureReadyCondition, infrastructurev1alpha1.PhysicalHostErrorReason, clusterv1.ConditionSeverityError, "%s", physicalHost.Status.ErrorMessage)
 		phase := "Failed"
 		b7machine.Status.Phase = &phase
 		return ctrl.Result{}, nil // No automatic requeue
@@ -449,12 +483,6 @@ func (r *Beskar7MachineReconciler) findAndClaimOrGetAssociatedHost(ctx context.C
 		switch provisioningMode {
 		case "RemoteConfig":
 			logger.Info("Configuring boot for RemoteConfig mode")
-			if b7machine.Spec.ConfigURL == "" {
-				err := errors.New("ConfigURL must be set when ProvisioningMode is RemoteConfig")
-				logger.Error(err, "Invalid spec")
-				return nil, ctrl.Result{}, err
-			}
-
 			var kernelParams []string
 			switch b7machine.Spec.OSFamily {
 			case "kairos":
@@ -466,6 +494,7 @@ func (r *Beskar7MachineReconciler) findAndClaimOrGetAssociatedHost(ctx context.C
 			case "LeapMicro":
 				kernelParams = []string{fmt.Sprintf("combustion.path=%s", b7machine.Spec.ConfigURL)}
 			default:
+				// This should never happen as we validate earlier
 				err := errors.Errorf("unsupported OSFamily for RemoteConfig: %s", b7machine.Spec.OSFamily)
 				logger.Error(err, "Invalid spec")
 				return nil, ctrl.Result{}, err
