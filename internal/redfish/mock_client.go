@@ -74,10 +74,7 @@ func (m *MockClient) GetSystemInfo(ctx context.Context) (*SystemInfo, error) {
 	// Check for TLS certificate error if not insecure
 	if !m.Insecure {
 		if err := m.failIfNeeded("GetSystemInfo"); err != nil {
-			if err.Error() == "x509: certificate signed by unknown authority" {
-				return nil, fmt.Errorf("TLS certificate validation failed: %w", err)
-			}
-			return nil, err
+			return nil, fmt.Errorf("TLS certificate validation failed: %w", err)
 		}
 	}
 
@@ -96,9 +93,19 @@ func (m *MockClient) GetPowerState(ctx context.Context) (redfish.PowerState, err
 	m.mu.Lock()
 	m.GetPowerStateCalled = true
 	m.mu.Unlock()
-	if err := m.failIfNeeded("GetPowerState"); err != nil {
-		return "", err
+
+	// Check for TLS certificate error if not insecure
+	if !m.Insecure {
+		if err := m.failIfNeeded("GetPowerState"); err != nil {
+			return "", fmt.Errorf("TLS certificate validation failed: %w", err)
+		}
 	}
+
+	// Check for authentication error
+	if m.Username == "invalid" || m.Password == "invalid" {
+		return "", fmt.Errorf("authentication failed: invalid credentials")
+	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.PowerState, nil

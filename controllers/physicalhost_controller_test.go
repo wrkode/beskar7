@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -19,15 +20,15 @@ import (
 	internalredfish "github.com/wrkode/beskar7/internal/redfish" // Import internal redfish
 )
 
-var _ = Describe("PhysicalHost Controller", func() {
+var (
+	PhNamespace = "default"
+	PhName      = "test-physicalhost"
+	SecretName  string // Now a variable, not a const
+	Timeout     = time.Second * 10
+	Interval    = time.Millisecond * 250
+)
 
-	const ( // Define constants for test resources
-		PhNamespace = "default"
-		PhName      = "test-physicalhost"
-		SecretName  = "test-redfish-credentials"
-		Timeout     = time.Second * 10
-		Interval    = time.Millisecond * 250
-	)
+var _ = Describe("PhysicalHost Controller", func() {
 
 	Context("When reconciling a PhysicalHost", func() {
 		var physicalHost *infrastructurev1alpha1.PhysicalHost
@@ -40,7 +41,8 @@ var _ = Describe("PhysicalHost Controller", func() {
 			ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: PhNamespace}}
 			Expect(k8sClient.Create(ctx, ns)).To(SatisfyAny(Succeed(), MatchError(ContainSubstring("already exists"))))
 
-			// Create the credential secret
+			// Create the credential secret with a unique name
+			SecretName = fmt.Sprintf("test-redfish-credentials-%d-%d", GinkgoParallelProcess(), time.Now().UnixNano())
 			credentialSecret = &corev1.Secret{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      SecretName,

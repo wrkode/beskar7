@@ -34,6 +34,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	conditions "sigs.k8s.io/cluster-api/util/conditions"
 	patch "sigs.k8s.io/cluster-api/util/patch"
@@ -104,10 +105,35 @@ func (r *PhysicalHostReconciler) Reconcile(ctx context.Context, req ctrl.Request
 			// infrastructurev1alpha1.HostProvisionedCondition, (if consumed)
 		))
 
-		if err := patchHelper.Patch(ctx, physicalHost); err != nil {
-			logger.Error(err, "Failed to patch PhysicalHost status")
+		var patchErr error
+		for i := 0; i < 5; i++ {
+			// Get the latest version of the object before patching
+			latest := &infrastructurev1alpha1.PhysicalHost{}
+			if err := r.Get(ctx, client.ObjectKeyFromObject(physicalHost), latest); err == nil {
+				// Copy status and conditions from our working object to the latest
+				latest.Status = physicalHost.Status
+				// Copy conditions individually to avoid conflicts
+				for _, c := range physicalHost.Status.Conditions {
+					conditions.Set(latest, &c)
+				}
+				*physicalHost = *latest
+				// Re-initialize patch helper with the new base
+				patchHelper, _ = patch.NewHelper(physicalHost, r.Client)
+			}
+
+			patchErr = patchHelper.Patch(ctx, physicalHost)
+			if patchErr == nil {
+				break
+			}
+			if !apierrors.IsConflict(patchErr) {
+				break
+			}
+			time.Sleep(time.Duration(1<<i) * 100 * time.Millisecond) // Exponential backoff
+		}
+		if patchErr != nil {
+			logger.Error(patchErr, "Failed to patch PhysicalHost status (with retry)")
 			if reterr == nil {
-				reterr = err // Return the patching error if no other error occurred
+				reterr = patchErr // Return the patching error if no other error occurred
 			}
 		}
 		logger.Info("Finished reconciliation")
@@ -167,15 +193,42 @@ func (r *PhysicalHostReconciler) reconcileNormal(ctx context.Context, logger log
 	password := string(passwordBytes)
 	insecure := physicalHost.Spec.RedfishConnection.InsecureSkipVerify != nil && *physicalHost.Spec.RedfishConnection.InsecureSkipVerify
 
+	// Create Redfish client
 	rfClient, err := r.RedfishClientFactory(ctx, physicalHost.Spec.RedfishConnection.Address, username, password, insecure)
 	if err != nil {
 		logger.Error(err, "Failed to create Redfish client")
-		conditions.MarkFalse(physicalHost, infrastructurev1alpha1.RedfishConnectionReadyCondition, infrastructurev1alpha1.RedfishConnectionFailedReason, clusterv1.ConditionSeverityError, "Failed to create Redfish client: %v", err)
-		physicalHost.Status.State = infrastructurev1alpha1.StateError
 		physicalHost.Status.ErrorMessage = err.Error()
-		return ctrl.Result{RequeueAfter: time.Minute}, nil
+		physicalHost.Status.State = infrastructurev1alpha1.StateError
+		if strings.Contains(err.Error(), "secret") {
+			conditions.MarkFalse(physicalHost, infrastructurev1alpha1.RedfishConnectionReadyCondition, infrastructurev1alpha1.SecretNotFoundReason, clusterv1.ConditionSeverityError, "Credentials secret not found")
+		} else if strings.Contains(err.Error(), "authentication") {
+			conditions.MarkFalse(physicalHost, infrastructurev1alpha1.RedfishConnectionReadyCondition, InvalidCredentialsReason, clusterv1.ConditionSeverityError, "Authentication failed")
+		} else if strings.Contains(err.Error(), "certificate") {
+			conditions.MarkFalse(physicalHost, infrastructurev1alpha1.RedfishConnectionReadyCondition, TLSErrorReason, clusterv1.ConditionSeverityError, "TLS certificate validation failed")
+		} else {
+			conditions.MarkFalse(physicalHost, infrastructurev1alpha1.RedfishConnectionReadyCondition, infrastructurev1alpha1.RedfishConnectionFailedReason, clusterv1.ConditionSeverityError, "Failed to create Redfish client")
+		}
+		return ctrl.Result{}, nil
 	}
 	defer rfClient.Close(ctx)
+
+	// Test connection by getting system info
+	_, err = rfClient.GetSystemInfo(ctx)
+	if err != nil {
+		logger.Error(err, "Failed to connect to Redfish endpoint")
+		physicalHost.Status.ErrorMessage = err.Error()
+		physicalHost.Status.State = infrastructurev1alpha1.StateError
+		if strings.Contains(err.Error(), "certificate") {
+			conditions.MarkFalse(physicalHost, infrastructurev1alpha1.RedfishConnectionReadyCondition, TLSErrorReason, clusterv1.ConditionSeverityError, "TLS certificate validation failed")
+		} else if strings.Contains(err.Error(), "authentication") {
+			conditions.MarkFalse(physicalHost, infrastructurev1alpha1.RedfishConnectionReadyCondition, InvalidCredentialsReason, clusterv1.ConditionSeverityError, "Authentication failed")
+		} else {
+			conditions.MarkFalse(physicalHost, infrastructurev1alpha1.RedfishConnectionReadyCondition, infrastructurev1alpha1.RedfishConnectionFailedReason, clusterv1.ConditionSeverityError, "Failed to connect to Redfish endpoint")
+		}
+		return ctrl.Result{}, nil
+	}
+	// If we reach here, connection is successful
+	physicalHost.Status.State = infrastructurev1alpha1.StateAvailable
 
 	// --- Query Redfish for System Info and Power State ---
 	systemInfo, rfErr := rfClient.GetSystemInfo(ctx)
@@ -204,7 +257,7 @@ func (r *PhysicalHostReconciler) reconcileNormal(ctx context.Context, logger log
 			conditions.MarkFalse(physicalHost, infrastructurev1alpha1.RedfishConnectionReadyCondition, TLSErrorReason, clusterv1.ConditionSeverityError, "TLS certificate validation failed: %v", rfErr.Error())
 			physicalHost.Status.ErrorMessage = fmt.Sprintf("TLS certificate validation failed: %v", rfErr.Error())
 		} else if strings.Contains(rfErr.Error(), "authentication") {
-			conditions.MarkFalse(physicalHost, infrastructurev1alpha1.RedfishConnectionReadyCondition, infrastructurev1alpha1.AuthenticationErrorReason, clusterv1.ConditionSeverityError, "Authentication failed: %v", rfErr.Error())
+			conditions.MarkFalse(physicalHost, infrastructurev1alpha1.RedfishConnectionReadyCondition, InvalidCredentialsReason, clusterv1.ConditionSeverityError, "Authentication failed: %v", rfErr.Error())
 			physicalHost.Status.ErrorMessage = fmt.Sprintf("Authentication failed: %v", rfErr.Error())
 		} else {
 			conditions.MarkFalse(physicalHost, infrastructurev1alpha1.RedfishConnectionReadyCondition, infrastructurev1alpha1.RedfishQueryFailedReason, clusterv1.ConditionSeverityError, "Failed to get system info: %v", rfErr.Error())

@@ -51,6 +51,7 @@ var _ = Describe("Security Tests", func() {
 			mockRfClient     *internalredfish.MockClient
 			reconciler       *PhysicalHostReconciler
 			secretName       string
+			shouldFailTLS    bool
 		)
 
 		BeforeEach(func() {
@@ -83,14 +84,17 @@ var _ = Describe("Security Tests", func() {
 				},
 			}
 
+			shouldFailTLS = false
+
 			mockRfClient = internalredfish.NewMockClient()
 			reconciler = &PhysicalHostReconciler{
 				Client: k8sClient,
 				Scheme: k8sClient.Scheme(),
 				RedfishClientFactory: func(ctx context.Context, address, username, password string, insecure bool) (internalredfish.Client, error) {
-					if !insecure && mockRfClient.ShouldFail["GetSystemInfo"] != nil {
-						return nil, mockRfClient.ShouldFail["GetSystemInfo"]
+					if shouldFailTLS && !insecure {
+						return nil, fmt.Errorf("TLS certificate validation failed: x509: certificate signed by unknown authority")
 					}
+					mockRfClient.Insecure = insecure
 					return mockRfClient, nil
 				},
 			}
@@ -125,27 +129,28 @@ var _ = Describe("Security Tests", func() {
 			Expect(k8sClient.Create(ctx, physicalHost)).To(Succeed())
 
 			// Simulate TLS error in mock client
-			mockRfClient.ShouldFail["GetSystemInfo"] = fmt.Errorf("x509: certificate signed by unknown authority")
-			mockRfClient.Insecure = false // Ensure insecure is false
+			shouldFailTLS = true
 
-			// Reconcile should fail due to TLS error
+			// Reconcile should not return an error, but update status
 			_, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{
 				Name:      physicalHost.Name,
 				Namespace: testNs.Name,
 			}})
-			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("certificate"))
+			Expect(err).NotTo(HaveOccurred())
 
-			// Check that the host status reflects the error
+			// Re-fetch the PhysicalHost before assertions
+			updatedHost := &infrastructurev1alpha1.PhysicalHost{}
 			Eventually(func(g Gomega) {
-				updatedHost := &infrastructurev1alpha1.PhysicalHost{}
-				g.Expect(k8sClient.Get(ctx, types.NamespacedName{
+				err := k8sClient.Get(ctx, types.NamespacedName{
 					Name:      physicalHost.Name,
 					Namespace: testNs.Name,
-				}, updatedHost)).To(Succeed())
+				}, updatedHost)
+				g.Expect(err).NotTo(HaveOccurred())
 				g.Expect(updatedHost.Status.ErrorMessage).To(ContainSubstring("certificate"))
 				g.Expect(updatedHost.Status.State).To(Equal(infrastructurev1alpha1.StateError))
-			}, "30s", "100ms").Should(Succeed())
+				g.Expect(conditions.IsFalse(updatedHost, infrastructurev1alpha1.RedfishConnectionReadyCondition)).To(BeTrue())
+				g.Expect(conditions.GetReason(updatedHost, infrastructurev1alpha1.RedfishConnectionReadyCondition)).To(Equal(TLSErrorReason))
+			}, "10s", "100ms").Should(Succeed())
 		})
 
 		It("should allow insecure connections when explicitly configured", func() {
@@ -153,8 +158,8 @@ var _ = Describe("Security Tests", func() {
 			physicalHost.Spec.RedfishConnection.InsecureSkipVerify = ptr.To(true)
 			Expect(k8sClient.Create(ctx, physicalHost)).To(Succeed())
 
-			// Configure mock client to allow insecure connections
-			mockRfClient.ShouldFail["GetSystemInfo"] = fmt.Errorf("x509: certificate signed by unknown authority")
+			// Simulate TLS error in mock client, but insecure is true so it should not fail
+			shouldFailTLS = true
 
 			// Reconcile should succeed
 			_, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{
@@ -163,15 +168,18 @@ var _ = Describe("Security Tests", func() {
 			}})
 			Expect(err).NotTo(HaveOccurred())
 
-			// Check that the host status is updated
+			// Re-fetch the PhysicalHost before assertions
+			updatedHost := &infrastructurev1alpha1.PhysicalHost{}
 			Eventually(func(g Gomega) {
-				updatedHost := &infrastructurev1alpha1.PhysicalHost{}
-				g.Expect(k8sClient.Get(ctx, types.NamespacedName{
+				err := k8sClient.Get(ctx, types.NamespacedName{
 					Name:      physicalHost.Name,
 					Namespace: testNs.Name,
-				}, updatedHost)).To(Succeed())
+				}, updatedHost)
+				g.Expect(err).NotTo(HaveOccurred())
 				g.Expect(updatedHost.Status.ErrorMessage).To(BeEmpty())
-			}, "30s", "100ms").Should(Succeed())
+				g.Expect(updatedHost.Status.State).To(Equal(infrastructurev1alpha1.StateAvailable))
+				g.Expect(conditions.IsTrue(updatedHost, infrastructurev1alpha1.RedfishConnectionReadyCondition)).To(BeTrue())
+			}, "10s", "100ms").Should(Succeed())
 		})
 	})
 
@@ -255,13 +263,12 @@ var _ = Describe("Security Tests", func() {
 			Expect(k8sClient.Delete(ctx, credentialSecret)).To(Succeed())
 			Expect(k8sClient.Create(ctx, physicalHost)).To(Succeed())
 
-			// Reconcile should fail due to missing secret
+			// Reconcile should not return an error, but update status
 			_, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{
 				Name:      physicalHost.Name,
 				Namespace: testNs.Name,
 			}})
-			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("secret"))
+			Expect(err).NotTo(HaveOccurred())
 
 			// Check that the host status reflects the error
 			Eventually(func(g Gomega) {
@@ -273,6 +280,7 @@ var _ = Describe("Security Tests", func() {
 				g.Expect(updatedHost.Status.State).To(Equal(infrastructurev1alpha1.StateError))
 				g.Expect(updatedHost.Status.ErrorMessage).To(ContainSubstring("secret"))
 				g.Expect(conditions.IsFalse(updatedHost, infrastructurev1alpha1.RedfishConnectionReadyCondition)).To(BeTrue())
+				g.Expect(conditions.GetReason(updatedHost, infrastructurev1alpha1.RedfishConnectionReadyCondition)).To(Equal(infrastructurev1alpha1.SecretNotFoundReason))
 			}, "30s", "100ms").Should(Succeed())
 		})
 
@@ -283,13 +291,12 @@ var _ = Describe("Security Tests", func() {
 			Expect(k8sClient.Update(ctx, credentialSecret)).To(Succeed())
 			Expect(k8sClient.Create(ctx, physicalHost)).To(Succeed())
 
-			// Reconcile should fail due to invalid credentials
+			// Reconcile should not return an error, but update status
 			_, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{
 				Name:      physicalHost.Name,
 				Namespace: testNs.Name,
 			}})
-			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("authentication"))
+			Expect(err).NotTo(HaveOccurred())
 
 			// Check that the host status reflects the error
 			Eventually(func(g Gomega) {
@@ -301,6 +308,7 @@ var _ = Describe("Security Tests", func() {
 				g.Expect(updatedHost.Status.State).To(Equal(infrastructurev1alpha1.StateError))
 				g.Expect(updatedHost.Status.ErrorMessage).To(ContainSubstring("authentication"))
 				g.Expect(conditions.IsFalse(updatedHost, infrastructurev1alpha1.RedfishConnectionReadyCondition)).To(BeTrue())
+				g.Expect(conditions.GetReason(updatedHost, infrastructurev1alpha1.RedfishConnectionReadyCondition)).To(Equal(InvalidCredentialsReason))
 			}, "30s", "100ms").Should(Succeed())
 		})
 
