@@ -18,24 +18,25 @@ package controllers
 
 import (
 	"context"
-	"errors"
+	stderrors "errors"
 	"fmt"
 	"time"
 
+	"github.com/stmcginnis/gofish/redfish"
+	infrastructurev1alpha1 "github.com/wrkode/beskar7/api/v1alpha1"
+	beskarerrors "github.com/wrkode/beskar7/internal/errors"
+	internalredfish "github.com/wrkode/beskar7/internal/redfish"
+	"github.com/wrkode/beskar7/internal/retry"
+	"github.com/wrkode/beskar7/internal/statemachine"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"sigs.k8s.io/cluster-api/util/conditions"
+	"sigs.k8s.io/cluster-api/util/patch"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-
-	infrastructurev1alpha1 "github.com/wrkode/beskar7/api/v1alpha1"
-	"github.com/wrkode/beskar7/internal/redfish"
-	internalredfish "github.com/wrkode/beskar7/internal/redfish"
-	"github.com/wrkode/beskar7/internal/statemachine"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"sigs.k8s.io/cluster-api/util/conditions"
-	"sigs.k8s.io/cluster-api/util/patch"
 )
 
 const (
@@ -116,12 +117,11 @@ func mapPhysicalHostStateToStateMachineState(state infrastructurev1alpha1.Physic
 	}
 }
 
-// getRedfishClient creates a Redfish client for the given PhysicalHost
+// getRedfishClient creates a Redfish client using the credentials from the secret.
 func (r *PhysicalHostReconciler) getRedfishClient(ctx context.Context, physicalHost *infrastructurev1alpha1.PhysicalHost) (internalredfish.Client, error) {
-	// Fetch Redfish credentials
 	secretName := physicalHost.Spec.RedfishConnection.CredentialsSecretRef
 	if secretName == "" {
-		return nil, errors.New("CredentialsSecretRef is not set")
+		return nil, beskarerrors.New("CredentialsSecretRef is not set")
 	}
 
 	credentialsSecret := &corev1.Secret{}
@@ -133,7 +133,7 @@ func (r *PhysicalHostReconciler) getRedfishClient(ctx context.Context, physicalH
 	usernameBytes, okUser := credentialsSecret.Data["username"]
 	passwordBytes, okPass := credentialsSecret.Data["password"]
 	if !okUser || !okPass {
-		return nil, errors.New("username or password missing in credentials secret data")
+		return nil, beskarerrors.New("username or password missing in credentials secret data")
 	}
 
 	username := string(usernameBytes)
@@ -151,14 +151,46 @@ func (r *PhysicalHostReconciler) getRedfishClient(ctx context.Context, physicalH
 
 // discoverHost attempts to discover the host via Redfish
 func (r *PhysicalHostReconciler) discoverHost(ctx context.Context, physicalHost *infrastructurev1alpha1.PhysicalHost, redfishClient internalredfish.Client) error {
-	systemInfo, err := redfishClient.GetSystemInfo(ctx)
-	if err != nil {
-		return err
+	config := &retry.Config{
+		InitialInterval: 2 * time.Second,
+		MaxInterval:     1 * time.Minute,
+		Multiplier:      2.0,
+		MaxAttempts:     3,
+		MaxElapsedTime:  5 * time.Minute,
 	}
 
-	powerState, err := redfishClient.GetPowerState(ctx)
+	var systemInfo *internalredfish.SystemInfo
+	var powerState redfish.PowerState
+	var err error
+
+	// Retry getting system info
+	err = retry.WithContext(ctx, config, func() error {
+		systemInfo, err = redfishClient.GetSystemInfo(ctx)
+		if err != nil {
+			if beskarerrors.IsRetryableError(err) {
+				return beskarerrors.NewRetryableError(err)
+			}
+			return err
+		}
+		return nil
+	})
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to get system info after retries: %w", err)
+	}
+
+	// Retry getting power state
+	err = retry.WithContext(ctx, config, func() error {
+		powerState, err = redfishClient.GetPowerState(ctx)
+		if err != nil {
+			if beskarerrors.IsRetryableError(err) {
+				return beskarerrors.NewRetryableError(err)
+			}
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("failed to get power state after retries: %w", err)
 	}
 
 	// Update status with discovered info
@@ -176,25 +208,64 @@ func (r *PhysicalHostReconciler) discoverHost(ctx context.Context, physicalHost 
 
 // checkProvisioningStatus checks if the host has been successfully provisioned
 func (r *PhysicalHostReconciler) checkProvisioningStatus(ctx context.Context, physicalHost *infrastructurev1alpha1.PhysicalHost, redfishClient internalredfish.Client) error {
+	config := &retry.Config{
+		InitialInterval: 2 * time.Second,
+		MaxInterval:     1 * time.Minute,
+		Multiplier:      2.0,
+		MaxAttempts:     3,
+		MaxElapsedTime:  5 * time.Minute,
+	}
+
 	// Check if boot source is set
 	if physicalHost.Spec.BootISOSource == nil || *physicalHost.Spec.BootISOSource == "" {
-		return errors.New("BootISOSource is not set")
+		return stderrors.New("BootISOSource is not set")
 	}
 
-	// Set boot source
-	if err := redfishClient.SetBootSourceISO(ctx, *physicalHost.Spec.BootISOSource); err != nil {
-		return err
-	}
-
-	// Power on the host
-	powerState, err := redfishClient.GetPowerState(ctx)
+	// Retry setting boot source
+	err := retry.WithContext(ctx, config, func() error {
+		err := redfishClient.SetBootSourceISO(ctx, *physicalHost.Spec.BootISOSource)
+		if err != nil {
+			if beskarerrors.IsRetryableError(err) {
+				return beskarerrors.NewRetryableError(err)
+			}
+			return err
+		}
+		return nil
+	})
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to set boot source after retries: %w", err)
+	}
+
+	// Retry getting power state
+	var powerState redfish.PowerState
+	err = retry.WithContext(ctx, config, func() error {
+		powerState, err = redfishClient.GetPowerState(ctx)
+		if err != nil {
+			if beskarerrors.IsRetryableError(err) {
+				return beskarerrors.NewRetryableError(err)
+			}
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("failed to get power state after retries: %w", err)
 	}
 
 	if powerState != redfish.OnPowerState {
-		if err := redfishClient.SetPowerState(ctx, redfish.OnPowerState); err != nil {
-			return err
+		// Retry setting power state
+		err = retry.WithContext(ctx, config, func() error {
+			err := redfishClient.SetPowerState(ctx, redfish.OnPowerState)
+			if err != nil {
+				if beskarerrors.IsRetryableError(err) {
+					return beskarerrors.NewRetryableError(err)
+				}
+				return err
+			}
+			return nil
+		})
+		if err != nil {
+			return fmt.Errorf("failed to set power state after retries: %w", err)
 		}
 		physicalHost.Status.ObservedPowerState = redfish.OnPowerState
 	}
@@ -204,22 +275,44 @@ func (r *PhysicalHostReconciler) checkProvisioningStatus(ctx context.Context, ph
 
 // recoverFromError attempts to recover from an error state
 func (r *PhysicalHostReconciler) recoverFromError(ctx context.Context, physicalHost *infrastructurev1alpha1.PhysicalHost) error {
-	// For now, just try to rediscover the host
-	redfishClient, err := r.getRedfishClient(ctx, physicalHost)
-	if err != nil {
-		return err
+	config := &retry.Config{
+		InitialInterval: 5 * time.Second,
+		MaxInterval:     5 * time.Minute,
+		Multiplier:      2.0,
+		MaxAttempts:     5,
+		MaxElapsedTime:  15 * time.Minute,
 	}
 
-	if err := r.discoverHost(ctx, physicalHost, redfishClient); err != nil {
-		return err
-	}
+	var err error
+	err = retry.WithContext(ctx, config, func() error {
+		// For now, just try to rediscover the host
+		redfishClient, err := r.getRedfishClient(ctx, physicalHost)
+		if err != nil {
+			if beskarerrors.IsRetryableError(err) {
+				return beskarerrors.NewRetryableError(err)
+			}
+			return err
+		}
 
-	// If successful, transition back to available state
-	if err := r.StateMachine.Transition(ctx, statemachine.ConvertEvent(statemachine.PhysicalHostEventDiscoverySucceeded)); err != nil {
-		return err
-	}
-	physicalHost.Status.State = mapStateMachineStateToPhysicalHostState(statemachine.ConvertState(statemachine.PhysicalHostStateAvailable))
-	return nil
+		if err := r.discoverHost(ctx, physicalHost, redfishClient); err != nil {
+			if beskarerrors.IsRetryableError(err) {
+				return beskarerrors.NewRetryableError(err)
+			}
+			return err
+		}
+
+		// If successful, transition back to available state
+		if err := r.StateMachine.Transition(ctx, statemachine.ConvertEvent(statemachine.PhysicalHostEventDiscoverySucceeded)); err != nil {
+			if beskarerrors.IsRetryableError(err) {
+				return beskarerrors.NewRetryableError(err)
+			}
+			return err
+		}
+		physicalHost.Status.State = mapStateMachineStateToPhysicalHostState(statemachine.ConvertState(statemachine.PhysicalHostStateAvailable))
+		return nil
+	})
+
+	return err
 }
 
 // updateStateTransition updates the state transition information in the PhysicalHost status
@@ -443,7 +536,7 @@ func (r *PhysicalHostReconciler) reconcileNormal(ctx context.Context, physicalHo
 	default:
 		log.Error(nil, "unknown state", "state", currentState)
 		r.updateErrorDetails(physicalHost, "StateError", "UNKNOWN_STATE", "Unknown state encountered")
-		return ctrl.Result{}, errors.New("unknown state")
+		return ctrl.Result{}, beskarerrors.New("unknown state")
 	}
 }
 
@@ -515,7 +608,7 @@ func (r *PhysicalHostReconciler) reconcileDelete(ctx context.Context, physicalHo
 }
 
 // deprovisionHost handles the deprovisioning of a PhysicalHost.
-func (r *PhysicalHostReconciler) deprovisionHost(ctx context.Context, physicalHost *infrastructurev1alpha1.PhysicalHost, redfishClient redfish.Client) error {
+func (r *PhysicalHostReconciler) deprovisionHost(ctx context.Context, physicalHost *infrastructurev1alpha1.PhysicalHost, redfishClient internalredfish.Client) error {
 	log := log.FromContext(ctx)
 
 	// Eject Virtual Media
