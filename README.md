@@ -232,28 +232,9 @@ kubectl apply -f b7machine-kairos-remote.yaml
 
 *(This README will be updated as more features are implemented, including CAPI `Machine` and `Cluster` examples.)*
 
-## Future Work / Roadmap
+## Project Status and Roadmap
 
-The following key areas are planned or in progress:
-
-*   [x] Basic `PhysicalHost` reconciliation (Redfish connection, status update).
-*   [x] Basic `Beskar7Machine` reconciliation (Host claiming, status monitoring based on host).
-*   [x] `Beskar7Machine` deletion/finalizer handling (releasing the `PhysicalHost`).
-*   [x] BDD Testing setup (`envtest`, Ginkgo/Gomega).
-*   [x] Basic UserData handling (`Beskar7Machine` spec changes for OS-specific remote config).
-*   [x] Implement `PhysicalHost` Deprovisioning (Power off, eject media on delete).
-*   [x] Initial `SetBootParameters` implementation in Redfish client (UEFI target attempt).
-*   [x] Basic `Beskar7Cluster` reconciliation (handles finalizer and `ControlPlaneEndpointReady` based on spec).
-*   [x] Refine Status Reporting (CAPI Conditions for Beskar7Machine, PhysicalHost, Beskar7Cluster types and basic `Status.Ready` logic).
-*   [ ] **`SetBootParameters` Full Implementation:** Robustly handle setting boot parameters via Redfish across various BMCs, investigating `UefiTargetBootSourceOverride`, BIOS attributes, and other vendor-specific mechanisms. This is crucial for reliable "RemoteConfig" provisioning.
-*   [ ] **`Beskar7Cluster` Enhancements:**
-    *   Derive `ControlPlaneEndpoint` in `Status` from control plane `Beskar7Machine`s (this will first require `Beskar7MachineStatus` to include IP address information).
-    *   Implement `FailureDomains` reporting in `Beskar7ClusterStatus` if applicable to the target bare-metal environments.
-    *   Add comprehensive tests for `Beskar7ClusterReconciler`.
-*   [ ] **Testing & Validation:**
-    *   Comprehensive BDD Tests for all controllers and provisioning modes (especially "RemoteConfig" error cases and different OS families).
-    *   Real-world testing with a variety of physical hardware and Redfish implementations.
-*   [ ] **Documentation:** Advanced Usage, Troubleshooting, Contribution Guidelines.
+For detailed information about the project's current status and future plans, please see our [ROADMAP.md](ROADMAP.md) file.
 
 ## Contributing
 
