@@ -315,10 +315,9 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 		})
 
 		It("should set Infra Ready=False when host is Provisioning", func() {
-			Skip("Skipping due to envtest status/update reliability issues")
-			// Create a PhysicalHost claimed by our machine and in Provisioning state (with status)
+			// Create a PhysicalHost claimed by our machine and in Provisioning state
 			hostName := "provisioning-host"
-			imageUrl := "http://example.com/prov-test.iso" // Ensure unique URL if needed
+			imageUrl := "http://example.com/prov-test.iso"
 			host = &infrastructurev1alpha1.PhysicalHost{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      hostName,
@@ -337,60 +336,76 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 					},
 					BootISOSource: &imageUrl,
 				},
-				Status: infrastructurev1alpha1.PhysicalHostStatus{
-					State: infrastructurev1alpha1.StateProvisioning,
-					Ready: false,
-				},
 			}
 			Expect(k8sClient.Create(ctx, host)).To(Succeed())
-			// Removed Status().Update()
 
-			// Wait slightly for create to settle (optional, might help envtest)
-			time.Sleep(100 * time.Millisecond)
+			// Create mock Redfish client that simulates provisioning state
+			mockClient := &MockRedfishClient{
+				GetSystemInfoFunc: func(ctx context.Context) (*internalredfish.SystemInfo, error) {
+					return &internalredfish.SystemInfo{
+						Manufacturer: "TestManufacturer",
+						Model:        "TestModel",
+						SerialNumber: "TestSerial",
+						Status:       common.Status{State: common.EnabledState},
+					}, nil
+				},
+				GetPowerStateFunc: func(ctx context.Context) (redfish.PowerState, error) {
+					return redfish.OnPowerState, nil
+				},
+			}
 
 			// Set ProviderID on Beskar7Machine to link it to the host
 			providerID := providerID(host.Namespace, host.Name)
 			b7machine.Spec.ProviderID = &providerID
-			b7machine.Spec.ImageURL = imageUrl // Match host spec
+			b7machine.Spec.ImageURL = imageUrl
 
 			// Create the Beskar7Machine
 			Expect(k8sClient.Create(ctx, b7machine)).To(Succeed())
 
-			// Initialize the reconciler
+			// Initialize the reconciler with mock client
 			reconciler := &Beskar7MachineReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
+				Client:               k8sClient,
+				Scheme:               k8sClient.Scheme(),
+				RedfishClientFactory: NewMockRedfishClientFactory(mockClient),
 			}
 
 			// First reconcile (adds finalizer)
 			result, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: key})
 			Expect(err).NotTo(HaveOccurred())
-			Expect(result.Requeue).To(BeTrue()) // Expect immediate requeue
-			Expect(result.RequeueAfter).To(BeZero())
+			Expect(result.Requeue).To(BeTrue())
+
+			// Update host status to Provisioning
+			host.Status.State = infrastructurev1alpha1.StateProvisioning
+			host.Status.Ready = false
+			Expect(k8sClient.Status().Update(ctx, host)).To(Succeed())
+
+			// Wait for status update to be processed
+			Eventually(func() bool {
+				var updatedHost infrastructurev1alpha1.PhysicalHost
+				err := k8sClient.Get(ctx, types.NamespacedName{Name: host.Name, Namespace: host.Namespace}, &updatedHost)
+				return err == nil && updatedHost.Status.State == infrastructurev1alpha1.StateProvisioning
+			}, time.Second*5, time.Millisecond*200).Should(BeTrue())
 
 			// Second reconcile (finds provisioning host)
 			result, err = reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: key})
 			Expect(err).NotTo(HaveOccurred())
-			Expect(result.Requeue || result.RequeueAfter > 0).To(BeTrue(), "Should requeue (with or without delay) when host is provisioning")
+			Expect(result.Requeue || result.RequeueAfter > 0).To(BeTrue())
 
-			// Fetch the updated Beskar7Machine
-			Eventually(func() bool {
-				Expect(k8sClient.Get(ctx, key, b7machine)).To(Succeed())
-				return conditions.Has(b7machine, infrastructurev1alpha1.InfrastructureReadyCondition)
-			}, time.Second*5, time.Millisecond*200).Should(BeTrue(), "InfrastructureReadyCondition should be set")
-
-			// Check conditions and phase
-			cond := conditions.Get(b7machine, infrastructurev1alpha1.InfrastructureReadyCondition)
-			Expect(cond.Status).To(Equal(corev1.ConditionFalse))
-			Expect(cond.Reason).To(Equal(infrastructurev1alpha1.PhysicalHostNotReadyReason))
-			Expect(cond.Message).To(ContainSubstring("is still provisioning"))
-			Expect(b7machine.Status.Phase).NotTo(BeNil())
-			Expect(*b7machine.Status.Phase).To(Equal("Provisioning"))
+			// Verify Beskar7Machine status
+			Eventually(func(g Gomega) {
+				g.Expect(k8sClient.Get(ctx, key, b7machine)).To(Succeed())
+				g.Expect(conditions.Has(b7machine, infrastructurev1alpha1.InfrastructureReadyCondition)).To(BeTrue())
+				cond := conditions.Get(b7machine, infrastructurev1alpha1.InfrastructureReadyCondition)
+				g.Expect(cond.Status).To(Equal(corev1.ConditionFalse))
+				g.Expect(cond.Reason).To(Equal(infrastructurev1alpha1.PhysicalHostNotReadyReason))
+				g.Expect(cond.Message).To(ContainSubstring("is still provisioning"))
+				g.Expect(b7machine.Status.Phase).NotTo(BeNil())
+				g.Expect(*b7machine.Status.Phase).To(Equal("Provisioning"))
+			}, time.Second*5, time.Millisecond*200).Should(Succeed())
 		})
 
 		It("should set Infra Ready=True and ProviderID when host is Provisioned", func() {
-			Skip("Skipping due to envtest status/update reliability issues")
-			// Create a PhysicalHost claimed by our machine and in Provisioned state (with status)
+			// Create a PhysicalHost claimed by our machine and in Provisioned state
 			hostName := "provisioned-host"
 			imageUrl := "http://example.com/ready-test.iso"
 			host = &infrastructurev1alpha1.PhysicalHost{
@@ -411,57 +426,72 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 					},
 					BootISOSource: &imageUrl,
 				},
-				Status: infrastructurev1alpha1.PhysicalHostStatus{
-					State: infrastructurev1alpha1.StateProvisioned,
-					Ready: true,
-				},
 			}
 			Expect(k8sClient.Create(ctx, host)).To(Succeed())
-			// Removed Status().Update()
 
-			// Wait slightly for create to settle (optional, might help envtest)
-			time.Sleep(100 * time.Millisecond)
+			// Create mock Redfish client that simulates provisioned state
+			mockClient := &MockRedfishClient{
+				GetSystemInfoFunc: func(ctx context.Context) (*internalredfish.SystemInfo, error) {
+					return &internalredfish.SystemInfo{
+						Manufacturer: "TestManufacturer",
+						Model:        "TestModel",
+						SerialNumber: "TestSerial",
+						Status:       common.Status{State: common.EnabledState},
+					}, nil
+				},
+				GetPowerStateFunc: func(ctx context.Context) (redfish.PowerState, error) {
+					return redfish.OnPowerState, nil
+				},
+			}
 
-			// Create the Beskar7Machine (ProviderID should be set by reconcile)
-			b7machine.Spec.ImageURL = imageUrl // Match host spec
+			// Create the Beskar7Machine
+			b7machine.Spec.ImageURL = imageUrl
 			Expect(k8sClient.Create(ctx, b7machine)).To(Succeed())
 
-			// Initialize the reconciler
+			// Initialize the reconciler with mock client
 			reconciler := &Beskar7MachineReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
+				Client:               k8sClient,
+				Scheme:               k8sClient.Scheme(),
+				RedfishClientFactory: NewMockRedfishClientFactory(mockClient),
 			}
 
 			// First reconcile (adds finalizer)
 			result, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: key})
 			Expect(err).NotTo(HaveOccurred())
-			Expect(result.Requeue).To(BeFalse()) // Should not requeue once provisioned
-			Expect(result.RequeueAfter).To(BeZero())
+			Expect(result.Requeue).To(BeTrue())
+
+			// Update host status to Provisioned
+			host.Status.State = infrastructurev1alpha1.StateProvisioned
+			host.Status.Ready = true
+			Expect(k8sClient.Status().Update(ctx, host)).To(Succeed())
+
+			// Wait for status update to be processed
+			Eventually(func() bool {
+				var updatedHost infrastructurev1alpha1.PhysicalHost
+				err := k8sClient.Get(ctx, types.NamespacedName{Name: host.Name, Namespace: host.Namespace}, &updatedHost)
+				return err == nil && updatedHost.Status.State == infrastructurev1alpha1.StateProvisioned
+			}, time.Second*5, time.Millisecond*200).Should(BeTrue())
 
 			// Second reconcile (finds provisioned host)
 			result, err = reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: key})
 			Expect(err).NotTo(HaveOccurred())
-			Expect(result.Requeue).To(BeFalse()) // Should not requeue once provisioned
+			Expect(result.Requeue).To(BeFalse())
 			Expect(result.RequeueAfter).To(BeZero())
 
-			// Fetch the updated Beskar7Machine
+			// Verify Beskar7Machine status
 			Eventually(func(g Gomega) {
 				g.Expect(k8sClient.Get(ctx, key, b7machine)).To(Succeed())
-				// Check ProviderID is set
 				g.Expect(b7machine.Spec.ProviderID).NotTo(BeNil())
 				expectedProviderID := providerID(host.Namespace, host.Name)
 				g.Expect(*b7machine.Spec.ProviderID).To(Equal(expectedProviderID))
-				// Check Condition
 				g.Expect(conditions.IsTrue(b7machine, infrastructurev1alpha1.InfrastructureReadyCondition)).To(BeTrue())
-				// Check Phase
 				g.Expect(b7machine.Status.Phase).NotTo(BeNil())
 				g.Expect(*b7machine.Status.Phase).To(Equal("Provisioned"))
-			}, time.Second*5, time.Millisecond*200).Should(Succeed(), "Beskar7Machine should be Ready with ProviderID")
+			}, time.Second*5, time.Millisecond*200).Should(Succeed())
 		})
 
 		It("should set Infra Ready=False and Phase=Failed when host is Error", func() {
-			Skip("Skipping due to envtest status/update reliability issues")
-			// Create a PhysicalHost claimed by our machine and in Error state (with status)
+			// Create a PhysicalHost claimed by our machine and in Error state
 			hostName := "error-host"
 			imageUrl := "http://example.com/error-test.iso"
 			host = &infrastructurev1alpha1.PhysicalHost{
@@ -482,62 +512,76 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 					},
 					BootISOSource: &imageUrl,
 				},
-				Status: infrastructurev1alpha1.PhysicalHostStatus{
-					State:        infrastructurev1alpha1.StateError,
-					ErrorMessage: "Redfish connection failed repeatedly",
-					Ready:        false,
-				},
 			}
 			Expect(k8sClient.Create(ctx, host)).To(Succeed())
-			// Removed Status().Update()
 
-			// Wait slightly for create to settle (optional, might help envtest)
-			time.Sleep(100 * time.Millisecond)
+			// Create mock Redfish client that simulates error state
+			mockClient := &MockRedfishClient{
+				GetSystemInfoFunc: func(ctx context.Context) (*internalredfish.SystemInfo, error) {
+					return nil, fmt.Errorf("simulated error")
+				},
+				GetPowerStateFunc: func(ctx context.Context) (redfish.PowerState, error) {
+					return "", fmt.Errorf("simulated error")
+				},
+			}
 
 			// Set ProviderID on Beskar7Machine to link it to the host
 			providerID := providerID(host.Namespace, host.Name)
 			b7machine.Spec.ProviderID = &providerID
-			b7machine.Spec.ImageURL = imageUrl // Match host spec
+			b7machine.Spec.ImageURL = imageUrl
 
 			// Create the Beskar7Machine
 			Expect(k8sClient.Create(ctx, b7machine)).To(Succeed())
 
-			// Initialize the reconciler
+			// Initialize the reconciler with mock client
 			reconciler := &Beskar7MachineReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
+				Client:               k8sClient,
+				Scheme:               k8sClient.Scheme(),
+				RedfishClientFactory: NewMockRedfishClientFactory(mockClient),
 			}
 
 			// First reconcile (adds finalizer)
 			result, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: key})
 			Expect(err).NotTo(HaveOccurred())
-			Expect(result.Requeue).To(BeTrue()) // Expect immediate requeue
-			Expect(result.RequeueAfter).To(BeZero())
+			Expect(result.Requeue).To(BeTrue())
+
+			// Update host status to Error
+			host.Status.State = infrastructurev1alpha1.StateError
+			host.Status.ErrorMessage = "Redfish connection failed repeatedly"
+			host.Status.Ready = false
+			Expect(k8sClient.Status().Update(ctx, host)).To(Succeed())
+
+			// Wait for status update to be processed
+			Eventually(func() bool {
+				var updatedHost infrastructurev1alpha1.PhysicalHost
+				err := k8sClient.Get(ctx, types.NamespacedName{Name: host.Name, Namespace: host.Namespace}, &updatedHost)
+				return err == nil && updatedHost.Status.State == infrastructurev1alpha1.StateError
+			}, time.Second*5, time.Millisecond*200).Should(BeTrue())
 
 			// Second reconcile (finds error host)
 			result, err = reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: key})
-			Expect(err).NotTo(HaveOccurred())    // The reconcile itself shouldn't error, it should report status
-			Expect(result.Requeue).To(BeFalse()) // Should not requeue on terminal error
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.Requeue).To(BeFalse())
 			Expect(result.RequeueAfter).To(BeZero())
 
-			// Fetch the updated Beskar7Machine
+			// Verify Beskar7Machine status
 			Eventually(func(g Gomega) {
 				g.Expect(k8sClient.Get(ctx, key, b7machine)).To(Succeed())
-				// Check Condition
+				g.Expect(conditions.Has(b7machine, infrastructurev1alpha1.InfrastructureReadyCondition)).To(BeTrue())
 				cond := conditions.Get(b7machine, infrastructurev1alpha1.InfrastructureReadyCondition)
-				g.Expect(cond).NotTo(BeNil())
 				g.Expect(cond.Status).To(Equal(corev1.ConditionFalse))
 				g.Expect(cond.Reason).To(Equal(infrastructurev1alpha1.PhysicalHostErrorReason))
-				// Check Phase
+				g.Expect(cond.Message).To(ContainSubstring("Redfish connection failed repeatedly"))
 				g.Expect(b7machine.Status.Phase).NotTo(BeNil())
 				g.Expect(*b7machine.Status.Phase).To(Equal("Failed"))
-			}, time.Second*5, time.Millisecond*200).Should(Succeed(), "Beskar7Machine should be Failed")
+			}, time.Second*5, time.Millisecond*200).Should(Succeed())
 		})
 	})
 
 	Context("Reconcile Delete", func() {
-		It("should release the PhysicalHost when deleted", func() {
-			Skip("Skipping due to envtest patch/update reliability issues")
+		// TODO: This test is currently skipped due to timing issues with host state transitions.
+		// The test will be reimplemented in the future with proper state management and timing controls.
+		PIt("should release the PhysicalHost when deleted", func() {
 			// Create a PhysicalHost claimed by our machine
 			hostName := "to-be-released-host"
 			imageUrl := "http://example.com/release-test.iso"
@@ -566,6 +610,14 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 			}
 			Expect(k8sClient.Create(ctx, host)).To(Succeed())
 
+			// Wait for host to be created and status to be updated
+			hostKey := types.NamespacedName{Name: host.Name, Namespace: host.Namespace}
+			Eventually(func(g Gomega) {
+				getErr := k8sClient.Get(ctx, hostKey, host)
+				g.Expect(getErr).NotTo(HaveOccurred())
+				g.Expect(host.Status.State).To(Equal(infrastructurev1alpha1.StateProvisioned))
+			}, time.Second*5, time.Millisecond*200).Should(Succeed())
+
 			// Set ProviderID on Beskar7Machine to link it
 			providerID := providerID(host.Namespace, host.Name)
 			b7machine.Spec.ProviderID = &providerID
@@ -573,6 +625,11 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 
 			// Create the Beskar7Machine
 			Expect(k8sClient.Create(ctx, b7machine)).To(Succeed())
+
+			// Wait for Beskar7Machine to be created
+			Eventually(func() bool {
+				return k8sClient.Get(ctx, key, b7machine) == nil
+			}, time.Second*5, time.Millisecond*200).Should(BeTrue())
 
 			// Initialize the reconciler
 			reconciler := &Beskar7MachineReconciler{
@@ -591,14 +648,28 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result.Requeue).To(BeFalse()) // Should not requeue after successful delete reconcile
 
-			// Check the PhysicalHost is released
-			hostKey := types.NamespacedName{Name: host.Name, Namespace: host.Namespace}
+			// --- Simulate the PhysicalHost controller updating the status ---
 			Eventually(func(g Gomega) {
-				getErr := k8sClient.Get(ctx, hostKey, host)
+				latest := &infrastructurev1alpha1.PhysicalHost{}
+				getErr := k8sClient.Get(ctx, hostKey, latest)
+				g.Expect(getErr).NotTo(HaveOccurred(), "Failed to get host for status update")
+				latest.Status.State = infrastructurev1alpha1.StateProvisioned
+				latest.Status.Ready = true
+				g.Expect(k8sClient.Status().Update(ctx, latest)).To(Succeed(), "Failed to update host status")
+			}, time.Second*5, time.Millisecond*200).Should(Succeed(), "Failed to update PhysicalHost status")
+
+			// Check the PhysicalHost is released
+			Eventually(func(g Gomega) {
+				latest := &infrastructurev1alpha1.PhysicalHost{}
+				getErr := k8sClient.Get(ctx, hostKey, latest)
 				g.Expect(getErr).NotTo(HaveOccurred(), "Failed to get host for release check")
-				g.Expect(host.Spec.ConsumerRef).To(BeNil(), "ConsumerRef should be nil after release")
-				g.Expect(host.Spec.BootISOSource).To(BeNil(), "BootISOSource should be nil after release")
-			}, time.Second*15, time.Millisecond*250).Should(Succeed(), "PhysicalHost should be released") // Increased timeout slightly
+				g.Expect(latest.Spec.ConsumerRef).To(BeNil(), "ConsumerRef should be nil after release")
+				g.Expect(latest.Spec.BootISOSource).To(BeNil(), "BootISOSource should be nil after release")
+				g.Expect(latest.Status.State).To(Equal(infrastructurev1alpha1.StateProvisioned), "Host should remain in Provisioned state after release")
+			}, time.Second*15, time.Millisecond*250).Should(Succeed(), "PhysicalHost should be released and remain in Provisioned state")
+
+			// Delete the Beskar7Machine
+			Expect(k8sClient.Delete(ctx, b7machine)).To(Succeed())
 
 			// Check Beskar7Machine is eventually deleted (finalizer removed)
 			Eventually(func() bool {
