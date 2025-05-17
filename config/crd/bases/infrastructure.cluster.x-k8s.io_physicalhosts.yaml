@@ -113,6 +113,21 @@ spec:
                   - type
                   type: object
                 type: array
+              errorDetails:
+                properties:
+                  code:
+                    type: string
+                  lastAttemptTime:
+                    format: date-time
+                    type: string
+                  message:
+                    type: string
+                  retryCount:
+                    format: int32
+                    type: integer
+                  type:
+                    type: string
+                type: object
               errorMessage:
                 type: string
               hardwareDetails:
@@ -137,8 +152,32 @@ spec:
                     - State
                     type: object
                 type: object
+              lastStateTransitionReason:
+                type: string
+              lastStateTransitionTime:
+                format: date-time
+                type: string
               observedPowerState:
                 type: string
+              progress:
+                properties:
+                  currentStep:
+                    type: string
+                  currentStepNumber:
+                    format: int32
+                    type: integer
+                  lastUpdateTime:
+                    format: date-time
+                    type: string
+                  operation:
+                    type: string
+                  startTime:
+                    format: date-time
+                    type: string
+                  totalSteps:
+                    format: int32
+                    type: integer
+                type: object
               ready:
                 default: false
                 type: boolean

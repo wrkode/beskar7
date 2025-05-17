@@ -26,9 +26,9 @@ This document outlines the current status and future plans for the Beskar7 proje
 ## Architecture and Design Improvements
 
 ### State Management
-- [ ] Implement state machine pattern for clearer state transitions
-- [ ] Add more detailed state tracking in the PhysicalHost status
-- [ ] Implement retry mechanisms with exponential backoff for transient failures
+- [x] Implement state machine pattern for clearer state transitions
+- [x] Add more detailed state tracking in the PhysicalHost status
+- [x] Implement retry mechanisms with exponential backoff for transient failures
 
 ### Error Handling
 - [ ] Implement more granular error types and error wrapping

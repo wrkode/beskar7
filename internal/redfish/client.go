@@ -7,6 +7,12 @@ import (
 	"github.com/stmcginnis/gofish/redfish"
 )
 
+// Power state constants
+const (
+	OnPowerState  = "On"
+	OffPowerState = "Off"
+)
+
 // Client defines the interface for interacting with a Redfish API.
 type Client interface {
 	// GetSystemInfo retrieves basic system details.
