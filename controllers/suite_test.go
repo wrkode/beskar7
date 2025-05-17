@@ -67,10 +67,8 @@ var _ = BeforeSuite(func() {
 	testEnv = &envtest.Environment{
 		CRDDirectoryPaths: []string{
 			filepath.Join("..", "config", "crd", "bases"), // Local CRDs
-			// Absolute path to CAPI CRDs from go list command
-			"/Users/wrizzo/go/pkg/mod/sigs.k8s.io/cluster-api@v1.10.1/config/crd/bases",
+			filepath.Join("..", "config", "test-crds"),    // Downloaded test CRDs
 		},
-		// Remove CRDInstallOptions as we use CRDDirectoryPaths explicitly
 		ErrorIfCRDPathMissing: true,
 	}
 

@@ -259,9 +259,17 @@ The following key areas are planned or in progress:
 
 Contributions are welcome! Please refer to the contribution guidelines (to be added).
 
-## Some testing notes
+## Running Tests
 
+Before running the tests, you need to download the required CRDs:
+
+```bash
+# Download test CRDs
+./hack/download-test-crds.sh
+
+# Run the tests
+export KUBEBUILDER_ASSETS=$(go run sigs.k8s.io/controller-runtime/tools/setup-envtest@latest use 1.31.x -p path)
+go test ./controllers/... -v -ginkgo.v
 ```
-export KUBEBUILDER_ASSETS=$(/Users/wrizzo/go/bin/setup-envtest use 1.29.x -p path)
-go clean -testcache && go test ./controllers/... -v -ginkgo.v
-```
+
+The test setup is designed to be portable and work across different systems. All required CRDs are downloaded locally and referenced from the repository, ensuring consistent test behavior across different environments.
