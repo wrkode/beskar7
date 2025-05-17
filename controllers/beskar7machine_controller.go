@@ -199,8 +199,7 @@ func (r *Beskar7MachineReconciler) reconcileNormal(ctx context.Context, logger l
 	case infrastructurev1alpha1.StateError:
 		errMsg := fmt.Sprintf("PhysicalHost %q is in error state: %s", physicalHost.Name, physicalHost.Status.ErrorMessage)
 		logger.Error(nil, errMsg)
-		// Temporarily use a hardcoded string for testing build issue
-		conditions.MarkFalse(b7machine, infrastructurev1alpha1.InfrastructureReadyCondition, infrastructurev1alpha1.PhysicalHostErrorReason, clusterv1.ConditionSeverityError, "Associated host in error")
+		conditions.MarkFalse(b7machine, infrastructurev1alpha1.InfrastructureReadyCondition, infrastructurev1alpha1.PhysicalHostErrorReason, clusterv1.ConditionSeverityError, "%s", errMsg)
 		phase := "Failed"
 		b7machine.Status.Phase = &phase
 		return ctrl.Result{}, nil // No automatic requeue
