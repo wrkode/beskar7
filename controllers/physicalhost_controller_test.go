@@ -17,13 +17,13 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	infrastructurev1alpha1 "github.com/wrkode/beskar7/api/v1alpha1"
-	internalredfish "github.com/wrkode/beskar7/internal/redfish" // Import internal redfish
+	internalredfish "github.com/wrkode/beskar7/internal/redfish"
 	"github.com/wrkode/beskar7/internal/statemachine"
 )
 
 var _ = Describe("PhysicalHost Controller", func() {
 
-	const ( // Define constants for test resources
+	const (
 		PhNamespace = "default"
 		PhName      = "test-physicalhost"
 		SecretName  = "test-redfish-credentials"
@@ -34,8 +34,8 @@ var _ = Describe("PhysicalHost Controller", func() {
 	Context("When reconciling a PhysicalHost", func() {
 		var physicalHost *infrastructurev1alpha1.PhysicalHost
 		var credentialSecret *corev1.Secret
-		var mockRfClient *internalredfish.MockClient // Added mock client variable
-		var reconciler *PhysicalHostReconciler       // Added reconciler variable
+		var mockRfClient *internalredfish.MockClient
+		var reconciler *PhysicalHostReconciler
 
 		BeforeEach(func() {
 			// Create namespace if needed (usually default exists)
@@ -63,18 +63,17 @@ var _ = Describe("PhysicalHost Controller", func() {
 				},
 				Spec: infrastructurev1alpha1.PhysicalHostSpec{
 					RedfishConnection: infrastructurev1alpha1.RedfishConnectionInfo{
-						Address:              "redfish-mock.example.com", // Doesn't matter for mock
+						Address:              "redfish-mock.example.com",
 						CredentialsSecretRef: SecretName,
 					},
 				},
 				Status: infrastructurev1alpha1.PhysicalHostStatus{
-					State: infrastructurev1alpha1.StateNone, // Set initial state
+					State: infrastructurev1alpha1.StateNone,
 				},
 			}
 
 			// Create Mock Redfish Client
 			mockRfClient = internalredfish.NewMockClient()
-			// Set up mock client to return success for discovery
 			mockRfClient.SystemInfo = &internalredfish.SystemInfo{
 				Manufacturer: "TestManufacturer",
 				Model:        "TestModel",
@@ -82,17 +81,16 @@ var _ = Describe("PhysicalHost Controller", func() {
 				Status:       common.Status{State: common.EnabledState},
 			}
 			mockRfClient.PowerState = redfish.OffPowerState
+			mockRfClient.ShouldFail = make(map[string]error)
 
 			// Create the reconciler instance for the test
 			reconciler = &PhysicalHostReconciler{
 				Client: k8sClient,
 				Scheme: k8sClient.Scheme(),
-				// Define a factory that returns our mock client instance
 				RedfishClientFactory: func(ctx context.Context, address, username, password string, insecure bool) (internalredfish.Client, error) {
-					// You could add assertions here on address/username/password if needed
 					return mockRfClient, nil
 				},
-				StateMachine: statemachine.NewPhysicalHostStateMachine(), // Initialize the state machine
+				StateMachine: statemachine.NewPhysicalHostStateMachine(),
 			}
 		})
 
@@ -100,7 +98,6 @@ var _ = Describe("PhysicalHost Controller", func() {
 			// Clean up resources
 			Expect(k8sClient.Delete(ctx, physicalHost)).To(Succeed())
 			Expect(k8sClient.Delete(ctx, credentialSecret)).To(Succeed())
-			// Optionally delete namespace if created for test
 		})
 
 		It("Should successfully reconcile and become Available", func() {
@@ -138,8 +135,8 @@ var _ = Describe("PhysicalHost Controller", func() {
 			}, Timeout, Interval).Should(Succeed(), "PhysicalHost should become Available")
 
 			// Verify mock client methods were called
-			Expect(mockRfClient.GetSystemInfoCalled).To(BeTrue())
-			Expect(mockRfClient.GetPowerStateCalled).To(BeTrue())
+			Expect(mockRfClient.GetSystemInfoCalled).To(BeTrue(), "GetSystemInfo should have been called")
+			Expect(mockRfClient.GetPowerStateCalled).To(BeTrue(), "GetPowerState should have been called")
 		})
 
 		// TODO: Fix deprovisioning test - EjectVirtualMedia is not being called during deprovisioning
@@ -155,16 +152,15 @@ var _ = Describe("PhysicalHost Controller", func() {
 
 			phToCreate := physicalHost.DeepCopy()
 			phToCreate.Name = deletePhName
-			phToCreate.Spec.RedfishConnection.CredentialsSecretRef = deleteSecretName // Point to unique secret
+			phToCreate.Spec.RedfishConnection.CredentialsSecretRef = deleteSecretName
 			phToCreate.Finalizers = []string{PhysicalHostFinalizer}
-			// Simulate it was provisioned and then released (ConsumerRef is nil)
-			phToCreate.Status.State = infrastructurev1alpha1.StateProvisioned // Set to a state that allows deprovisioning
-			phToCreate.Spec.ConsumerRef = nil                                 // Ensure it's not considered in use
+			phToCreate.Status.State = infrastructurev1alpha1.StateProvisioned
+			phToCreate.Spec.ConsumerRef = nil
 
 			// Create unique secret for this test
 			deleteSecret := credentialSecret.DeepCopy()
 			deleteSecret.Name = deleteSecretName
-			deleteSecret.ResourceVersion = "" // Clear resource version for create
+			deleteSecret.ResourceVersion = ""
 			Expect(k8sClient.Create(ctx, deleteSecret)).To(Succeed())
 
 			Expect(k8sClient.Create(ctx, phToCreate)).To(Succeed())
@@ -182,23 +178,18 @@ var _ = Describe("PhysicalHost Controller", func() {
 			Expect(k8sClient.Delete(ctx, phToCreate)).To(Succeed())
 
 			By("Reconciling to trigger deprovisioning, Redfish actions, and finalizer removal setup")
-			// A single reconcile should be enough for reconcileDelete to do its work.
-			// The deferred patch in the main Reconcile loop will handle the actual finalizer removal from the object.
 			_, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: phLookupKey})
 			Expect(err).NotTo(HaveOccurred(), "Reconcile for deprovisioning failed")
 
-			// Verify mock client methods were called for deprovisioning IMMEDIATELY after the reconcile call
-			// as these actions happen within the reconcileDelete function.
+			// Verify mock client methods were called for deprovisioning
 			Expect(mockRfClient.EjectMediaCalled).To(BeTrue(), "EjectVirtualMedia should have been called")
 			Expect(mockRfClient.SetPowerStateCalled).To(BeTrue(), "SetPowerState should have been called")
 			Expect(mockRfClient.PowerState).To(Equal(redfish.OffPowerState), "SetPowerState should have been called with OffPowerState")
 
-			// Check if state moved to deprovisioning. This might be racy if the object is deleted too fast.
-			// It's more important to check that the Redfish calls were made and the object is gone.
-			// We can attempt to get it once, but if it's already gone, that's also a success for finalizer removal.
+			// Check if state moved to deprovisioning
 			deletedPh := &infrastructurev1alpha1.PhysicalHost{}
 			err = k8sClient.Get(ctx, phLookupKey, deletedPh)
-			if err == nil { // If we can still get it, check its status
+			if err == nil {
 				Expect(deletedPh.Status.State).To(Equal(infrastructurev1alpha1.StateDeprovisioning))
 				cond := conditions.Get(deletedPh, infrastructurev1alpha1.HostProvisionedCondition)
 				Expect(cond).NotTo(BeNil())
@@ -217,15 +208,5 @@ var _ = Describe("PhysicalHost Controller", func() {
 			// Cleanup the unique secret for this test
 			Expect(k8sClient.Delete(ctx, deleteSecret)).To(Succeed())
 		})
-
-		// TODO: Add more tests:
-		// - Test deletion/finalizer removal
-		// - Test Redfish connection failure (using mock)
-		// - Test secret not found / missing data
-		// - Test provisioning flow (when claimed by a machine)
-		//   - Check SetBootSourceISO called
-		//   - Check SetPowerState called
-		//   - Check status becomes Provisioned
-
 	})
 })

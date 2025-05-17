@@ -365,6 +365,7 @@ func (r *PhysicalHostReconciler) reconcileNormal(ctx context.Context, physicalHo
 			return ctrl.Result{}, err
 		}
 		r.updateStateTransition(physicalHost, infrastructurev1alpha1.StateAvailable, "Host discovery completed successfully")
+		conditions.MarkTrue(physicalHost, infrastructurev1alpha1.HostAvailableCondition)
 		return ctrl.Result{RequeueAfter: 5 * time.Minute}, nil
 
 	case statemachine.PhysicalHostStateAvailable:
