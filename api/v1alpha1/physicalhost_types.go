@@ -98,6 +98,14 @@ type PhysicalHostStatus struct {
 	// +optional
 	State PhysicalHostProvisioningState `json:"state,omitempty"`
 
+	// LastStateTransitionTime is the timestamp of the last state transition.
+	// +optional
+	LastStateTransitionTime *metav1.Time `json:"lastStateTransitionTime,omitempty"`
+
+	// LastStateTransitionReason provides the reason for the last state transition.
+	// +optional
+	LastStateTransitionReason string `json:"lastStateTransitionReason,omitempty"`
+
 	// ObservedPowerState reflects the power state last observed from the Redfish endpoint.
 	// +optional
 	ObservedPowerState redfish.PowerState `json:"observedPowerState,omitempty"`
@@ -106,6 +114,14 @@ type PhysicalHostStatus struct {
 	// +optional
 	ErrorMessage string `json:"errorMessage,omitempty"`
 
+	// ErrorDetails provides structured error information when in error state.
+	// +optional
+	ErrorDetails *ErrorDetails `json:"errorDetails,omitempty"`
+
+	// Progress provides information about the progress of long-running operations.
+	// +optional
+	Progress *OperationProgress `json:"progress,omitempty"`
+
 	// HardwareDetails contains discovered information about the host's hardware.
 	// +optional
 	HardwareDetails *HardwareDetails `json:"hardwareDetails,omitempty"`
@@ -113,6 +129,56 @@ type PhysicalHostStatus struct {
 	// Conditions represent the latest available observations of an object's state.
 	// +optional
 	Conditions clusterv1.Conditions `json:"conditions,omitempty"` // Use clusterv1.Conditions type
+}
+
+// ErrorDetails provides structured information about an error state
+type ErrorDetails struct {
+	// Type categorizes the error (e.g., "ConnectionError", "ProvisioningError")
+	// +optional
+	Type string `json:"type,omitempty"`
+
+	// Code is a machine-readable error code
+	// +optional
+	Code string `json:"code,omitempty"`
+
+	// Message is a human-readable error message
+	// +optional
+	Message string `json:"message,omitempty"`
+
+	// LastAttemptTime is when the error was last encountered
+	// +optional
+	LastAttemptTime *metav1.Time `json:"lastAttemptTime,omitempty"`
+
+	// RetryCount is the number of times the operation has been retried
+	// +optional
+	RetryCount int32 `json:"retryCount,omitempty"`
+}
+
+// OperationProgress provides information about the progress of long-running operations
+type OperationProgress struct {
+	// Operation is the type of operation in progress (e.g., "Provisioning", "Deprovisioning")
+	// +optional
+	Operation string `json:"operation,omitempty"`
+
+	// CurrentStep is the current step in the operation
+	// +optional
+	CurrentStep string `json:"currentStep,omitempty"`
+
+	// TotalSteps is the total number of steps in the operation
+	// +optional
+	TotalSteps int32 `json:"totalSteps,omitempty"`
+
+	// CurrentStepNumber is the number of the current step
+	// +optional
+	CurrentStepNumber int32 `json:"currentStepNumber,omitempty"`
+
+	// StartTime is when the operation started
+	// +optional
+	StartTime *metav1.Time `json:"startTime,omitempty"`
+
+	// LastUpdateTime is when the progress was last updated
+	// +optional
+	LastUpdateTime *metav1.Time `json:"lastUpdateTime,omitempty"`
 }
 
 // HardwareDetails stores hardware information discovered via Redfish.

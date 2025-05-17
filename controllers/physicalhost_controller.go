@@ -33,7 +33,7 @@ import (
 	"github.com/wrkode/beskar7/internal/redfish"
 	internalredfish "github.com/wrkode/beskar7/internal/redfish"
 	"github.com/wrkode/beskar7/internal/statemachine"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/cluster-api/util/conditions"
 	"sigs.k8s.io/cluster-api/util/patch"
 )
@@ -222,6 +222,64 @@ func (r *PhysicalHostReconciler) recoverFromError(ctx context.Context, physicalH
 	return nil
 }
 
+// updateStateTransition updates the state transition information in the PhysicalHost status
+func (r *PhysicalHostReconciler) updateStateTransition(physicalHost *infrastructurev1alpha1.PhysicalHost, newState infrastructurev1alpha1.PhysicalHostProvisioningState, reason string) {
+	now := metav1.Now()
+	physicalHost.Status.LastStateTransitionTime = &now
+	physicalHost.Status.LastStateTransitionReason = reason
+	physicalHost.Status.State = newState
+
+	// Clear error details if transitioning out of error state
+	if physicalHost.Status.State != infrastructurev1alpha1.StateError {
+		physicalHost.Status.ErrorDetails = nil
+		physicalHost.Status.ErrorMessage = ""
+	}
+
+	// Clear progress if transitioning to a non-progress state
+	if newState != infrastructurev1alpha1.StateProvisioning &&
+		newState != infrastructurev1alpha1.StateDeprovisioning {
+		physicalHost.Status.Progress = nil
+	}
+}
+
+// updateErrorDetails updates the error details in the PhysicalHost status
+func (r *PhysicalHostReconciler) updateErrorDetails(physicalHost *infrastructurev1alpha1.PhysicalHost, errType, code, message string) {
+	now := metav1.Now()
+	if physicalHost.Status.ErrorDetails == nil {
+		physicalHost.Status.ErrorDetails = &infrastructurev1alpha1.ErrorDetails{
+			Type:            errType,
+			Code:            code,
+			Message:         message,
+			LastAttemptTime: &now,
+			RetryCount:      1,
+		}
+	} else {
+		physicalHost.Status.ErrorDetails.LastAttemptTime = &now
+		physicalHost.Status.ErrorDetails.RetryCount++
+		physicalHost.Status.ErrorDetails.Message = message
+	}
+	physicalHost.Status.ErrorMessage = message
+}
+
+// updateOperationProgress updates the operation progress in the PhysicalHost status
+func (r *PhysicalHostReconciler) updateOperationProgress(physicalHost *infrastructurev1alpha1.PhysicalHost, operation, currentStep string, currentStepNumber, totalSteps int32) {
+	now := metav1.Now()
+	if physicalHost.Status.Progress == nil {
+		physicalHost.Status.Progress = &infrastructurev1alpha1.OperationProgress{
+			Operation:         operation,
+			CurrentStep:       currentStep,
+			CurrentStepNumber: currentStepNumber,
+			TotalSteps:        totalSteps,
+			StartTime:         &now,
+			LastUpdateTime:    &now,
+		}
+	} else {
+		physicalHost.Status.Progress.CurrentStep = currentStep
+		physicalHost.Status.Progress.CurrentStepNumber = currentStepNumber
+		physicalHost.Status.Progress.LastUpdateTime = &now
+	}
+}
+
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
 func (r *PhysicalHostReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -279,83 +337,93 @@ func (r *PhysicalHostReconciler) reconcileNormal(ctx context.Context, physicalHo
 		// Start discovery process
 		if err := r.StateMachine.Transition(ctx, statemachine.ConvertEvent(statemachine.PhysicalHostEventStartDiscovery)); err != nil {
 			log.Error(err, "failed to start discovery")
+			r.updateErrorDetails(physicalHost, "StateTransitionError", "DISCOVERY_START_FAILED", err.Error())
 			return ctrl.Result{}, err
 		}
-		physicalHost.Status.State = mapStateMachineStateToPhysicalHostState(statemachine.ConvertState(statemachine.PhysicalHostStateDiscovering))
+		r.updateStateTransition(physicalHost, infrastructurev1alpha1.StateEnrolling, "Starting host discovery")
+		r.updateOperationProgress(physicalHost, "Discovery", "Connecting to Redfish", 1, 3)
 		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 
 	case statemachine.PhysicalHostStateDiscovering:
-		// Attempt to discover the host
+		// Try to discover the host
 		redfishClient, err := r.getRedfishClient(ctx, physicalHost)
 		if err != nil {
 			log.Error(err, "failed to get Redfish client")
+			r.updateErrorDetails(physicalHost, "RedfishConnectionError", "CLIENT_CREATION_FAILED", err.Error())
 			return ctrl.Result{}, err
 		}
 
 		if err := r.discoverHost(ctx, physicalHost, redfishClient); err != nil {
-			if err := r.StateMachine.Transition(ctx, statemachine.ConvertEvent(statemachine.PhysicalHostEventDiscoveryFailed)); err != nil {
-				log.Error(err, "failed to transition to error state")
-				return ctrl.Result{}, err
-			}
-			physicalHost.Status.State = mapStateMachineStateToPhysicalHostState(statemachine.ConvertState(statemachine.PhysicalHostStateError))
-			conditions.MarkFalse(physicalHost, infrastructurev1alpha1.HostAvailableCondition, "DiscoveryFailed", clusterv1.ConditionSeverityError, "Failed to discover host: %v", err)
-			return ctrl.Result{RequeueAfter: 5 * time.Minute}, nil
+			log.Error(err, "failed to discover host")
+			r.updateErrorDetails(physicalHost, "DiscoveryError", "HOST_DISCOVERY_FAILED", err.Error())
+			return ctrl.Result{}, err
 		}
 
 		if err := r.StateMachine.Transition(ctx, statemachine.ConvertEvent(statemachine.PhysicalHostEventDiscoverySucceeded)); err != nil {
 			log.Error(err, "failed to transition to available state")
+			r.updateErrorDetails(physicalHost, "StateTransitionError", "DISCOVERY_SUCCESS_TRANSITION_FAILED", err.Error())
 			return ctrl.Result{}, err
 		}
-		physicalHost.Status.State = mapStateMachineStateToPhysicalHostState(statemachine.ConvertState(statemachine.PhysicalHostStateAvailable))
-		conditions.MarkTrue(physicalHost, infrastructurev1alpha1.HostAvailableCondition)
-		return ctrl.Result{}, nil
+		r.updateStateTransition(physicalHost, infrastructurev1alpha1.StateAvailable, "Host discovery completed successfully")
+		return ctrl.Result{RequeueAfter: 5 * time.Minute}, nil
 
 	case statemachine.PhysicalHostStateAvailable:
-		// Wait for claim
+		// Check if host is claimed
 		if physicalHost.Spec.ConsumerRef != nil {
 			if err := r.StateMachine.Transition(ctx, statemachine.ConvertEvent(statemachine.PhysicalHostEventClaim)); err != nil {
 				log.Error(err, "failed to transition to claimed state")
+				r.updateErrorDetails(physicalHost, "StateTransitionError", "CLAIM_TRANSITION_FAILED", err.Error())
 				return ctrl.Result{}, err
 			}
-			physicalHost.Status.State = mapStateMachineStateToPhysicalHostState(statemachine.ConvertState(statemachine.PhysicalHostStateClaimed))
-			return ctrl.Result{}, nil
+			r.updateStateTransition(physicalHost, infrastructurev1alpha1.StateClaimed, "Host claimed by consumer")
+			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 		}
-		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+		return ctrl.Result{RequeueAfter: 5 * time.Minute}, nil
 
 	case statemachine.PhysicalHostStateClaimed:
-		// Start provisioning
-		if err := r.StateMachine.Transition(ctx, statemachine.ConvertEvent(statemachine.PhysicalHostEventStartProvisioning)); err != nil {
-			log.Error(err, "failed to transition to provisioning state")
-			return ctrl.Result{}, err
+		// Check if we need to start provisioning
+		if physicalHost.Spec.BootISOSource != nil && *physicalHost.Spec.BootISOSource != "" {
+			if err := r.StateMachine.Transition(ctx, statemachine.ConvertEvent(statemachine.PhysicalHostEventStartProvisioning)); err != nil {
+				log.Error(err, "failed to transition to provisioning state")
+				r.updateErrorDetails(physicalHost, "StateTransitionError", "PROVISIONING_START_FAILED", err.Error())
+				return ctrl.Result{}, err
+			}
+			r.updateStateTransition(physicalHost, infrastructurev1alpha1.StateProvisioning, "Starting host provisioning")
+			r.updateOperationProgress(physicalHost, "Provisioning", "Setting boot source", 1, 4)
+			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 		}
-		physicalHost.Status.State = mapStateMachineStateToPhysicalHostState(statemachine.ConvertState(statemachine.PhysicalHostStateProvisioning))
-		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+		return ctrl.Result{RequeueAfter: 5 * time.Minute}, nil
 
 	case statemachine.PhysicalHostStateProvisioning:
 		// Check provisioning status
 		redfishClient, err := r.getRedfishClient(ctx, physicalHost)
 		if err != nil {
 			log.Error(err, "failed to get Redfish client")
+			r.updateErrorDetails(physicalHost, "RedfishConnectionError", "CLIENT_CREATION_FAILED", err.Error())
 			return ctrl.Result{}, err
 		}
 
+		// Update progress
+		r.updateOperationProgress(physicalHost, "Provisioning", "Checking power state", 2, 4)
+
 		if err := r.checkProvisioningStatus(ctx, physicalHost, redfishClient); err != nil {
-			if err := r.StateMachine.Transition(ctx, statemachine.ConvertEvent(statemachine.PhysicalHostEventProvisioningFailed)); err != nil {
-				log.Error(err, "failed to transition to error state")
-				return ctrl.Result{}, err
-			}
-			physicalHost.Status.State = mapStateMachineStateToPhysicalHostState(statemachine.ConvertState(statemachine.PhysicalHostStateError))
-			conditions.MarkFalse(physicalHost, infrastructurev1alpha1.HostProvisionedCondition, "ProvisioningFailed", clusterv1.ConditionSeverityError, "Failed to provision host: %v", err)
-			return ctrl.Result{RequeueAfter: 5 * time.Minute}, nil
+			log.Error(err, "failed to check provisioning status")
+			r.updateErrorDetails(physicalHost, "ProvisioningError", "PROVISIONING_CHECK_FAILED", err.Error())
+			return ctrl.Result{}, err
 		}
+
+		// Update progress
+		r.updateOperationProgress(physicalHost, "Provisioning", "Setting boot source", 3, 4)
 
 		if err := r.StateMachine.Transition(ctx, statemachine.ConvertEvent(statemachine.PhysicalHostEventProvisioningSucceeded)); err != nil {
 			log.Error(err, "failed to transition to provisioned state")
+			r.updateErrorDetails(physicalHost, "StateTransitionError", "PROVISIONING_SUCCESS_TRANSITION_FAILED", err.Error())
 			return ctrl.Result{}, err
 		}
-		physicalHost.Status.State = mapStateMachineStateToPhysicalHostState(statemachine.ConvertState(statemachine.PhysicalHostStateProvisioned))
+
+		r.updateStateTransition(physicalHost, infrastructurev1alpha1.StateProvisioned, "Host provisioning completed successfully")
 		conditions.MarkTrue(physicalHost, infrastructurev1alpha1.HostProvisionedCondition)
-		return ctrl.Result{}, nil
+		return ctrl.Result{RequeueAfter: 5 * time.Minute}, nil
 
 	case statemachine.PhysicalHostStateProvisioned:
 		// Host is provisioned and ready
@@ -365,12 +433,15 @@ func (r *PhysicalHostReconciler) reconcileNormal(ctx context.Context, physicalHo
 		// Attempt to recover from error state
 		if err := r.recoverFromError(ctx, physicalHost); err != nil {
 			log.Error(err, "failed to recover from error state")
+			r.updateErrorDetails(physicalHost, "RecoveryError", "RECOVERY_FAILED", err.Error())
 			return ctrl.Result{RequeueAfter: 5 * time.Minute}, nil
 		}
+		r.updateStateTransition(physicalHost, infrastructurev1alpha1.StateAvailable, "Recovered from error state")
 		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 
 	default:
 		log.Error(nil, "unknown state", "state", currentState)
+		r.updateErrorDetails(physicalHost, "StateError", "UNKNOWN_STATE", "Unknown state encountered")
 		return ctrl.Result{}, errors.New("unknown state")
 	}
 }
@@ -394,9 +465,11 @@ func (r *PhysicalHostReconciler) reconcileDelete(ctx context.Context, physicalHo
 		// Start deprovisioning
 		if err := r.StateMachine.Transition(ctx, statemachine.ConvertEvent(statemachine.PhysicalHostEventStartDeprovisioning)); err != nil {
 			log.Error(err, "failed to transition to deprovisioning state")
+			r.updateErrorDetails(physicalHost, "StateTransitionError", "DEPROVISIONING_START_FAILED", err.Error())
 			return ctrl.Result{}, err
 		}
-		physicalHost.Status.State = mapStateMachineStateToPhysicalHostState(statemachine.ConvertState(statemachine.PhysicalHostStateDeprovisioning))
+		r.updateStateTransition(physicalHost, infrastructurev1alpha1.StateDeprovisioning, "Starting host deprovisioning")
+		r.updateOperationProgress(physicalHost, "Deprovisioning", "Ejecting virtual media", 1, 3)
 		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 
 	case statemachine.PhysicalHostStateDeprovisioning:
@@ -404,52 +477,39 @@ func (r *PhysicalHostReconciler) reconcileDelete(ctx context.Context, physicalHo
 		redfishClient, err := r.getRedfishClient(ctx, physicalHost)
 		if err != nil {
 			log.Error(err, "failed to get Redfish client")
+			r.updateErrorDetails(physicalHost, "RedfishConnectionError", "CLIENT_CREATION_FAILED", err.Error())
 			return ctrl.Result{}, err
 		}
 
+		// Update progress
+		r.updateOperationProgress(physicalHost, "Deprovisioning", "Powering off host", 2, 3)
+
 		if err := r.deprovisionHost(ctx, physicalHost, redfishClient); err != nil {
-			if err := r.StateMachine.Transition(ctx, statemachine.ConvertEvent(statemachine.PhysicalHostEventError)); err != nil {
-				log.Error(err, "failed to transition to error state")
-				return ctrl.Result{}, err
-			}
-			physicalHost.Status.State = mapStateMachineStateToPhysicalHostState(statemachine.ConvertState(statemachine.PhysicalHostStateError))
-			conditions.MarkFalse(physicalHost, infrastructurev1alpha1.HostProvisionedCondition, "DeprovisioningFailed", clusterv1.ConditionSeverityError, "Failed to deprovision host: %v", err)
+			log.Error(err, "failed to deprovision host")
+			r.updateErrorDetails(physicalHost, "DeprovisioningError", "DEPROVISIONING_FAILED", err.Error())
 			return ctrl.Result{RequeueAfter: 5 * time.Minute}, nil
 		}
 
+		// Update progress
+		r.updateOperationProgress(physicalHost, "Deprovisioning", "Cleaning up", 3, 3)
+
 		if err := r.StateMachine.Transition(ctx, statemachine.ConvertEvent(statemachine.PhysicalHostEventDeprovisioningCompleted)); err != nil {
 			log.Error(err, "failed to transition to available state")
+			r.updateErrorDetails(physicalHost, "StateTransitionError", "DEPROVISIONING_COMPLETION_FAILED", err.Error())
 			return ctrl.Result{}, err
 		}
-		physicalHost.Status.State = mapStateMachineStateToPhysicalHostState(statemachine.ConvertState(statemachine.PhysicalHostStateAvailable))
+
+		r.updateStateTransition(physicalHost, infrastructurev1alpha1.StateAvailable, "Host deprovisioning completed successfully")
 		conditions.MarkTrue(physicalHost, infrastructurev1alpha1.HostProvisionedCondition)
-		return ctrl.Result{}, nil
 
-	case statemachine.PhysicalHostStateAvailable:
-		// Release the host
-		if err := r.StateMachine.Transition(ctx, statemachine.ConvertEvent(statemachine.PhysicalHostEventRelease)); err != nil {
-			log.Error(err, "failed to transition to initial state")
-			return ctrl.Result{}, err
-		}
-		physicalHost.Status.State = mapStateMachineStateToPhysicalHostState(statemachine.ConvertState(statemachine.PhysicalHostStateInitial))
-		return ctrl.Result{}, nil
-
-	case statemachine.PhysicalHostStateInitial:
 		// Remove finalizer
 		controllerutil.RemoveFinalizer(physicalHost, PhysicalHostFinalizer)
 		return ctrl.Result{}, nil
 
-	case statemachine.PhysicalHostStateError:
-		// Attempt to recover from error state
-		if err := r.recoverFromError(ctx, physicalHost); err != nil {
-			log.Error(err, "failed to recover from error state")
-			return ctrl.Result{RequeueAfter: 5 * time.Minute}, nil
-		}
-		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
-
 	default:
-		log.Error(nil, "unknown state", "state", currentState)
-		return ctrl.Result{}, errors.New("unknown state")
+		// If we're not in a state that needs deprovisioning, just remove the finalizer
+		controllerutil.RemoveFinalizer(physicalHost, PhysicalHostFinalizer)
+		return ctrl.Result{}, nil
 	}
 }
 
