@@ -64,6 +64,28 @@ This document outlines the current status and future plans for the Beskar7 proje
 - [x] Move hardcoded values to configurable parameters
 - [x] Add support for environment-specific configurations
 - [x] Implement feature flags for experimental features
+- [ ] Enhance feature flags system
+  - [ ] Add comprehensive test coverage for feature flags
+    - [ ] Unit tests for feature flag registration and state management
+    - [ ] Integration tests for feature flag configuration
+    - [ ] Test coverage for environment variable loading
+    - [ ] Test coverage for ConfigMap configuration
+  - [ ] Implement feature flag improvements
+    - [ ] Add web interface for managing feature flags
+    - [ ] Implement feature flag analytics and usage tracking
+    - [ ] Add support for feature flag targeting (namespace/cluster level)
+    - [ ] Implement feature flag versioning
+    - [ ] Add support for feature flag dependencies
+  - [ ] Add more experimental features
+    - [ ] EnableCustomBootSource configuration
+    - [ ] EnableVendorSpecificFeatures for BMC-specific optimizations
+    - [ ] EnableAdvancedRecovery for enhanced error handling
+    - [ ] EnableMetricsExport for detailed monitoring
+  - [ ] Refine current implementation
+    - [ ] Add feature flag validation
+    - [ ] Implement feature flag deprecation mechanism
+    - [ ] Add feature flag documentation generation
+    - [ ] Improve feature flag logging and monitoring
 
 ## Testing Improvements
 
