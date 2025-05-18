@@ -73,9 +73,12 @@ func main() {
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
-	// Load configuration from environment variables
-	cfg := config.LoadFromEnv()
-	setupLog.Info("Loaded configuration", "config", cfg)
+	// Load configuration from environment variables and environment-specific files
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		setupLog.Error(err, "unable to load configuration")
+		os.Exit(1)
+	}
 
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme:                 scheme,

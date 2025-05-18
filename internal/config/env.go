@@ -7,9 +7,7 @@ import (
 )
 
 // LoadFromEnv loads configuration from environment variables
-func LoadFromEnv() *Config {
-	config := DefaultConfig()
-
+func LoadFromEnv(config *Config) {
 	// Redfish configuration
 	if scheme := os.Getenv("BESKAR7_REDFISH_SCHEME"); scheme != "" {
 		config.Redfish.DefaultScheme = scheme
@@ -52,12 +50,12 @@ func LoadFromEnv() *Config {
 		}
 	}
 	if multiplier := os.Getenv("BESKAR7_RETRY_MULTIPLIER"); multiplier != "" {
-		if value, err := strconv.ParseFloat(multiplier, 64); err == nil {
+		if value, err := parseFloat(multiplier); err == nil {
 			config.Retry.Multiplier = value
 		}
 	}
 	if maxAttempts := os.Getenv("BESKAR7_RETRY_MAX_ATTEMPTS"); maxAttempts != "" {
-		if value, err := strconv.Atoi(maxAttempts); err == nil {
+		if value, err := parseInt(maxAttempts); err == nil {
 			config.Retry.MaxAttempts = value
 		}
 	}
@@ -77,6 +75,14 @@ func LoadFromEnv() *Config {
 	if overrideTarget := os.Getenv("BESKAR7_BOOT_DEFAULT_OVERRIDE_TARGET"); overrideTarget != "" {
 		config.Boot.DefaultBootSourceOverrideTarget = overrideTarget
 	}
+}
 
-	return config
+// parseFloat parses a string into a float64
+func parseFloat(s string) (float64, error) {
+	return strconv.ParseFloat(s, 64)
+}
+
+// parseInt parses a string into an int
+func parseInt(s string) (int, error) {
+	return strconv.Atoi(s)
 }

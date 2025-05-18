@@ -1,84 +1,80 @@
-# Beskar7 Configuration
+# Configuration
 
-This document describes the configuration options available in Beskar7.
+Beskar7 supports configuration via environment variables and environment-specific `.env` files.
 
 ## Environment Variables
 
-Beskar7 can be configured using environment variables. All configuration variables are prefixed with `BESKAR7_`.
+All configuration keys are prefixed with `BESKAR7_`. For example:
 
-### Redfish Configuration
+- `BESKAR7_REDFISH_SCHEME` – Default URL scheme for Redfish endpoints
+- `BESKAR7_REDFISH_PORT` – Default port for Redfish endpoints
+- `BESKAR7_REDFISH_TIMEOUT` – Default timeout for Redfish operations
+- `BESKAR7_CONTROLLER_REQUEUE_INTERVAL` – Default interval for requeuing reconciliation
+- `BESKAR7_CONTROLLER_REQUEUE_AFTER_ERROR` – Interval for requeuing after an error
+- `BESKAR7_CONTROLLER_REQUEUE_AFTER_NO_HOST` – Interval for requeuing when no host is found
+- `BESKAR7_RETRY_INITIAL_INTERVAL` – Initial retry interval
+- `BESKAR7_RETRY_MAX_INTERVAL` – Maximum retry interval
+- `BESKAR7_RETRY_MULTIPLIER` – Factor to multiply the interval by for each retry
+- `BESKAR7_RETRY_MAX_ATTEMPTS` – Maximum number of retry attempts
+- `BESKAR7_RETRY_MAX_ELAPSED_TIME` – Maximum total time to retry
+- `BESKAR7_BOOT_DEFAULT_EFI_PATH` – Default path to the EFI bootloader
+- `BESKAR7_BOOT_DEFAULT_OVERRIDE_ENABLED` – Default boot source override setting
+- `BESKAR7_BOOT_DEFAULT_OVERRIDE_TARGET` – Default boot source override target
 
-| Variable | Description | Default | Example |
-|----------|-------------|---------|---------|
-| `BESKAR7_REDFISH_SCHEME` | Default URL scheme for Redfish endpoints | `https` | `https` |
-| `BESKAR7_REDFISH_PORT` | Default port for Redfish endpoints | `443` | `443` |
-| `BESKAR7_REDFISH_TIMEOUT` | Default timeout for Redfish operations | `30s` | `1m` |
+## Environment-Specific Configuration
 
-### Controller Configuration
+Beskar7 supports environment-specific configuration via `.env` files and environment variables.
 
-| Variable | Description | Default | Example |
-|----------|-------------|---------|---------|
-| `BESKAR7_CONTROLLER_REQUEUE_INTERVAL` | Default interval for requeuing reconciliation | `15s` | `30s` |
-| `BESKAR7_CONTROLLER_REQUEUE_AFTER_ERROR` | Interval for requeuing after an error | `5m` | `10m` |
-| `BESKAR7_CONTROLLER_REQUEUE_AFTER_NO_HOST` | Interval for requeuing when no host is found | `1m` | `2m` |
+### How it works
 
-### Retry Configuration
+- Set the environment with `BESKAR7_ENVIRONMENT` (e.g., `development`, `staging`, `production`).
+- Place a `.env` file in `config/environments/<environment>/.env`.
+- You can override any config key in the `.env` file (see example below).
+- Environment variables with the prefix `BESKAR7_<ENV>_` (e.g., `BESKAR7_DEVELOPMENT_REDFISH_PORT`) will also override config.
 
-| Variable | Description | Default | Example |
-|----------|-------------|---------|---------|
-| `BESKAR7_RETRY_INITIAL_INTERVAL` | Initial retry interval | `1s` | `2s` |
-| `BESKAR7_RETRY_MAX_INTERVAL` | Maximum retry interval | `5m` | `10m` |
-| `BESKAR7_RETRY_MULTIPLIER` | Factor to multiply the interval by for each retry | `2.0` | `1.5` |
-| `BESKAR7_RETRY_MAX_ATTEMPTS` | Maximum number of retry attempts | `5` | `10` |
-| `BESKAR7_RETRY_MAX_ELAPSED_TIME` | Maximum total time to retry | `15m` | `30m` |
+### Example
 
-### Boot Configuration
+```sh
+export BESKAR7_ENVIRONMENT=staging
+export BESKAR7_STAGING_REDFISH_PORT=8443
+```
 
-| Variable | Description | Default | Example |
-|----------|-------------|---------|---------|
-| `BESKAR7_BOOT_DEFAULT_EFI_PATH` | Default path to the EFI bootloader | `\EFI\BOOT\BOOTX64.EFI` | `/EFI/BOOT/BOOTX64.EFI` |
-| `BESKAR7_BOOT_DEFAULT_OVERRIDE_ENABLED` | Default boot source override setting | `Once` | `Continuous` |
-| `BESKAR7_BOOT_DEFAULT_OVERRIDE_TARGET` | Default boot source override target | `UefiTarget` | `Pxe` |
+The controller will load:
+- Defaults
+- Values from `config/environments/staging/.env`
+- Any `BESKAR7_STAGING_*` environment variables
+
+### Precedence
+
+1. `BESKAR7_<ENV>_<KEY>` environment variables
+2. `.env` file in `config/environments/<environment>/`
+3. Top-level `BESKAR7_*` environment variables
+4. Built-in defaults
 
 ## Usage
 
-### Setting Environment Variables
+In your code, load the configuration using:
 
-You can set these environment variables in your deployment configuration:
+```go
+import "github.com/wrkode/beskar7/internal/config"
 
-```yaml
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: beskar7-controller-manager
-spec:
-  template:
-    spec:
-      containers:
-      - name: manager
-        env:
-        - name: BESKAR7_REDFISH_TIMEOUT
-          value: "1m"
-        - name: BESKAR7_CONTROLLER_REQUEUE_INTERVAL
-          value: "30s"
+cfg, err := config.LoadConfig()
+if err != nil {
+    // Handle error
+}
 ```
 
-### Duration Format
+## Best Practices
 
-Time-based configuration values (timeouts, intervals) should be specified using Go's duration format:
-- `s` for seconds (e.g., `30s`)
-- `m` for minutes (e.g., `5m`)
-- `h` for hours (e.g., `1h`)
+- Use environment variables for dynamic configuration.
+- Use `.env` files for static, environment-specific overrides.
+- Always validate configuration values before use.
 
-### Best Practices
+## Validation Rules
 
-1. **Timeouts**: Set appropriate timeouts based on your network conditions and BMC response times.
-2. **Retry Configuration**: Adjust retry parameters based on your environment's reliability:
-   - Increase `BESKAR7_RETRY_MAX_ATTEMPTS` for less reliable networks
-   - Decrease `BESKAR7_RETRY_MULTIPLIER` for more aggressive retries
-3. **Boot Configuration**: Customize boot parameters based on your hardware:
-   - Adjust `BESKAR7_BOOT_DEFAULT_EFI_PATH` for different EFI bootloader locations
-   - Modify `BESKAR7_BOOT_DEFAULT_OVERRIDE_TARGET` for different boot methods
+- All durations must be valid Go duration strings (e.g., `30s`, `5m`).
+- All numeric values must be valid numbers.
+- All paths must be valid for the operating system.
 
 ## Configuration in Code
 
