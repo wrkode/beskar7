@@ -29,6 +29,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	infrastructurev1alpha1 "github.com/wrkode/beskar7/api/v1alpha1"
+	"github.com/wrkode/beskar7/internal/config"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	"sigs.k8s.io/cluster-api/util"
 	conditions "sigs.k8s.io/cluster-api/util/conditions"
@@ -44,6 +45,8 @@ const (
 type Beskar7ClusterReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
+	// Config holds the controller configuration
+	Config *config.Config
 }
 
 //+kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=beskar7clusters,verbs=get;list;watch;create;update;patch;delete

@@ -1,3 +1,10 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  labels:
+    control-plane: controller-manager
+  name: system
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -40,6 +47,35 @@ spec:
           capabilities:
             drop:
               - "ALL"
+        env:
+        - name: BESKAR7_REDFISH_SCHEME
+          value: "https"
+        - name: BESKAR7_REDFISH_PORT
+          value: "443"
+        - name: BESKAR7_REDFISH_TIMEOUT
+          value: "30s"
+        - name: BESKAR7_CONTROLLER_REQUEUE_INTERVAL
+          value: "15s"
+        - name: BESKAR7_CONTROLLER_REQUEUE_AFTER_ERROR
+          value: "5m"
+        - name: BESKAR7_CONTROLLER_REQUEUE_AFTER_NO_HOST
+          value: "1m"
+        - name: BESKAR7_RETRY_INITIAL_INTERVAL
+          value: "1s"
+        - name: BESKAR7_RETRY_MAX_INTERVAL
+          value: "5m"
+        - name: BESKAR7_RETRY_MULTIPLIER
+          value: "2.0"
+        - name: BESKAR7_RETRY_MAX_ATTEMPTS
+          value: "5"
+        - name: BESKAR7_RETRY_MAX_ELAPSED_TIME
+          value: "15m"
+        - name: BESKAR7_BOOT_DEFAULT_EFI_PATH
+          value: "\\EFI\\BOOT\\BOOTX64.EFI"
+        - name: BESKAR7_BOOT_DEFAULT_OVERRIDE_ENABLED
+          value: "Once"
+        - name: BESKAR7_BOOT_DEFAULT_OVERRIDE_TARGET
+          value: "UefiTarget"
         livenessProbe:
           httpGet:
             path: /healthz

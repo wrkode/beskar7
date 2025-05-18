@@ -36,6 +36,7 @@ import (
 
 	infrastructurev1alpha1 "github.com/wrkode/beskar7/api/v1alpha1"
 	"github.com/wrkode/beskar7/controllers"
+	"github.com/wrkode/beskar7/internal/config"
 	internalredfish "github.com/wrkode/beskar7/internal/redfish"
 	//+kubebuilder:scaffold:imports
 )
@@ -72,23 +73,27 @@ func main() {
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
+	// Load configuration from environment variables
+	cfg := config.LoadFromEnv()
+	setupLog.Info("Loaded configuration", "config", cfg)
+
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
-		Scheme:  scheme,
-		Metrics: metricsserver.Options{BindAddress: metricsAddr},
-		WebhookServer: webhook.NewServer(webhook.Options{
-			Port: 9443,
-		}),
+		Scheme:                 scheme,
+		Metrics:                metricsserver.Options{BindAddress: metricsAddr},
+		WebhookServer:          webhook.NewServer(webhook.Options{Port: 9443}),
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         enableLeaderElection,
-		LeaderElectionID:       "7be7e04e.cluster.x-k8s.io",
+		LeaderElectionID:       "beskar7-controller-manager",
 		// LeaderElectionReleaseOnCancel defines if the leader should step down voluntarily
 		// when the Manager ends. This requires the binary to immediately end when the
 		// Manager is stopped, otherwise, this setting is unsafe. Setting this significantly
 		// speeds up voluntary leader transitions as the new leader don't have to wait
 		// LeaseDuration time first.
 		//
-		// In the future, controller-runtime will detect on its own if it is safe to enable
-		// this option, meaning this flag has a chance to be removed without notice.
+		// In the default scaffold provided, the program ends immediately after
+		// the manager stops, so would be fine to enable this option. However,
+		// if you are doing or is intended to do any operation such as perform cleanups
+		// after the manager stops then its usage might be unsafe.
 		// LeaderElectionReleaseOnCancel: true,
 	})
 	if err != nil {
@@ -96,31 +101,32 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Setup controllers here
 	if err = (&controllers.PhysicalHostReconciler{
 		Client:               mgr.GetClient(),
 		Scheme:               mgr.GetScheme(),
 		RedfishClientFactory: internalredfish.NewClient,
+		Config:               cfg,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "PhysicalHost")
 		os.Exit(1)
 	}
-	// TODO: Add Beskar7Cluster and Beskar7Machine reconcilers
-	if err = (&controllers.Beskar7ClusterReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
-	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "Beskar7Cluster")
-		os.Exit(1)
-	}
 	if err = (&controllers.Beskar7MachineReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
+		Client:               mgr.GetClient(),
+		Scheme:               mgr.GetScheme(),
+		RedfishClientFactory: internalredfish.NewClient,
+		Config:               cfg,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Beskar7Machine")
 		os.Exit(1)
 	}
-
+	if err = (&controllers.Beskar7ClusterReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+		Config: cfg,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "Beskar7Cluster")
+		os.Exit(1)
+	}
 	//+kubebuilder:scaffold:builder
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {

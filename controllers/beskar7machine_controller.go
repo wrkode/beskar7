@@ -25,6 +25,7 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/pkg/errors"
 	infrastructurev1alpha1 "github.com/wrkode/beskar7/api/v1alpha1"
+	"github.com/wrkode/beskar7/internal/config"
 	internalredfish "github.com/wrkode/beskar7/internal/redfish"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -51,8 +52,9 @@ type Beskar7MachineReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
 	// RedfishClientFactory allows overriding the Redfish client creation for testing.
-	// If nil, internalredfish.NewClient will be used by default in getRedfishClientForHost.
 	RedfishClientFactory internalredfish.RedfishClientFactory
+	// Config holds the controller configuration
+	Config *config.Config
 }
 
 //+kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=beskar7machines,verbs=get;list;watch;create;update;patch;delete

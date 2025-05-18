@@ -22,6 +22,7 @@ import (
 
 	"github.com/stmcginnis/gofish/redfish"
 	infrastructurev1alpha1 "github.com/wrkode/beskar7/api/v1alpha1"
+	"github.com/wrkode/beskar7/internal/config"
 	beskarerrors "github.com/wrkode/beskar7/internal/errors"
 	"github.com/wrkode/beskar7/internal/recovery"
 	internalredfish "github.com/wrkode/beskar7/internal/redfish"
@@ -56,6 +57,8 @@ type PhysicalHostReconciler struct {
 	RecoveryManager *recovery.RecoveryManager
 	// Logger for the controller
 	Logger *zap.Logger
+	// Config holds the controller configuration
+	Config *config.Config
 }
 
 //+kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=physicalhosts,verbs=get;list;watch;create;update;patch;delete
