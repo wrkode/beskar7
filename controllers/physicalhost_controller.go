@@ -373,8 +373,8 @@ func (r *PhysicalHostReconciler) recoverFromError(ctx context.Context, physicalH
 		MaxElapsedTime:  15 * time.Minute,
 	}
 
-	var err error
-	err = retry.WithContext(ctx, config, func() error {
+	// Try to recover from the error
+	err := retry.WithContext(ctx, config, func() error {
 		// For now, just try to rediscover the host
 		redfishClient, err := r.getRedfishClient(ctx, physicalHost)
 		if err != nil {
