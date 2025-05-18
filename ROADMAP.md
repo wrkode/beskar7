@@ -63,7 +63,7 @@ This document outlines the current status and future plans for the Beskar7 proje
 ### Configuration
 - [x] Move hardcoded values to configurable parameters
 - [x] Add support for environment-specific configurations
-- [ ] Implement feature flags for experimental features
+- [x] Implement feature flags for experimental features
 
 ## Testing Improvements
 

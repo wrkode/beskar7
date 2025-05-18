@@ -20,6 +20,9 @@ type Config struct {
 
 	// Environment configuration
 	Environment *EnvironmentConfig
+
+	// Feature flags
+	Features map[string]bool
 }
 
 // RedfishConfig holds Redfish-specific configuration
@@ -30,6 +33,12 @@ type RedfishConfig struct {
 	DefaultPort string
 	// DefaultTimeout is the default timeout for Redfish operations
 	DefaultTimeout time.Duration
+
+	// InsecureSkipVerify is a flag to skip SSL verification
+	InsecureSkipVerify bool
+
+	// Timeout is the timeout for Redfish operations
+	Timeout time.Duration
 }
 
 // ControllerConfig holds controller-specific configuration
@@ -64,15 +73,20 @@ type BootConfig struct {
 	DefaultBootSourceOverrideEnabled string
 	// DefaultBootSourceOverrideTarget is the default boot source override target
 	DefaultBootSourceOverrideTarget string
+
+	// DefaultBootSource is the default boot source
+	DefaultBootSource string
 }
 
 // DefaultConfig returns a default configuration
 func DefaultConfig() *Config {
 	return &Config{
 		Redfish: RedfishConfig{
-			DefaultScheme:  "https",
-			DefaultPort:    "443",
-			DefaultTimeout: 30 * time.Second,
+			DefaultScheme:      "https",
+			DefaultPort:        "443",
+			DefaultTimeout:     30 * time.Second,
+			InsecureSkipVerify: false,
+			Timeout:            30 * time.Second,
 		},
 		Controller: ControllerConfig{
 			RequeueInterval:    15 * time.Second,
@@ -80,18 +94,20 @@ func DefaultConfig() *Config {
 			RequeueAfterNoHost: 1 * time.Minute,
 		},
 		Retry: RetryConfig{
-			InitialInterval: 1 * time.Second,
-			MaxInterval:     5 * time.Minute,
+			InitialInterval: 2 * time.Second,
+			MaxInterval:     1 * time.Minute,
 			Multiplier:      2.0,
-			MaxAttempts:     5,
-			MaxElapsedTime:  15 * time.Minute,
+			MaxAttempts:     3,
+			MaxElapsedTime:  5 * time.Minute,
 		},
 		Boot: BootConfig{
 			DefaultEFIBootloaderPath:         "\\EFI\\BOOT\\BOOTX64.EFI",
 			DefaultBootSourceOverrideEnabled: "Once",
 			DefaultBootSourceOverrideTarget:  "UefiTarget",
+			DefaultBootSource:                "UEFI",
 		},
 		Environment: NewEnvironmentConfig(),
+		Features:    make(map[string]bool),
 	}
 }
 
@@ -186,5 +202,10 @@ func applyEnvironmentOverrides(config *Config) {
 	}
 	if value, ok := getOverride("BOOT_DEFAULT_OVERRIDE_TARGET"); ok {
 		config.Boot.DefaultBootSourceOverrideTarget = value
+	}
+
+	// Apply feature flags
+	if value, ok := getOverride("FEATURE_FLAG"); ok {
+		config.Features[value] = true
 	}
 }
