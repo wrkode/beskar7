@@ -23,9 +23,11 @@ import (
 	"github.com/stmcginnis/gofish/redfish"
 	infrastructurev1alpha1 "github.com/wrkode/beskar7/api/v1alpha1"
 	beskarerrors "github.com/wrkode/beskar7/internal/errors"
+	"github.com/wrkode/beskar7/internal/recovery"
 	internalredfish "github.com/wrkode/beskar7/internal/redfish"
 	"github.com/wrkode/beskar7/internal/retry"
 	"github.com/wrkode/beskar7/internal/statemachine"
+	"go.uber.org/zap"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -50,6 +52,10 @@ type PhysicalHostReconciler struct {
 	RedfishClientFactory internalredfish.RedfishClientFactory
 	// StateMachine manages the state transitions for PhysicalHost
 	StateMachine statemachine.StateMachine
+	// RecoveryManager handles error recovery strategies
+	RecoveryManager *recovery.RecoveryManager
+	// Logger for the controller
+	Logger *zap.Logger
 }
 
 //+kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=physicalhosts,verbs=get;list;watch;create;update;patch;delete
@@ -59,11 +65,18 @@ type PhysicalHostReconciler struct {
 
 // NewPhysicalHostReconciler creates a new PhysicalHostReconciler
 func NewPhysicalHostReconciler(client client.Client, scheme *runtime.Scheme, redfishClientFactory internalredfish.RedfishClientFactory) *PhysicalHostReconciler {
+	logger, err := zap.NewProduction()
+	if err != nil {
+		// If we can't create a production logger, use a development logger
+		logger, _ = zap.NewDevelopment()
+	}
 	return &PhysicalHostReconciler{
 		Client:               client,
 		Scheme:               scheme,
 		RedfishClientFactory: redfishClientFactory,
 		StateMachine:         statemachine.NewPhysicalHostStateMachine(),
+		RecoveryManager:      recovery.NewRecoveryManager(logger, nil),
+		Logger:               logger,
 	}
 }
 
@@ -173,7 +186,15 @@ func (r *PhysicalHostReconciler) discoverHost(ctx context.Context, physicalHost 
 			if beskarerrors.IsRetryableError(err) {
 				return beskarerrors.NewRetryableError(err)
 			}
-			return beskarerrors.NewDiscoveryError(physicalHost.Name, "failed to get system info", err)
+			// Try to recover from the error
+			if recoveryErr := r.RecoveryManager.AttemptRecovery(ctx, redfishClient, err); recoveryErr != nil {
+				return beskarerrors.NewDiscoveryError(physicalHost.Name, "failed to get system info", err)
+			}
+			// If recovery was successful, retry the operation
+			systemInfo, err = redfishClient.GetSystemInfo(ctx)
+			if err != nil {
+				return beskarerrors.NewDiscoveryError(physicalHost.Name, "failed to get system info after recovery", err)
+			}
 		}
 		return nil
 	})
@@ -188,7 +209,15 @@ func (r *PhysicalHostReconciler) discoverHost(ctx context.Context, physicalHost 
 			if beskarerrors.IsRetryableError(err) {
 				return beskarerrors.NewRetryableError(err)
 			}
-			return beskarerrors.NewPowerStateError("unknown", "unknown", "failed to get power state", err)
+			// Try to recover from the error
+			if recoveryErr := r.RecoveryManager.AttemptRecovery(ctx, redfishClient, err); recoveryErr != nil {
+				return beskarerrors.NewPowerStateError("unknown", "unknown", "failed to get power state", err)
+			}
+			// If recovery was successful, retry the operation
+			powerState, err = redfishClient.GetPowerState(ctx)
+			if err != nil {
+				return beskarerrors.NewPowerStateError("unknown", "unknown", "failed to get power state after recovery", err)
+			}
 		}
 		return nil
 	})
@@ -231,7 +260,15 @@ func (r *PhysicalHostReconciler) checkProvisioningStatus(ctx context.Context, ph
 			if beskarerrors.IsRetryableError(err) {
 				return beskarerrors.NewRetryableError(err)
 			}
-			return beskarerrors.NewBootSourceError(*physicalHost.Spec.BootISOSource, "failed to set boot source", err)
+			// Try to recover from the error
+			if recoveryErr := r.RecoveryManager.AttemptRecovery(ctx, redfishClient, err); recoveryErr != nil {
+				return beskarerrors.NewBootSourceError(*physicalHost.Spec.BootISOSource, "failed to set boot source", err)
+			}
+			// If recovery was successful, retry the operation
+			err = redfishClient.SetBootSourceISO(ctx, *physicalHost.Spec.BootISOSource)
+			if err != nil {
+				return beskarerrors.NewBootSourceError(*physicalHost.Spec.BootISOSource, "failed to set boot source after recovery", err)
+			}
 		}
 		return nil
 	})
@@ -247,7 +284,15 @@ func (r *PhysicalHostReconciler) checkProvisioningStatus(ctx context.Context, ph
 			if beskarerrors.IsRetryableError(err) {
 				return beskarerrors.NewRetryableError(err)
 			}
-			return beskarerrors.NewPowerStateError("unknown", "unknown", "failed to get power state", err)
+			// Try to recover from the error
+			if recoveryErr := r.RecoveryManager.AttemptRecovery(ctx, redfishClient, err); recoveryErr != nil {
+				return beskarerrors.NewPowerStateError("unknown", "unknown", "failed to get power state", err)
+			}
+			// If recovery was successful, retry the operation
+			powerState, err = redfishClient.GetPowerState(ctx)
+			if err != nil {
+				return beskarerrors.NewPowerStateError("unknown", "unknown", "failed to get power state after recovery", err)
+			}
 		}
 		return nil
 	})
@@ -263,7 +308,15 @@ func (r *PhysicalHostReconciler) checkProvisioningStatus(ctx context.Context, ph
 				if beskarerrors.IsRetryableError(err) {
 					return beskarerrors.NewRetryableError(err)
 				}
-				return beskarerrors.NewPowerStateError(string(powerState), string(redfish.OnPowerState), "failed to set power state", err)
+				// Try to recover from the error
+				if recoveryErr := r.RecoveryManager.AttemptRecovery(ctx, redfishClient, err); recoveryErr != nil {
+					return beskarerrors.NewPowerStateError(string(powerState), string(redfish.OnPowerState), "failed to set power state", err)
+				}
+				// If recovery was successful, retry the operation
+				err = redfishClient.SetPowerState(ctx, redfish.OnPowerState)
+				if err != nil {
+					return beskarerrors.NewPowerStateError(string(powerState), string(redfish.OnPowerState), "failed to set power state after recovery", err)
+				}
 			}
 			return nil
 		})
