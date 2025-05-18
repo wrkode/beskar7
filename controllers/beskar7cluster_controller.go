@@ -107,8 +107,8 @@ func (r *Beskar7ClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		logger.Info("Finished reconciliation")
 	}()
 
-	// Handle deletion reconciliation
-	if !b7cluster.ObjectMeta.DeletionTimestamp.IsZero() {
+	// Handle deletion reconciliation loop.
+	if !b7cluster.DeletionTimestamp.IsZero() {
 		return r.reconcileDelete(ctx, logger, b7cluster)
 	}
 

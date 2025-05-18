@@ -81,6 +81,12 @@ func (r *Beskar7MachineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrl.Result{}, nil
 	}
 
+	// Check if the machine is being deleted
+	if !b7machine.DeletionTimestamp.IsZero() {
+		// Handle deletion
+		return r.reconcileDelete(ctx, logger, b7machine)
+	}
+
 	// Fetch the Machine instance.
 	machine, err := util.GetOwnerMachine(ctx, r.Client, b7machine.ObjectMeta)
 	if err != nil {
@@ -114,11 +120,6 @@ func (r *Beskar7MachineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		}
 		logger.Info("Finished reconciliation")
 	}()
-
-	// Handle deletion reconciliation
-	if !b7machine.ObjectMeta.DeletionTimestamp.IsZero() {
-		return r.reconcileDelete(ctx, logger, b7machine)
-	}
 
 	// Handle non-deletion reconciliation
 	return r.reconcileNormal(ctx, logger, b7machine, machine)
