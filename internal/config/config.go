@@ -17,6 +17,9 @@ type Config struct {
 
 	// Boot configuration
 	Boot BootConfig
+
+	// Environment configuration
+	Environment *EnvironmentConfig
 }
 
 // RedfishConfig holds Redfish-specific configuration
@@ -88,5 +91,100 @@ func DefaultConfig() *Config {
 			DefaultBootSourceOverrideEnabled: "Once",
 			DefaultBootSourceOverrideTarget:  "UefiTarget",
 		},
+		Environment: NewEnvironmentConfig(),
+	}
+}
+
+// LoadConfig loads configuration from environment variables and environment-specific settings
+func LoadConfig() (*Config, error) {
+	config := DefaultConfig()
+
+	// Load environment-specific configuration
+	if err := config.Environment.LoadEnvironmentConfig(); err != nil {
+		return nil, err
+	}
+
+	// Load from environment variables
+	LoadFromEnv(config)
+
+	// Apply environment-specific overrides
+	applyEnvironmentOverrides(config)
+
+	return config, nil
+}
+
+// applyEnvironmentOverrides applies environment-specific configuration overrides
+func applyEnvironmentOverrides(config *Config) {
+	// Helper function to get environment override
+	getOverride := func(key string) (string, bool) {
+		return config.Environment.GetOverride(key)
+	}
+
+	// Apply Redfish overrides
+	if value, ok := getOverride("REDFISH_SCHEME"); ok {
+		config.Redfish.DefaultScheme = value
+	}
+	if value, ok := getOverride("REDFISH_PORT"); ok {
+		config.Redfish.DefaultPort = value
+	}
+	if value, ok := getOverride("REDFISH_TIMEOUT"); ok {
+		if duration, err := time.ParseDuration(value); err == nil {
+			config.Redfish.DefaultTimeout = duration
+		}
+	}
+
+	// Apply Controller overrides
+	if value, ok := getOverride("CONTROLLER_REQUEUE_INTERVAL"); ok {
+		if duration, err := time.ParseDuration(value); err == nil {
+			config.Controller.RequeueInterval = duration
+		}
+	}
+	if value, ok := getOverride("CONTROLLER_REQUEUE_AFTER_ERROR"); ok {
+		if duration, err := time.ParseDuration(value); err == nil {
+			config.Controller.RequeueAfterError = duration
+		}
+	}
+	if value, ok := getOverride("CONTROLLER_REQUEUE_AFTER_NO_HOST"); ok {
+		if duration, err := time.ParseDuration(value); err == nil {
+			config.Controller.RequeueAfterNoHost = duration
+		}
+	}
+
+	// Apply Retry overrides
+	if value, ok := getOverride("RETRY_INITIAL_INTERVAL"); ok {
+		if duration, err := time.ParseDuration(value); err == nil {
+			config.Retry.InitialInterval = duration
+		}
+	}
+	if value, ok := getOverride("RETRY_MAX_INTERVAL"); ok {
+		if duration, err := time.ParseDuration(value); err == nil {
+			config.Retry.MaxInterval = duration
+		}
+	}
+	if value, ok := getOverride("RETRY_MULTIPLIER"); ok {
+		if multiplier, err := parseFloat(value); err == nil {
+			config.Retry.Multiplier = multiplier
+		}
+	}
+	if value, ok := getOverride("RETRY_MAX_ATTEMPTS"); ok {
+		if attempts, err := parseInt(value); err == nil {
+			config.Retry.MaxAttempts = attempts
+		}
+	}
+	if value, ok := getOverride("RETRY_MAX_ELAPSED_TIME"); ok {
+		if duration, err := time.ParseDuration(value); err == nil {
+			config.Retry.MaxElapsedTime = duration
+		}
+	}
+
+	// Apply Boot overrides
+	if value, ok := getOverride("BOOT_DEFAULT_EFI_PATH"); ok {
+		config.Boot.DefaultEFIBootloaderPath = value
+	}
+	if value, ok := getOverride("BOOT_DEFAULT_OVERRIDE_ENABLED"); ok {
+		config.Boot.DefaultBootSourceOverrideEnabled = value
+	}
+	if value, ok := getOverride("BOOT_DEFAULT_OVERRIDE_TARGET"); ok {
+		config.Boot.DefaultBootSourceOverrideTarget = value
 	}
 }
