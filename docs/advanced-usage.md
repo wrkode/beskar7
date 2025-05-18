@@ -65,12 +65,20 @@ spec:
 
 ## Redfish Client Configuration
 
-*(To be added: Details on configuring timeouts or other Redfish client parameters, if such configuration options are implemented in the future.)*
+The Redfish client can be configured through environment variables and environment-specific configuration files. For detailed configuration options, see [Configuration](configuration.md).
 
-Potential topics:
+Key configuration options include:
 
-*   Configuring specific Redfish timeouts or retries (if implemented).
-*   Details on configuring different OS families in "RemoteConfig" mode.
-*   Using annotations for hardware-specific hints (e.g., BIOS attributes for boot parameters).
-*   Failure domain configuration and usage.
-*   Troubleshooting specific hardware/BMC interactions. 
+* `BESKAR7_REDFISH_SCHEME` - URL scheme for Redfish endpoints (default: https)
+* `BESKAR7_REDFISH_PORT` - Port for Redfish endpoints
+* `BESKAR7_REDFISH_TIMEOUT` - Timeout for Redfish operations
+* `BESKAR7_RETRY_*` - Various retry parameters for Redfish operations
+
+Example configuration:
+```sh
+export BESKAR7_REDFISH_TIMEOUT=30s
+export BESKAR7_RETRY_MAX_ATTEMPTS=5
+export BESKAR7_RETRY_INITIAL_INTERVAL=1s
+```
+
+For more configuration options and environment-specific settings, refer to the [Configuration](configuration.md) documentation. 
