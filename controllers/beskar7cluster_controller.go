@@ -139,13 +139,18 @@ func (r *Beskar7ClusterReconciler) reconcileNormal(ctx context.Context, logger l
 		// Or return error? For now, log and continue, but consider returning err.
 	} else {
 		failureDomains := make(clusterv1.FailureDomains)
-		zoneLabel := "topology.kubernetes.io/zone" // Standard zone label
+		// Use custom label if specified, otherwise use default
+		zoneLabel := "topology.kubernetes.io/zone" // Default zone label
+		if b7cluster.Spec.FailureDomainLabel != "" {
+			zoneLabel = b7cluster.Spec.FailureDomainLabel
+			logger.V(1).Info("Using custom failure domain label", "label", zoneLabel)
+		}
 
 		for _, ph := range phList.Items {
 			if ph.Labels != nil {
 				if zone, ok := ph.Labels[zoneLabel]; ok && zone != "" {
 					if _, domainExists := failureDomains[zone]; !domainExists {
-						logger.V(1).Info("Discovered failure domain zone", "zone", zone)
+						logger.V(1).Info("Discovered failure domain zone", "zone", zone, "label", zoneLabel)
 						failureDomains[zone] = clusterv1.FailureDomainSpec{
 							ControlPlane: true, // Assume all discovered zones can host control plane for now
 						}
@@ -156,11 +161,11 @@ func (r *Beskar7ClusterReconciler) reconcileNormal(ctx context.Context, logger l
 		// TODO: Check if failureDomains actually changed before updating status?
 		if len(failureDomains) > 0 {
 			b7cluster.Status.FailureDomains = failureDomains
-			logger.Info("Updated cluster status with discovered failure domains", "count", len(failureDomains))
+			logger.Info("Updated cluster status with discovered failure domains", "count", len(failureDomains), "label", zoneLabel)
 		} else {
 			// Clear failure domains if none are found (optional, depends on desired behavior)
 			// b7cluster.Status.FailureDomains = nil
-			logger.Info("No PhysicalHosts with zone labels found in namespace")
+			logger.Info("No PhysicalHosts with zone labels found in namespace", "label", zoneLabel)
 		}
 	}
 	// --- End Reconcile Failure Domains ---

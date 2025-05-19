@@ -45,7 +45,7 @@ spec:
 Cluster API utilizes failure domains (often corresponding to availability zones, racks, etc.) for workload scheduling and resilience.
 
 *   **Discovery:** The `Beskar7Cluster` controller attempts to discover available failure domains by listing `PhysicalHost` resources in the same namespace.
-*   **Labeling:** It looks for the standard Kubernetes label `topology.kubernetes.io/zone` on the `PhysicalHost` resources.
+*   **Labeling:** By default, it looks for the standard Kubernetes label `topology.kubernetes.io/zone` on the `PhysicalHost` resources. This can be customized using the `spec.failureDomainLabel` field in the `Beskar7Cluster` resource.
 *   **Status:** Unique zone values found are populated into the `Beskar7Cluster`'s `status.failureDomains` map.
 
 To use failure domains, ensure your `PhysicalHost` resources are labeled appropriately:
@@ -58,10 +58,38 @@ metadata:
   name: server-rack1-01
   namespace: default
   labels:
-    topology.kubernetes.io/zone: "rack-1" # Assign zone label
+    topology.kubernetes.io/zone: "rack-1" # Default zone label
 spec:
   # ... rest of spec ...
 ```
+
+To use a custom label for failure domains:
+
+```yaml
+# beskar7cluster.yaml
+apiVersion: infrastructure.cluster.x-k8s.io/v1alpha1
+kind: Beskar7Cluster
+metadata:
+  name: my-cluster
+  namespace: default
+spec:
+  failureDomainLabel: "custom.zone" # Custom label for failure domains
+  # ... rest of spec ...
+
+---
+# physicalhost-rack1.yaml
+apiVersion: infrastructure.cluster.x-k8s.io/v1alpha1
+kind: PhysicalHost
+metadata:
+  name: server-rack1-01
+  namespace: default
+  labels:
+    custom.zone: "rack-1" # Using custom zone label
+spec:
+  # ... rest of spec ...
+```
+
+Note: When using a custom failure domain label, ensure that all `PhysicalHost` resources in the cluster use the same label key for consistency.
 
 ## Redfish Client Configuration
 

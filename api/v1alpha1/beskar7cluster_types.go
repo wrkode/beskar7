@@ -27,6 +27,11 @@ type Beskar7ClusterSpec struct {
 	// +optional
 	ControlPlaneEndpoint clusterv1.APIEndpoint `json:"controlPlaneEndpoint,omitempty"`
 
+	// FailureDomainLabel specifies the label key to use for failure domain discovery.
+	// If not specified, defaults to "topology.kubernetes.io/zone".
+	// +optional
+	FailureDomainLabel string `json:"failureDomainLabel,omitempty"`
+
 	// TODO: Add any Beskar7 specific cluster configuration here
 	// Example: Redfish discovery settings, global power management policies?
 }

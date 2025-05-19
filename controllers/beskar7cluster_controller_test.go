@@ -251,6 +251,49 @@ var _ = Describe("Beskar7Cluster Reconciler", func() {
 				g.Expect(b7cluster.Status.FailureDomains["zone-b"]).To(Equal(clusterv1.FailureDomainSpec{ControlPlane: true}))
 			}, "5s", "100ms").Should(Succeed(), "FailureDomains should be discovered correctly")
 		})
+
+		It("should support custom failure domain labels", func() {
+			// Create the Beskar7Cluster with custom failure domain label
+			customLabel := "custom.zone"
+			b7cluster.Spec.FailureDomainLabel = customLabel
+			Expect(k8sClient.Create(ctx, b7cluster)).To(Succeed())
+			reconciler := &Beskar7ClusterReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}
+			_, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: key})
+			Expect(err).NotTo(HaveOccurred())
+
+			// Create PhysicalHosts with custom zone labels
+			ph1 := &infrastructurev1alpha1.PhysicalHost{
+				ObjectMeta: metav1.ObjectMeta{Name: "custom-fd-host-1", Namespace: testNs.Name, Labels: map[string]string{customLabel: "custom-zone-1"}},
+				Spec:       infrastructurev1alpha1.PhysicalHostSpec{RedfishConnection: infrastructurev1alpha1.RedfishConnectionInfo{Address: "dummy1", CredentialsSecretRef: "dummy"}},
+			}
+			ph2 := &infrastructurev1alpha1.PhysicalHost{
+				ObjectMeta: metav1.ObjectMeta{Name: "custom-fd-host-2", Namespace: testNs.Name, Labels: map[string]string{customLabel: "custom-zone-2"}},
+				Spec:       infrastructurev1alpha1.PhysicalHostSpec{RedfishConnection: infrastructurev1alpha1.RedfishConnectionInfo{Address: "dummy2", CredentialsSecretRef: "dummy"}},
+			}
+			// Create a host with standard label (should be ignored)
+			ph3 := &infrastructurev1alpha1.PhysicalHost{
+				ObjectMeta: metav1.ObjectMeta{Name: "standard-fd-host", Namespace: testNs.Name, Labels: map[string]string{"topology.kubernetes.io/zone": "standard-zone"}},
+				Spec:       infrastructurev1alpha1.PhysicalHostSpec{RedfishConnection: infrastructurev1alpha1.RedfishConnectionInfo{Address: "dummy3", CredentialsSecretRef: "dummy"}},
+			}
+			Expect(k8sClient.Create(ctx, ph1)).To(Succeed())
+			Expect(k8sClient.Create(ctx, ph2)).To(Succeed())
+			Expect(k8sClient.Create(ctx, ph3)).To(Succeed())
+
+			// Reconcile again to trigger FailureDomain discovery
+			_, err = reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: key})
+			Expect(err).NotTo(HaveOccurred())
+
+			// Check FailureDomains in status
+			Eventually(func(g Gomega) {
+				Expect(k8sClient.Get(ctx, key, b7cluster)).To(Succeed())
+				g.Expect(b7cluster.Status.FailureDomains).To(HaveLen(2), "Should discover 2 unique custom zones")
+				g.Expect(b7cluster.Status.FailureDomains).To(HaveKey("custom-zone-1"))
+				g.Expect(b7cluster.Status.FailureDomains["custom-zone-1"]).To(Equal(clusterv1.FailureDomainSpec{ControlPlane: true}))
+				g.Expect(b7cluster.Status.FailureDomains).To(HaveKey("custom-zone-2"))
+				g.Expect(b7cluster.Status.FailureDomains["custom-zone-2"]).To(Equal(clusterv1.FailureDomainSpec{ControlPlane: true}))
+				g.Expect(b7cluster.Status.FailureDomains).NotTo(HaveKey("standard-zone"), "Should not discover zones with standard label")
+			}, "5s", "100ms").Should(Succeed(), "Custom failure domains should be discovered correctly")
+		})
 	})
 
 	Context("Reconcile Delete", func() {
