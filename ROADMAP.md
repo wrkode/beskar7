@@ -20,8 +20,8 @@ This document outlines the current status and future plans for the Beskar7 proje
 ### Core Functionality
 - [ ] **`SetBootParameters` Full Implementation:** Robustly handle setting boot parameters via Redfish across various BMCs, investigating `UefiTargetBootSourceOverride`, BIOS attributes, and other vendor-specific mechanisms
 - [ ] **`Beskar7Cluster` Enhancements:**
-  - [ ] Derive `ControlPlaneEndpoint` in `Status` from control plane `Beskar7Machine`s
-  - [ ] Add IP address information to `Beskar7MachineStatus`
+  - [x] Derive `ControlPlaneEndpoint` in `Status` from control plane `Beskar7Machine`s
+  - [x] Add IP address information to `Beskar7MachineStatus`
 
 ## Architecture and Design Improvements
 

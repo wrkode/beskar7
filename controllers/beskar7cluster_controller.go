@@ -18,6 +18,7 @@ package controllers
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -128,6 +129,19 @@ func (r *Beskar7ClusterReconciler) reconcileNormal(ctx context.Context, logger l
 
 	// TODO: Check if paused
 
+	// --- Validate Failure Domain Labels ---
+	if len(b7cluster.Spec.FailureDomainLabels) > 0 {
+		for _, label := range b7cluster.Spec.FailureDomainLabels {
+			// Validate label format according to Kubernetes label requirements
+			if !isValidLabelKey(label) {
+				logger.Error(nil, "Invalid failure domain label format", "label", label)
+				conditions.MarkFalse(b7cluster, infrastructurev1alpha1.FailureDomainsReady, infrastructurev1alpha1.InvalidFailureDomainLabelReason, clusterv1.ConditionSeverityError, "Invalid failure domain label format: %s", label)
+				return ctrl.Result{}, nil
+			}
+		}
+	}
+	// --- End Validate Failure Domain Labels ---
+
 	// --- Reconcile Failure Domains ---
 	// Discover available failure domains from PhysicalHosts in the same namespace.
 	// Assumes hosts are labeled with `topology.kubernetes.io/zone=<zone-name>`.
@@ -135,33 +149,56 @@ func (r *Beskar7ClusterReconciler) reconcileNormal(ctx context.Context, logger l
 	listOpts := []client.ListOption{client.InNamespace(b7cluster.Namespace)}
 	if err := r.List(ctx, phList, listOpts...); err != nil {
 		logger.Error(err, "Failed to list PhysicalHosts to determine failure domains")
-		// Continue reconciliation without failure domains if listing fails?
-		// Or return error? For now, log and continue, but consider returning err.
-	} else {
-		failureDomains := make(clusterv1.FailureDomains)
-		zoneLabel := "topology.kubernetes.io/zone" // Standard zone label
+		conditions.MarkFalse(b7cluster, infrastructurev1alpha1.FailureDomainsReady, infrastructurev1alpha1.ListFailedReason, clusterv1.ConditionSeverityError, "Failed to list PhysicalHosts: %v", err)
+		return ctrl.Result{}, err
+	}
 
-		for _, ph := range phList.Items {
-			if ph.Labels != nil {
-				if zone, ok := ph.Labels[zoneLabel]; ok && zone != "" {
-					if _, domainExists := failureDomains[zone]; !domainExists {
-						logger.V(1).Info("Discovered failure domain zone", "zone", zone)
-						failureDomains[zone] = clusterv1.FailureDomainSpec{
-							ControlPlane: true, // Assume all discovered zones can host control plane for now
-						}
+	failureDomains := make(clusterv1.FailureDomains)
+	// Use custom labels if specified, otherwise use default
+	zoneLabels := []string{"topology.kubernetes.io/zone"} // Default zone label
+	if len(b7cluster.Spec.FailureDomainLabels) > 0 {
+		zoneLabels = b7cluster.Spec.FailureDomainLabels
+		logger.V(1).Info("Using custom failure domain labels", "labels", zoneLabels)
+	}
+
+	// Track which hosts have been processed to avoid duplicates
+	processedHosts := make(map[string]bool)
+
+	for _, ph := range phList.Items {
+		if ph.Labels == nil {
+			continue
+		}
+
+		// Try each label in order until we find a match
+		for _, label := range zoneLabels {
+			if zone, ok := ph.Labels[label]; ok && zone != "" {
+				// Skip if we've already processed this host
+				if processedHosts[ph.Name] {
+					break
+				}
+
+				if _, domainExists := failureDomains[zone]; !domainExists {
+					logger.V(1).Info("Discovered failure domain zone", "zone", zone, "label", label, "host", ph.Name)
+					failureDomains[zone] = clusterv1.FailureDomainSpec{
+						ControlPlane: true, // Assume all discovered zones can host control plane for now
 					}
 				}
+				processedHosts[ph.Name] = true
+				break // Found a matching label, no need to check others
 			}
 		}
-		// TODO: Check if failureDomains actually changed before updating status?
-		if len(failureDomains) > 0 {
-			b7cluster.Status.FailureDomains = failureDomains
-			logger.Info("Updated cluster status with discovered failure domains", "count", len(failureDomains))
-		} else {
-			// Clear failure domains if none are found (optional, depends on desired behavior)
-			// b7cluster.Status.FailureDomains = nil
-			logger.Info("No PhysicalHosts with zone labels found in namespace")
-		}
+	}
+
+	// Update status with discovered failure domains
+	if len(failureDomains) > 0 {
+		b7cluster.Status.FailureDomains = failureDomains
+		conditions.MarkTrue(b7cluster, infrastructurev1alpha1.FailureDomainsReady)
+		logger.Info("Updated cluster status with discovered failure domains", "count", len(failureDomains), "labels", zoneLabels)
+	} else {
+		// Clear failure domains if none are found
+		b7cluster.Status.FailureDomains = nil
+		conditions.MarkFalse(b7cluster, infrastructurev1alpha1.FailureDomainsReady, infrastructurev1alpha1.NoFailureDomainsReason, clusterv1.ConditionSeverityWarning, "No PhysicalHosts with zone labels found in namespace with labels: %v", zoneLabels)
+		logger.Info("No PhysicalHosts with zone labels found in namespace", "labels", zoneLabels)
 	}
 	// --- End Reconcile Failure Domains ---
 
@@ -221,30 +258,65 @@ func (r *Beskar7ClusterReconciler) findControlPlaneEndpoint(ctx context.Context,
 			continue
 		}
 
-		// Check if Machine has an address in its status
-		if len(machine.Status.Addresses) == 0 {
-			logger.V(1).Info("Skipping machine, no addresses found in status", "machine", machine.Name)
+		// Get the associated Beskar7Machine
+		b7machine := &infrastructurev1alpha1.Beskar7Machine{}
+		b7machineKey := client.ObjectKey{
+			Namespace: machine.Namespace,
+			Name:      machine.Spec.InfrastructureRef.Name,
+		}
+		if err := r.Get(ctx, b7machineKey, b7machine); err != nil {
+			logger.V(1).Info("Skipping machine, failed to get Beskar7Machine", "machine", machine.Name, "error", err)
 			continue
 		}
 
-		// Select the first available address (prefer internal IP, then external)
-		// TODO: Add more sophisticated address selection logic if needed (IPv4 vs IPv6?)
-		var selectedAddress string
-		for _, addr := range machine.Status.Addresses {
-			if addr.Type == clusterv1.MachineInternalIP {
-				selectedAddress = addr.Address
-				break
-			}
-		}
-		if selectedAddress == "" {
-			selectedAddress = machine.Status.Addresses[0].Address // Fallback to the first address
+		// First try to use the preferred IP from Beskar7Machine status
+		if b7machine.Status.IPAddresses.PreferredIP != "" {
+			logger.Info("Using preferred IP from Beskar7Machine status", "machine", machine.Name, "ip", b7machine.Status.IPAddresses.PreferredIP)
+			return &clusterv1.APIEndpoint{
+				Host: b7machine.Status.IPAddresses.PreferredIP,
+				Port: 6443, // Default Kubernetes API server port
+			}, nil
 		}
 
-		logger.Info("Found suitable control plane machine endpoint", "machine", machine.Name, "address", selectedAddress)
-		return &clusterv1.APIEndpoint{
-			Host: selectedAddress,
-			Port: 6443, // Default Kubernetes API server port
-		}, nil
+		// If no preferred IP, try to use internal IPs
+		if len(b7machine.Status.IPAddresses.InternalIPs) > 0 {
+			logger.Info("Using first internal IP from Beskar7Machine status", "machine", machine.Name, "ip", b7machine.Status.IPAddresses.InternalIPs[0])
+			return &clusterv1.APIEndpoint{
+				Host: b7machine.Status.IPAddresses.InternalIPs[0],
+				Port: 6443,
+			}, nil
+		}
+
+		// If no internal IPs, try to use external IPs
+		if len(b7machine.Status.IPAddresses.ExternalIPs) > 0 {
+			logger.Info("Using first external IP from Beskar7Machine status", "machine", machine.Name, "ip", b7machine.Status.IPAddresses.ExternalIPs[0])
+			return &clusterv1.APIEndpoint{
+				Host: b7machine.Status.IPAddresses.ExternalIPs[0],
+				Port: 6443,
+			}, nil
+		}
+
+		// Fallback to the original Machine.Status.Addresses if no IPs in Beskar7Machine status
+		if len(machine.Status.Addresses) > 0 {
+			// Try to find an internal IP first
+			for _, addr := range machine.Status.Addresses {
+				if addr.Type == clusterv1.MachineInternalIP {
+					logger.Info("Using internal IP from Machine status", "machine", machine.Name, "ip", addr.Address)
+					return &clusterv1.APIEndpoint{
+						Host: addr.Address,
+						Port: 6443,
+					}, nil
+				}
+			}
+			// Fallback to the first address
+			logger.Info("Using first address from Machine status", "machine", machine.Name, "ip", machine.Status.Addresses[0].Address)
+			return &clusterv1.APIEndpoint{
+				Host: machine.Status.Addresses[0].Address,
+				Port: 6443,
+			}, nil
+		}
+
+		logger.V(1).Info("Skipping machine, no suitable IP addresses found", "machine", machine.Name)
 	}
 
 	// No suitable machine found yet
@@ -278,4 +350,41 @@ func (r *Beskar7ClusterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		For(&infrastructurev1alpha1.Beskar7Cluster{}).
 		// TODO: Add watches for CAPI Cluster if needed?
 		Complete(r)
+}
+
+// isValidLabelKey checks if a string is a valid Kubernetes label key
+func isValidLabelKey(key string) bool {
+	// Kubernetes label keys must:
+	// 1. Be a valid DNS subdomain
+	// 2. Consist of alphanumeric characters, '-', '_' or '.'
+	// 3. Start and end with an alphanumeric character
+	// 4. Not contain consecutive dots
+	// 5. Not be empty
+	if len(key) == 0 {
+		return false
+	}
+
+	// Check for consecutive dots
+	if strings.Contains(key, "..") {
+		return false
+	}
+
+	// Check first and last character
+	if !isAlphanumeric(rune(key[0])) || !isAlphanumeric(rune(key[len(key)-1])) {
+		return false
+	}
+
+	// Check all characters
+	for _, c := range key {
+		if !isAlphanumeric(c) && c != '-' && c != '_' && c != '.' {
+			return false
+		}
+	}
+
+	return true
+}
+
+// isAlphanumeric checks if a rune is alphanumeric
+func isAlphanumeric(r rune) bool {
+	return (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9')
 }

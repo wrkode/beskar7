@@ -215,6 +215,11 @@ func (r *Beskar7MachineReconciler) reconcileNormal(ctx context.Context, logger l
 		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 	}
 
+	// Update IP addresses if the machine has them
+	if len(machine.Status.Addresses) > 0 {
+		r.updateIPAddresses(b7machine, machine.Status.Addresses)
+	}
+
 	return ctrl.Result{}, nil
 }
 
@@ -613,4 +618,29 @@ func parseProviderID(providerID string) (string, string, error) {
 		return "", "", errors.Errorf("invalid providerID %q: expected format %s<namespace>/<name>", providerID, ProviderIDPrefix)
 	}
 	return parts[0], parts[1], nil
+}
+
+// updateIPAddresses updates the IP addresses in the Beskar7Machine status based on the provided addresses.
+func (r *Beskar7MachineReconciler) updateIPAddresses(b7machine *infrastructurev1alpha1.Beskar7Machine, addresses []clusterv1.MachineAddress) {
+	// Clear existing IP addresses
+	b7machine.Status.IPAddresses.InternalIPs = nil
+	b7machine.Status.IPAddresses.ExternalIPs = nil
+	b7machine.Status.IPAddresses.PreferredIP = ""
+
+	// Categorize addresses
+	for _, addr := range addresses {
+		switch addr.Type {
+		case clusterv1.MachineInternalIP:
+			b7machine.Status.IPAddresses.InternalIPs = append(b7machine.Status.IPAddresses.InternalIPs, addr.Address)
+		case clusterv1.MachineExternalIP:
+			b7machine.Status.IPAddresses.ExternalIPs = append(b7machine.Status.IPAddresses.ExternalIPs, addr.Address)
+		}
+	}
+
+	// Set preferred IP (first internal IP, or first external IP if no internal IPs)
+	if len(b7machine.Status.IPAddresses.InternalIPs) > 0 {
+		b7machine.Status.IPAddresses.PreferredIP = b7machine.Status.IPAddresses.InternalIPs[0]
+	} else if len(b7machine.Status.IPAddresses.ExternalIPs) > 0 {
+		b7machine.Status.IPAddresses.PreferredIP = b7machine.Status.IPAddresses.ExternalIPs[0]
+	}
 }

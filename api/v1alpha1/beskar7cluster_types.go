@@ -27,6 +27,16 @@ type Beskar7ClusterSpec struct {
 	// +optional
 	ControlPlaneEndpoint clusterv1.APIEndpoint `json:"controlPlaneEndpoint,omitempty"`
 
+	// FailureDomainLabels specifies the label keys to use for failure domain discovery.
+	// If not specified, defaults to ["topology.kubernetes.io/zone"].
+	// Labels are checked in order, and the first matching label is used.
+	// +optional
+	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=5
+	// +kubebuilder:validation:Items=string
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$`
+	FailureDomainLabels []string `json:"failureDomainLabels,omitempty"`
+
 	// TODO: Add any Beskar7 specific cluster configuration here
 	// Example: Redfish discovery settings, global power management policies?
 }
@@ -57,12 +67,20 @@ type Beskar7ClusterStatus struct {
 const (
 	// ControlPlaneEndpointReady documents the availability of the Control Plane Endpoint.
 	ControlPlaneEndpointReady clusterv1.ConditionType = "ControlPlaneEndpointReady"
+	// FailureDomainsReady documents the availability of failure domains.
+	FailureDomainsReady clusterv1.ConditionType = "FailureDomainsReady"
 )
 
 // Beskar7Cluster condition reasons
 const (
 	// ControlPlaneEndpointNotSetReason indicates the ControlPlaneEndpoint is not defined in the spec.
 	ControlPlaneEndpointNotSetReason = "ControlPlaneEndpointNotSet"
+	// InvalidFailureDomainLabelReason indicates that a failure domain label has an invalid format.
+	InvalidFailureDomainLabelReason = "InvalidFailureDomainLabel"
+	// ListFailedReason indicates that listing PhysicalHosts failed.
+	ListFailedReason = "ListFailed"
+	// NoFailureDomainsReason indicates that no failure domains were found.
+	NoFailureDomainsReason = "NoFailureDomains"
 )
 
 //+kubebuilder:object:root=true
