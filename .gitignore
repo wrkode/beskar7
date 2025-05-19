@@ -28,7 +28,7 @@
 # OS generated files
 .DS_Store
 ._*
-Thumbs.db
+Thumbs.db 
 
 # Test CRDs
 config/test-crds/ 

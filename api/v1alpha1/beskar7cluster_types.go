@@ -33,6 +33,7 @@ type Beskar7ClusterSpec struct {
 	// +optional
 	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:MaxItems=5
+	// +kubebuilder:validation:Items=string
 	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$`
 	FailureDomainLabels []string `json:"failureDomainLabels,omitempty"`
 
