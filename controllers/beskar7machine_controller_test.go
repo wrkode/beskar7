@@ -1080,4 +1080,132 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 
 	})
 
+	It("should update IP addresses in Beskar7Machine status", func() {
+		// Create a Beskar7Machine
+		b7machine := &infrastructurev1alpha1.Beskar7Machine{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-machine",
+				Namespace: testNs.Name,
+			},
+			Spec: infrastructurev1alpha1.Beskar7MachineSpec{
+				OSFamily:  "kairos",
+				ImageURL:  "http://example.com/image.iso",
+				ConfigURL: "http://example.com/config.yaml",
+			},
+		}
+		Expect(k8sClient.Create(ctx, b7machine)).To(Succeed())
+
+		// Create a CAPI Machine with addresses
+		machine := &clusterv1.Machine{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-machine",
+				Namespace: testNs.Name,
+				Labels: map[string]string{
+					clusterv1.ClusterNameLabel: "test-cluster",
+				},
+			},
+			Spec: clusterv1.MachineSpec{
+				ClusterName: "test-cluster",
+				InfrastructureRef: corev1.ObjectReference{
+					APIVersion: infrastructurev1alpha1.GroupVersion.String(),
+					Kind:       "Beskar7Machine",
+					Name:       b7machine.Name,
+					Namespace:  b7machine.Namespace,
+				},
+			},
+			Status: clusterv1.MachineStatus{
+				Addresses: []clusterv1.MachineAddress{
+					{Type: clusterv1.MachineInternalIP, Address: "192.168.1.10"},
+					{Type: clusterv1.MachineInternalIP, Address: "10.0.0.1"},
+					{Type: clusterv1.MachineExternalIP, Address: "1.1.1.1"},
+					{Type: clusterv1.MachineExternalIP, Address: "2.2.2.2"},
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, machine)).To(Succeed())
+
+		// Create the reconciler
+		reconciler := &Beskar7MachineReconciler{
+			Client: k8sClient,
+			Scheme: k8sClient.Scheme(),
+		}
+
+		// Reconcile
+		result, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(b7machine)})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result.Requeue).To(BeFalse())
+
+		// Check that IP addresses were updated correctly
+		Eventually(func(g Gomega) {
+			updatedB7Machine := &infrastructurev1alpha1.Beskar7Machine{}
+			g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(b7machine), updatedB7Machine)).To(Succeed())
+			g.Expect(updatedB7Machine.Status.IPAddresses.InternalIPs).To(ConsistOf("192.168.1.10", "10.0.0.1"))
+			g.Expect(updatedB7Machine.Status.IPAddresses.ExternalIPs).To(ConsistOf("1.1.1.1", "2.2.2.2"))
+			g.Expect(updatedB7Machine.Status.IPAddresses.PreferredIP).To(Equal("192.168.1.10"))
+		}, "5s", "100ms").Should(Succeed())
+	})
+
+	It("should handle machines with only external IPs", func() {
+		// Create a Beskar7Machine
+		b7machine := &infrastructurev1alpha1.Beskar7Machine{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-machine-external",
+				Namespace: testNs.Name,
+			},
+			Spec: infrastructurev1alpha1.Beskar7MachineSpec{
+				OSFamily:  "kairos",
+				ImageURL:  "http://example.com/image.iso",
+				ConfigURL: "http://example.com/config.yaml",
+			},
+		}
+		Expect(k8sClient.Create(ctx, b7machine)).To(Succeed())
+
+		// Create a CAPI Machine with only external addresses
+		machine := &clusterv1.Machine{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-machine-external",
+				Namespace: testNs.Name,
+				Labels: map[string]string{
+					clusterv1.ClusterNameLabel: "test-cluster",
+				},
+			},
+			Spec: clusterv1.MachineSpec{
+				ClusterName: "test-cluster",
+				InfrastructureRef: corev1.ObjectReference{
+					APIVersion: infrastructurev1alpha1.GroupVersion.String(),
+					Kind:       "Beskar7Machine",
+					Name:       b7machine.Name,
+					Namespace:  b7machine.Namespace,
+				},
+			},
+			Status: clusterv1.MachineStatus{
+				Addresses: []clusterv1.MachineAddress{
+					{Type: clusterv1.MachineExternalIP, Address: "1.1.1.1"},
+					{Type: clusterv1.MachineExternalIP, Address: "2.2.2.2"},
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, machine)).To(Succeed())
+
+		// Create the reconciler
+		reconciler := &Beskar7MachineReconciler{
+			Client: k8sClient,
+			Scheme: k8sClient.Scheme(),
+		}
+
+		// Reconcile
+		result, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(b7machine)})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result.Requeue).To(BeFalse())
+
+		// Check that IP addresses were updated correctly
+		Eventually(func(g Gomega) {
+			updatedB7Machine := &infrastructurev1alpha1.Beskar7Machine{}
+			g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(b7machine), updatedB7Machine)).To(Succeed())
+			g.Expect(updatedB7Machine.Status.IPAddresses.InternalIPs).To(BeEmpty())
+			g.Expect(updatedB7Machine.Status.IPAddresses.ExternalIPs).To(ConsistOf("1.1.1.1", "2.2.2.2"))
+			g.Expect(updatedB7Machine.Status.IPAddresses.PreferredIP).To(Equal("1.1.1.1"))
+		}, "5s", "100ms").Should(Succeed())
+	})
+
 })
