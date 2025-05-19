@@ -89,4 +89,7 @@ release-manifests:
 	$(KUSTOMIZE) build config/default > beskar7-manifests-$(VERSION).yaml
 	@echo "Release manifests generated: beskar7-manifests-$(VERSION).yaml"
 
-.PHONY: build generate manifests test docker-build docker-push deploy install-controller-gen install uninstall undeploy rbac crd release-manifests 
+.PHONY: build generate manifests test docker-build docker-push deploy install-controller-gen install uninstall undeploy rbac crd release-manifests clean
+clean:
+	rm -f config/crd/bases/*.yaml
+	rm -f config/rbac/*.yaml 

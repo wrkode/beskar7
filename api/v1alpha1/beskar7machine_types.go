@@ -63,6 +63,22 @@ type Beskar7MachineSpec struct {
 	ConfigURL string `json:"configURL,omitempty"`
 }
 
+// IPAddresses contains the IP addresses of the machine, categorized by type.
+type IPAddresses struct {
+	// InternalIPs contains the internal IP addresses of the machine.
+	// +optional
+	InternalIPs []string `json:"internalIPs,omitempty"`
+
+	// ExternalIPs contains the external IP addresses of the machine.
+	// +optional
+	ExternalIPs []string `json:"externalIPs,omitempty"`
+
+	// PreferredIP is the preferred IP address to use for this machine.
+	// This is typically the first internal IP, or if none exists, the first external IP.
+	// +optional
+	PreferredIP string `json:"preferredIP,omitempty"`
+}
+
 // Beskar7MachineStatus defines the observed state of Beskar7Machine
 type Beskar7MachineStatus struct {
 	// Ready indicates the machine is ready.
@@ -75,20 +91,7 @@ type Beskar7MachineStatus struct {
 
 	// IPAddresses contains the IP addresses of the machine, categorized by type.
 	// +optional
-	IPAddresses struct {
-		// InternalIPs contains the internal IP addresses of the machine.
-		// +optional
-		InternalIPs []string `json:"internalIPs,omitempty"`
-
-		// ExternalIPs contains the external IP addresses of the machine.
-		// +optional
-		ExternalIPs []string `json:"externalIPs,omitempty"`
-
-		// PreferredIP is the preferred IP address to use for this machine.
-		// This is typically the first internal IP, or if none exists, the first external IP.
-		// +optional
-		PreferredIP string `json:"preferredIP,omitempty"`
-	} `json:"ipAddresses,omitempty"`
+	IPAddresses IPAddresses `json:"ipAddresses,omitempty"`
 
 	// Phase represents the current phase of machine provisioning.
 	// E.g., Pending, Provisioning, Provisioned, Failed, Deleting

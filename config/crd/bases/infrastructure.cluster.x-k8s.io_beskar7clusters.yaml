@@ -58,6 +58,12 @@ spec:
                 - host
                 - port
                 type: object
+              failureDomainLabels:
+                items:
+                  type: string
+                maxItems: 5
+                minItems: 1
+                type: array
             type: object
           status:
             properties:

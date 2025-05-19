@@ -124,6 +124,19 @@ spec:
                 type: string
               failureReason:
                 type: string
+              ipAddresses:
+                properties:
+                  externalIPs:
+                    items:
+                      type: string
+                    type: array
+                  internalIPs:
+                    items:
+                      type: string
+                    type: array
+                  preferredIP:
+                    type: string
+                type: object
               phase:
                 type: string
               ready:
