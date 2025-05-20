@@ -93,3 +93,4 @@ release-manifests:
 clean:
 	rm -f config/crd/bases/*.yaml
 	rm -f config/rbac/*.yaml 
+	rm -f bin/manager
