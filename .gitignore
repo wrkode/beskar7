@@ -32,3 +32,8 @@ Thumbs.db
 
 # Test CRDs
 config/test-crds/ 
+
+# momentairly ignored
+.github/
+.github/*
+docs/release.md
