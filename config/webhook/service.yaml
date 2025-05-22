@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: beskar7-webhook-service
+  namespace: beskar7-system
+spec:
+  ports:
+  - port: 443
+    targetPort: 9443
+  selector:
+    app.kubernetes.io/name: beskar7
+    app.kubernetes.io/instance: manager
+    app.kubernetes.io/component: controller 

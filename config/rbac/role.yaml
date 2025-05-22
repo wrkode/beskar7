@@ -11,8 +11,8 @@ rules:
   verbs:
   - get
   - list
+  - watch
   - watch // Needed for Redfish credentials
-  - watch // Needed for UserData
 - apiGroups:
   - '*'
   resources:
@@ -22,24 +22,13 @@ rules:
 - apiGroups:
   - cluster.x-k8s.io
   resources:
-  - clusters
-  - clusters/status
+  - machines
   verbs:
   - get
   - list
   - watch
 - apiGroups:
-  - cluster.x-k8s.io
-  resources:
-  - machines
-  - machines/status
-  verbs:
-  - get
-  - list
-  - watch // Needed to find control plane machine addresses
-  - watch // Needed to interact with Machine object
-- apiGroups:
-  - infrastructure.cluster.x-k8s.io
+  - infrastructure.beskar7.io
   resources:
   - beskar7clusters
   - beskar7machines
@@ -52,23 +41,31 @@ rules:
   - update
   - watch
 - apiGroups:
-  - infrastructure.cluster.x-k8s.io
+  - infrastructure.beskar7.io
   resources:
   - beskar7clusters/finalizers
   - beskar7machines/finalizers
-  - physicalhosts/finalizers
   verbs:
   - update
 - apiGroups:
-  - infrastructure.cluster.x-k8s.io
+  - infrastructure.beskar7.io
   resources:
   - beskar7clusters/status
   - beskar7machines/status
-  - physicalhosts/status
   verbs:
   - get
   - patch
   - update
+- apiGroups:
+  - infrastructure.beskar7.io
+  resources:
+  - physicalhosts
+  verbs:
+  - get
+  - list
+  - patch
+  - update
+  - watch
 - apiGroups:
   - infrastructure.cluster.x-k8s.io
   resources:
@@ -79,10 +76,22 @@ rules:
   - get
   - list
   - patch
-  - patch // Needed to find and claim/patch PhysicalHost
   - update
   - watch
-  - watch // Needed to discover failure domains
+- apiGroups:
+  - infrastructure.cluster.x-k8s.io
+  resources:
+  - physicalhosts/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - infrastructure.cluster.x-k8s.io
+  resources:
+  - physicalhosts/status
+  verbs:
+  - get
+  - patch
+  - update
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role

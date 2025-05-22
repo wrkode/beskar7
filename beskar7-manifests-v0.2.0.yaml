@@ -2,14 +2,25 @@ apiVersion: v1
 kind: Namespace
 metadata:
   labels:
+    app.kubernetes.io/component: controller
+    app.kubernetes.io/instance: manager
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: beskar7
+    app.kubernetes.io/part-of: beskar7
     control-plane: controller-manager
-  name: system
+  name: beskar7-system
 ---
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.18.0
+  labels:
+    app.kubernetes.io/component: controller
+    app.kubernetes.io/instance: manager
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: beskar7
+    app.kubernetes.io/part-of: beskar7
   name: beskar7clusters.infrastructure.cluster.x-k8s.io
 spec:
   group: infrastructure.cluster.x-k8s.io
@@ -64,6 +75,12 @@ spec:
                 - host
                 - port
                 type: object
+              failureDomainLabels:
+                items:
+                  type: string
+                maxItems: 5
+                minItems: 1
+                type: array
             type: object
           status:
             properties:
@@ -133,6 +150,12 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.18.0
+  labels:
+    app.kubernetes.io/component: controller
+    app.kubernetes.io/instance: manager
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: beskar7
+    app.kubernetes.io/part-of: beskar7
   name: beskar7machines.infrastructure.cluster.x-k8s.io
 spec:
   group: infrastructure.cluster.x-k8s.io
@@ -253,6 +276,19 @@ spec:
                 type: string
               failureReason:
                 type: string
+              ipAddresses:
+                properties:
+                  externalIPs:
+                    items:
+                      type: string
+                    type: array
+                  internalIPs:
+                    items:
+                      type: string
+                    type: array
+                  preferredIP:
+                    type: string
+                type: object
               phase:
                 type: string
               ready:
@@ -269,6 +305,12 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.18.0
+  labels:
+    app.kubernetes.io/component: controller
+    app.kubernetes.io/instance: manager
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: beskar7
+    app.kubernetes.io/part-of: beskar7
   name: beskar7machinetemplates.infrastructure.cluster.x-k8s.io
 spec:
   group: infrastructure.cluster.x-k8s.io
@@ -336,6 +378,12 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.18.0
+  labels:
+    app.kubernetes.io/component: controller
+    app.kubernetes.io/instance: manager
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: beskar7
+    app.kubernetes.io/part-of: beskar7
   name: physicalhosts.infrastructure.cluster.x-k8s.io
 spec:
   group: infrastructure.cluster.x-k8s.io
@@ -445,6 +493,21 @@ spec:
                   - type
                   type: object
                 type: array
+              errorDetails:
+                properties:
+                  code:
+                    type: string
+                  lastAttemptTime:
+                    format: date-time
+                    type: string
+                  message:
+                    type: string
+                  retryCount:
+                    format: int32
+                    type: integer
+                  type:
+                    type: string
+                type: object
               errorMessage:
                 type: string
               hardwareDetails:
@@ -469,8 +532,32 @@ spec:
                     - State
                     type: object
                 type: object
+              lastStateTransitionReason:
+                type: string
+              lastStateTransitionTime:
+                format: date-time
+                type: string
               observedPowerState:
                 type: string
+              progress:
+                properties:
+                  currentStep:
+                    type: string
+                  currentStepNumber:
+                    format: int32
+                    type: integer
+                  lastUpdateTime:
+                    format: date-time
+                    type: string
+                  operation:
+                    type: string
+                  startTime:
+                    format: date-time
+                    type: string
+                  totalSteps:
+                    format: int32
+                    type: integer
+                type: object
               ready:
                 default: false
                 type: boolean
@@ -485,17 +572,17 @@ spec:
     subresources:
       status: {}
 ---
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: controller-manager
-  namespace: system
----
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: manager-role
-  namespace: system
+  labels:
+    app.kubernetes.io/component: controller
+    app.kubernetes.io/instance: manager
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: beskar7
+    app.kubernetes.io/part-of: beskar7
+  name: beskar7-manager-role
+  namespace: beskar7-system
 rules:
 - apiGroups:
   - rbac.authorization.k8s.io
@@ -514,7 +601,13 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: manager-role
+  labels:
+    app.kubernetes.io/component: controller
+    app.kubernetes.io/instance: manager
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: beskar7
+    app.kubernetes.io/part-of: beskar7
+  name: beskar7-manager-role
 rules:
 - apiGroups:
   - ""
@@ -523,8 +616,8 @@ rules:
   verbs:
   - get
   - list
+  - watch
   - watch // Needed for Redfish credentials
-  - watch // Needed for UserData
 - apiGroups:
   - '*'
   resources:
@@ -534,24 +627,13 @@ rules:
 - apiGroups:
   - cluster.x-k8s.io
   resources:
-  - clusters
-  - clusters/status
+  - machines
   verbs:
   - get
   - list
   - watch
 - apiGroups:
-  - cluster.x-k8s.io
-  resources:
-  - machines
-  - machines/status
-  verbs:
-  - get
-  - list
-  - watch // Needed to find control plane machine addresses
-  - watch // Needed to interact with Machine object
-- apiGroups:
-  - infrastructure.cluster.x-k8s.io
+  - infrastructure.beskar7.io
   resources:
   - beskar7clusters
   - beskar7machines
@@ -564,23 +646,31 @@ rules:
   - update
   - watch
 - apiGroups:
-  - infrastructure.cluster.x-k8s.io
+  - infrastructure.beskar7.io
   resources:
   - beskar7clusters/finalizers
   - beskar7machines/finalizers
-  - physicalhosts/finalizers
   verbs:
   - update
 - apiGroups:
-  - infrastructure.cluster.x-k8s.io
+  - infrastructure.beskar7.io
   resources:
   - beskar7clusters/status
   - beskar7machines/status
-  - physicalhosts/status
   verbs:
   - get
   - patch
   - update
+- apiGroups:
+  - infrastructure.beskar7.io
+  resources:
+  - physicalhosts
+  verbs:
+  - get
+  - list
+  - patch
+  - update
+  - watch
 - apiGroups:
   - infrastructure.cluster.x-k8s.io
   resources:
@@ -591,44 +681,158 @@ rules:
   - get
   - list
   - patch
-  - patch // Needed to find and claim/patch PhysicalHost
   - update
   - watch
-  - watch // Needed to discover failure domains
+- apiGroups:
+  - infrastructure.cluster.x-k8s.io
+  resources:
+  - physicalhosts/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - infrastructure.cluster.x-k8s.io
+  resources:
+  - physicalhosts/status
+  verbs:
+  - get
+  - patch
+  - update
 ---
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
+apiVersion: v1
+kind: Service
 metadata:
-  name: manager-rolebinding
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: manager-role
-subjects:
-- kind: ServiceAccount
-  name: controller-manager
-  namespace: system
+  labels:
+    app.kubernetes.io/component: controller
+    app.kubernetes.io/instance: manager
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: beskar7
+    app.kubernetes.io/part-of: beskar7
+  name: beskar7-beskar7-webhook-service
+  namespace: beskar7-system
+spec:
+  ports:
+  - port: 443
+    targetPort: 9443
+  selector:
+    app.kubernetes.io/component: controller
+    app.kubernetes.io/instance: manager
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: beskar7
+    app.kubernetes.io/part-of: beskar7
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   labels:
+    app.kubernetes.io/component: controller
+    app.kubernetes.io/instance: manager
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: beskar7
+    app.kubernetes.io/part-of: beskar7
     control-plane: controller-manager
-  name: controller-manager
-  namespace: system
+  name: beskar7-controller-manager
+  namespace: beskar7-system
 spec:
   replicas: 1
   selector:
     matchLabels:
+      app.kubernetes.io/component: controller
+      app.kubernetes.io/instance: manager
+      app.kubernetes.io/managed-by: kustomize
+      app.kubernetes.io/name: beskar7
+      app.kubernetes.io/part-of: beskar7
       control-plane: controller-manager
   template:
     metadata:
       annotations:
         kubectl.kubernetes.io/default-container: manager
       labels:
+        app.kubernetes.io/component: controller
+        app.kubernetes.io/instance: manager
+        app.kubernetes.io/managed-by: kustomize
+        app.kubernetes.io/name: beskar7
+        app.kubernetes.io/part-of: beskar7
         control-plane: controller-manager
     spec:
       containers:
+      - args:
+        - --health-probe-bind-address=:8081
+        - --metrics-bind-address=127.0.0.1:8080
+        - --leader-elect
+        command:
+        - /manager
+        env:
+        - name: BESKAR7_REDFISH_SCHEME
+          value: https
+        - name: BESKAR7_REDFISH_PORT
+          value: "443"
+        - name: BESKAR7_REDFISH_TIMEOUT
+          value: 30s
+        - name: BESKAR7_CONTROLLER_REQUEUE_INTERVAL
+          value: 15s
+        - name: BESKAR7_CONTROLLER_REQUEUE_AFTER_ERROR
+          value: 5m
+        - name: BESKAR7_CONTROLLER_REQUEUE_AFTER_NO_HOST
+          value: 1m
+        - name: BESKAR7_RETRY_INITIAL_INTERVAL
+          value: 1s
+        - name: BESKAR7_RETRY_MAX_INTERVAL
+          value: 5m
+        - name: BESKAR7_RETRY_MULTIPLIER
+          value: "2.0"
+        - name: BESKAR7_RETRY_MAX_ATTEMPTS
+          value: "5"
+        - name: BESKAR7_RETRY_MAX_ELAPSED_TIME
+          value: 15m
+        - name: BESKAR7_BOOT_DEFAULT_EFI_PATH
+          value: \EFI\BOOT\BOOTX64.EFI
+        - name: BESKAR7_BOOT_DEFAULT_OVERRIDE_ENABLED
+          value: Once
+        - name: BESKAR7_BOOT_DEFAULT_OVERRIDE_TARGET
+          value: UefiTarget
+        image: ghcr.io/wrkode/beskar7:v0.1.0-dev
+        imagePullPolicy: Always
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8081
+          initialDelaySeconds: 15
+          periodSeconds: 20
+        name: manager
+        ports:
+        - containerPort: 8080
+          name: metrics
+          protocol: TCP
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: 8081
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        resources:
+          limits:
+            cpu: 500m
+            memory: 128Mi
+          requests:
+            cpu: 10m
+            memory: 64Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+      - args:
+        - --webhook-port=9443
+        - --webhook-cert-dir=/tmp/certs
+        image: controller:latest
+        name: webhook-server
+        ports:
+        - containerPort: 9443
+          protocol: TCP
+        volumeMounts:
+        - mountPath: /tmp/certs
+          name: webhook-certs
+          readOnly: true
       - args:
         - --secure-listen-address=0.0.0.0:8443
         - --upstream=http://127.0.0.1:8080/
@@ -652,40 +856,63 @@ spec:
           capabilities:
             drop:
             - ALL
-      - args:
-        - --health-probe-bind-address=:8081
-        - --metrics-bind-address=127.0.0.1:8080
-        - --leader-elect
-        command:
-        - /manager
-        image: ghcr.io/wrkode/beskar7:v0.1.0-dev
-        imagePullPolicy: Always
-        livenessProbe:
-          httpGet:
-            path: /healthz
-            port: 8081
-          initialDelaySeconds: 15
-          periodSeconds: 20
-        name: manager
-        readinessProbe:
-          httpGet:
-            path: /readyz
-            port: 8081
-          initialDelaySeconds: 5
-          periodSeconds: 10
-        resources:
-          limits:
-            cpu: 500m
-            memory: 128Mi
-          requests:
-            cpu: 10m
-            memory: 64Mi
-        securityContext:
-          allowPrivilegeEscalation: false
-          capabilities:
-            drop:
-            - ALL
       securityContext:
         runAsNonRoot: true
       serviceAccountName: controller-manager
       terminationGracePeriodSeconds: 10
+      volumes:
+      - name: webhook-certs
+        secret:
+          secretName: beskar7-webhook-server-cert
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  labels:
+    app.kubernetes.io/component: controller
+    app.kubernetes.io/instance: manager
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: beskar7
+    app.kubernetes.io/part-of: beskar7
+  name: beskar7-beskar7-validating-webhook-configuration
+webhooks:
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: beskar7-beskar7-webhook-service
+      namespace: beskar7-system
+      path: /validate-infrastructure-cluster-x-k8s-io-v1alpha1-beskar7cluster
+  failurePolicy: Fail
+  name: vbeskar7cluster.kb.io
+  rules:
+  - apiGroups:
+    - infrastructure.cluster.x-k8s.io
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - beskar7clusters
+  sideEffects: None
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: beskar7-beskar7-webhook-service
+      namespace: beskar7-system
+      path: /validate-infrastructure-cluster-x-k8s-io-v1alpha1-beskar7machine
+  failurePolicy: Fail
+  name: vbeskar7machine.kb.io
+  rules:
+  - apiGroups:
+    - infrastructure.cluster.x-k8s.io
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - beskar7machines
+  sideEffects: None

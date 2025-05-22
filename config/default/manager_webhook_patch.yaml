@@ -1,0 +1,25 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: controller-manager
+  namespace: beskar7-system
+spec:
+  template:
+    spec:
+      containers:
+      - name: webhook-server
+        image: controller:latest
+        args:
+        - --webhook-port=9443
+        - --webhook-cert-dir=/tmp/certs
+        ports:
+        - containerPort: 9443
+          protocol: TCP
+        volumeMounts:
+        - name: webhook-certs
+          mountPath: /tmp/certs
+          readOnly: true
+      volumes:
+      - name: webhook-certs
+        secret:
+          secretName: beskar7-webhook-server-cert 

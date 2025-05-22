@@ -42,6 +42,12 @@ const (
 	Beskar7ClusterFinalizer = "beskar7cluster.infrastructure.cluster.x-k8s.io"
 )
 
+//+kubebuilder:rbac:groups=infrastructure.beskar7.io,resources=beskar7clusters,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=infrastructure.beskar7.io,resources=beskar7clusters/status,verbs=get;update;patch
+//+kubebuilder:rbac:groups=infrastructure.beskar7.io,resources=beskar7clusters/finalizers,verbs=update
+//+kubebuilder:rbac:groups=cluster.x-k8s.io,resources=machines,verbs=get;list;watch
+//+kubebuilder:rbac:groups=infrastructure.beskar7.io,resources=physicalhosts,verbs=get;list;watch
+
 // Beskar7ClusterReconciler reconciles a Beskar7Cluster object
 type Beskar7ClusterReconciler struct {
 	client.Client
@@ -49,13 +55,6 @@ type Beskar7ClusterReconciler struct {
 	// Config holds the controller configuration
 	Config *config.Config
 }
-
-//+kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=beskar7clusters,verbs=get;list;watch;create;update;patch;delete
-//+kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=beskar7clusters/status,verbs=get;update;patch
-//+kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=beskar7clusters/finalizers,verbs=update
-//+kubebuilder:rbac:groups=cluster.x-k8s.io,resources=clusters;clusters/status,verbs=get;list;watch
-//+kubebuilder:rbac:groups=cluster.x-k8s.io,resources=machines;machines/status,verbs=get;list;watch // Needed to find control plane machine addresses
-//+kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=physicalhosts,verbs=get;list;watch // Needed to discover failure domains
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
