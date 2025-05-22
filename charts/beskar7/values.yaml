@@ -1,0 +1,96 @@
+# Default values for Beskar7
+replicaCount: 1
+
+image:
+  repository: ghcr.io/wrkode/beskar7
+  tag: v0.2.0
+  pullPolicy: IfNotPresent
+
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+rbac:
+  create: true
+
+podSecurityContext: {}
+  # fsGroup: 2000
+
+securityContext: {}
+  # capabilities:
+  #   drop:
+  #   - ALL
+  # readOnlyRootFilesystem: true
+  # runAsNonRoot: true
+  # runAsUser: 1000
+
+service:
+  type: ClusterIP
+  port: 443
+
+resources: {}
+  # limits:
+  #   cpu: 100m
+  #   memory: 128Mi
+  # requests:
+  #   cpu: 100m
+  #   memory: 128Mi
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
+
+# Webhook configuration
+webhook:
+  enabled: true
+  certManager:
+    enabled: false
+  failurePolicy: Fail
+  port: 9443
+
+# Prometheus configuration
+prometheus:
+  enabled: true
+  serviceMonitor:
+    enabled: true
+    interval: 10s
+    scrapeTimeout: 5s
+
+# Controller configuration
+controller:
+  redfish:
+    defaultScheme: https
+    defaultPort: 443
+    defaultTimeout: 30s
+  requeueInterval: 15s
+  requeueAfterError: 5m
+  requeueAfterNoHost: 1m
+  retry:
+    initialInterval: 1s
+    maxInterval: 5m
+    multiplier: 2.0
+    maxAttempts: 5
+    maxElapsedTime: 15m
+  boot:
+    defaultEfiPath: "\\EFI\\BOOT\\BOOTX64.EFI"
+    defaultOverrideEnabled: "Once"
+    defaultOverrideTarget: "UefiTarget"
+
+# Cert-manager configuration
+cert-manager:
+  enabled: false
+  installCRDs: true
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi 

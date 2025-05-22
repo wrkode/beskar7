@@ -1,0 +1,6 @@
+owner: wrkode
+git-repo: beskar7
+package-path: .cr-release-packages
+index-path: .cr-index
+pages-branch: gh-pages
+charts-repo: https://wrkode.github.io/beskar7 

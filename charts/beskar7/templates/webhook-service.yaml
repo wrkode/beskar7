@@ -1,0 +1,16 @@
+{{- if .Values.webhook.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "beskar7.webhookServiceName" . }}
+  labels:
+    {{- include "beskar7.labels" . | nindent 4 }}
+spec:
+  ports:
+    - port: 443
+      targetPort: {{ .Values.webhook.port }}
+      protocol: TCP
+      name: https
+  selector:
+    {{- include "beskar7.selectorLabels" . | nindent 4 }}
+{{- end }} 

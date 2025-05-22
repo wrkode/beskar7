@@ -89,7 +89,36 @@ release-manifests:
 	$(KUSTOMIZE) build config/default > beskar7-manifests-$(VERSION).yaml
 	@echo "Release manifests generated: beskar7-manifests-$(VERSION).yaml"
 
-.PHONY: build generate manifests test docker-build docker-push deploy install-controller-gen install uninstall undeploy rbac crd release-manifests clean
+# Helm targets
+.PHONY: helm-package
+helm-package: ## Package the Helm chart
+	helm package charts/beskar7
+
+.PHONY: helm-lint
+helm-lint: ## Lint the Helm chart
+	helm lint charts/beskar7
+
+.PHONY: helm-docs
+helm-docs: ## Generate Helm chart documentation
+	helm-docs -c charts/beskar7
+
+.PHONY: helm-test
+helm-test: ## Test the Helm chart
+	helm test beskar7
+
+.PHONY: helm-install
+helm-install: ## Install the Helm chart
+	helm install beskar7 charts/beskar7 --namespace beskar7-system --create-namespace
+
+.PHONY: helm-uninstall
+helm-uninstall: ## Uninstall the Helm chart
+	helm uninstall beskar7 --namespace beskar7-system
+
+.PHONY: helm-upgrade
+helm-upgrade: ## Upgrade the Helm chart
+	helm upgrade beskar7 charts/beskar7 --namespace beskar7-system
+
+.PHONY: clean
 clean:
 	rm -f config/crd/bases/*.yaml
 	rm -f config/rbac/*.yaml 

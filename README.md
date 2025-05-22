@@ -21,6 +21,10 @@ Beskar7 consists of several custom controllers that work together:
 *   [controller-gen](https://book.kubebuilder.io/reference/controller-gen.html) (`make install-controller-gen`)
 *   [kustomize](https://kubectl.docs.kubernetes.io/installation/kustomize/) (v4 or later for `make deploy`)
 *   A running Kubernetes cluster (e.g., kind, minikube, or a remote cluster) with `kubectl` configured.
+*   Kubernetes 1.19+
+*   Helm 3.2.0+
+*   Cluster API v1.4.0+
+*   cert-manager (optional, for webhook support)
 
 ## Getting Started
 
@@ -64,19 +68,27 @@ Beskar7 consists of several custom controllers that work together:
 
 ## Installation / Deployment
 
-### Using Pre-built Manifests (Recommended)
+### Using Helm
 
-1.  **Ensure prerequisites are met:** `kubectl` configured for your target cluster.
-2.  **Install CRDs:**
-    ```bash
-    make install
-    ```
-3.  **Deploy the Controller Manager:**
-    This will deploy the controller using the image defined in the Makefile (`ghcr.io/wrkode/beskar7:v0.1.0-dev` by default).
-    ```bash
-    make deploy
-    ```
-    *(Note: If you pushed the image to a different location, you MUST either override `IMG` in the Makefile and re-run `make manifests` before `make deploy`, or manually edit the deployment manifest in `config/manager/manager.yaml` before running `make deploy`.)*
+#### Add the Helm repository
+
+```bash
+helm repo add beskar7 https://wrkode.github.io/beskar7
+helm repo update
+```
+
+#### Install the chart
+
+```bash
+# Install with default values
+helm install beskar7 beskar7/beskar7
+
+# Install with custom values
+helm install beskar7 beskar7/beskar7 -f values.yaml
+
+# Install in a specific namespace
+helm install beskar7 beskar7/beskar7 --namespace beskar7-system --create-namespace
+```
 
 ### Manual Deployment using Kustomize:
 
@@ -254,3 +266,37 @@ go test ./controllers/... -v -ginkgo.v
 ```
 
 The test setup is designed to be portable and work across different systems. All required CRDs are downloaded locally and referenced from the repository, ensuring consistent test behavior across different environments.
+
+## Uninstalling
+
+### Using Helm
+
+```bash
+helm uninstall beskar7
+```
+
+### Manual Uninstallation
+
+1. **Undeploy the controller**
+
+   ```bash
+   make undeploy
+   ```
+
+2. **Uninstall CRDs**
+
+   ```bash
+   make uninstall
+   ```
+
+## Upgrading
+
+### Using Helm
+
+```bash
+helm upgrade beskar7 beskar7/beskar7
+```
+
+## License
+
+This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.

@@ -1,0 +1,107 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "beskar7.fullname" . }}
+  labels:
+    {{- include "beskar7.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "beskar7.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "beskar7.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "beskar7.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: {{ .Chart.Name }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - --leader-elect
+            {{- if .Values.webhook.enabled }}
+            - --webhook-port={{ .Values.webhook.port }}
+            - --webhook-cert-dir=/tmp/certs
+            {{- end }}
+          env:
+            - name: BESKAR7_REDFISH_SCHEME
+              value: {{ .Values.controller.redfish.defaultScheme | quote }}
+            - name: BESKAR7_REDFISH_PORT
+              value: {{ .Values.controller.redfish.defaultPort | quote }}
+            - name: BESKAR7_REDFISH_TIMEOUT
+              value: {{ .Values.controller.redfish.defaultTimeout | quote }}
+            - name: BESKAR7_CONTROLLER_REQUEUE_INTERVAL
+              value: {{ .Values.controller.requeueInterval | quote }}
+            - name: BESKAR7_CONTROLLER_REQUEUE_AFTER_ERROR
+              value: {{ .Values.controller.requeueAfterError | quote }}
+            - name: BESKAR7_CONTROLLER_REQUEUE_AFTER_NO_HOST
+              value: {{ .Values.controller.requeueAfterNoHost | quote }}
+            - name: BESKAR7_RETRY_INITIAL_INTERVAL
+              value: {{ .Values.controller.retry.initialInterval | quote }}
+            - name: BESKAR7_RETRY_MAX_INTERVAL
+              value: {{ .Values.controller.retry.maxInterval | quote }}
+            - name: BESKAR7_RETRY_MULTIPLIER
+              value: {{ .Values.controller.retry.multiplier | quote }}
+            - name: BESKAR7_RETRY_MAX_ATTEMPTS
+              value: {{ .Values.controller.retry.maxAttempts | quote }}
+            - name: BESKAR7_RETRY_MAX_ELAPSED_TIME
+              value: {{ .Values.controller.retry.maxElapsedTime | quote }}
+            - name: BESKAR7_BOOT_DEFAULT_EFI_PATH
+              value: {{ .Values.controller.boot.defaultEfiPath | quote }}
+            - name: BESKAR7_BOOT_DEFAULT_OVERRIDE_ENABLED
+              value: {{ .Values.controller.boot.defaultOverrideEnabled | quote }}
+            - name: BESKAR7_BOOT_DEFAULT_OVERRIDE_TARGET
+              value: {{ .Values.controller.boot.defaultOverrideTarget | quote }}
+          ports:
+            - name: metrics
+              containerPort: 8080
+              protocol: TCP
+            {{- if .Values.webhook.enabled }}
+            - name: webhook
+              containerPort: {{ .Values.webhook.port }}
+              protocol: TCP
+            {{- end }}
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8081
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8081
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          {{- if .Values.webhook.enabled }}
+          volumeMounts:
+            - name: webhook-certs
+              mountPath: /tmp/certs
+              readOnly: true
+          {{- end }}
+      {{- if .Values.webhook.enabled }}
+      volumes:
+        - name: webhook-certs
+          secret:
+            secretName: {{ include "beskar7.webhookSecretName" . }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }} 

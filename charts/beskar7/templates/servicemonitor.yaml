@@ -1,0 +1,19 @@
+{{- if and .Values.prometheus.enabled .Values.prometheus.serviceMonitor.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "beskar7.fullname" . }}
+  labels:
+    {{- include "beskar7.labels" . | nindent 4 }}
+spec:
+  endpoints:
+    - port: metrics
+      interval: {{ .Values.prometheus.serviceMonitor.interval }}
+      scrapeTimeout: {{ .Values.prometheus.serviceMonitor.scrapeTimeout }}
+  selector:
+    matchLabels:
+      {{- include "beskar7.selectorLabels" . | nindent 6 }}
+  namespaceSelector:
+    matchNames:
+      - {{ .Release.Namespace }}
+{{- end }} 
