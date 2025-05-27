@@ -1,0 +1,691 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  labels:
+    control-plane: controller-manager
+  name: system
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.18.0
+  name: beskar7clusters.infrastructure.cluster.x-k8s.io
+spec:
+  group: infrastructure.cluster.x-k8s.io
+  names:
+    categories:
+    - cluster-api
+    kind: Beskar7Cluster
+    listKind: Beskar7ClusterList
+    plural: beskar7clusters
+    shortNames:
+    - b7c
+    singular: beskar7cluster
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - description: Cluster to which this Beskar7Cluster belongs
+      jsonPath: .metadata.labels['cluster.x-k8s.io/cluster-name']
+      name: Cluster
+      type: string
+    - description: Control Plane Endpoint Host
+      jsonPath: .spec.controlPlaneEndpoint.host
+      name: Endpoint
+      type: string
+    - description: Cluster infrastructure is ready for bootstrapping
+      jsonPath: .status.ready
+      name: Ready
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        properties:
+          apiVersion:
+            type: string
+          kind:
+            type: string
+          metadata:
+            type: object
+          spec:
+            properties:
+              controlPlaneEndpoint:
+                properties:
+                  host:
+                    maxLength: 512
+                    type: string
+                  port:
+                    format: int32
+                    type: integer
+                required:
+                - host
+                - port
+                type: object
+            type: object
+          status:
+            properties:
+              conditions:
+                items:
+                  properties:
+                    lastTransitionTime:
+                      format: date-time
+                      type: string
+                    message:
+                      maxLength: 10240
+                      minLength: 1
+                      type: string
+                    reason:
+                      maxLength: 256
+                      minLength: 1
+                      type: string
+                    severity:
+                      maxLength: 32
+                      type: string
+                    status:
+                      type: string
+                    type:
+                      maxLength: 256
+                      minLength: 1
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - status
+                  - type
+                  type: object
+                type: array
+              controlPlaneEndpoint:
+                properties:
+                  host:
+                    maxLength: 512
+                    type: string
+                  port:
+                    format: int32
+                    type: integer
+                required:
+                - host
+                - port
+                type: object
+              failureDomains:
+                additionalProperties:
+                  properties:
+                    attributes:
+                      additionalProperties:
+                        type: string
+                      type: object
+                    controlPlane:
+                      type: boolean
+                  type: object
+                type: object
+              ready:
+                type: boolean
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.18.0
+  name: beskar7machines.infrastructure.cluster.x-k8s.io
+spec:
+  group: infrastructure.cluster.x-k8s.io
+  names:
+    kind: Beskar7Machine
+    listKind: Beskar7MachineList
+    plural: beskar7machines
+    singular: beskar7machine
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - description: Cluster to which this Beskar7Machine belongs
+      jsonPath: .metadata.labels.cluster.x-k8s.io/cluster-name
+      name: Cluster
+      type: string
+    - description: Current state of the Beskar7Machine
+      jsonPath: .status.phase
+      name: State
+      type: string
+    - description: Machine ready status
+      jsonPath: .status.ready
+      name: Ready
+      type: string
+    - description: Provider ID
+      jsonPath: .spec.providerID
+      name: ProviderID
+      type: string
+    - description: Machine object which owns this Beskar7Machine
+      jsonPath: .metadata.ownerReferences[?(@.kind=='Machine')].name
+      name: Machine
+      type: string
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        properties:
+          apiVersion:
+            type: string
+          kind:
+            type: string
+          metadata:
+            type: object
+          spec:
+            properties:
+              configURL:
+                type: string
+              imageURL:
+                type: string
+              osFamily:
+                enum:
+                - kairos
+                - talos
+                - flatcar
+                - LeapMicro
+                type: string
+              providerID:
+                type: string
+              provisioningMode:
+                enum:
+                - RemoteConfig
+                - PreBakedISO
+                type: string
+            required:
+            - imageURL
+            - osFamily
+            type: object
+          status:
+            properties:
+              addresses:
+                items:
+                  properties:
+                    address:
+                      maxLength: 256
+                      minLength: 1
+                      type: string
+                    type:
+                      enum:
+                      - Hostname
+                      - ExternalIP
+                      - InternalIP
+                      - ExternalDNS
+                      - InternalDNS
+                      type: string
+                  required:
+                  - address
+                  - type
+                  type: object
+                type: array
+              conditions:
+                items:
+                  properties:
+                    lastTransitionTime:
+                      format: date-time
+                      type: string
+                    message:
+                      maxLength: 10240
+                      minLength: 1
+                      type: string
+                    reason:
+                      maxLength: 256
+                      minLength: 1
+                      type: string
+                    severity:
+                      maxLength: 32
+                      type: string
+                    status:
+                      type: string
+                    type:
+                      maxLength: 256
+                      minLength: 1
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - status
+                  - type
+                  type: object
+                type: array
+              failureMessage:
+                type: string
+              failureReason:
+                type: string
+              phase:
+                type: string
+              ready:
+                type: boolean
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.18.0
+  name: beskar7machinetemplates.infrastructure.cluster.x-k8s.io
+spec:
+  group: infrastructure.cluster.x-k8s.io
+  names:
+    categories:
+    - cluster-api
+    kind: Beskar7MachineTemplate
+    listKind: Beskar7MachineTemplateList
+    plural: beskar7machinetemplates
+    shortNames:
+    - b7mt
+    singular: beskar7machinetemplate
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        properties:
+          apiVersion:
+            type: string
+          kind:
+            type: string
+          metadata:
+            type: object
+          spec:
+            properties:
+              template:
+                properties:
+                  spec:
+                    properties:
+                      configURL:
+                        type: string
+                      imageURL:
+                        type: string
+                      osFamily:
+                        enum:
+                        - kairos
+                        - talos
+                        - flatcar
+                        - LeapMicro
+                        type: string
+                      providerID:
+                        type: string
+                      provisioningMode:
+                        enum:
+                        - RemoteConfig
+                        - PreBakedISO
+                        type: string
+                    required:
+                    - imageURL
+                    - osFamily
+                    type: object
+                required:
+                - spec
+                type: object
+            required:
+            - template
+            type: object
+        type: object
+    served: true
+    storage: true
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.18.0
+  name: physicalhosts.infrastructure.cluster.x-k8s.io
+spec:
+  group: infrastructure.cluster.x-k8s.io
+  names:
+    kind: PhysicalHost
+    listKind: PhysicalHostList
+    plural: physicalhosts
+    shortNames:
+    - ph
+    singular: physicalhost
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - description: Current state of the Physical Host
+      jsonPath: .status.state
+      name: State
+      type: string
+    - description: Indicates if the host is ready
+      jsonPath: .status.ready
+      name: Ready
+      type: boolean
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        properties:
+          apiVersion:
+            type: string
+          kind:
+            type: string
+          metadata:
+            type: object
+          spec:
+            properties:
+              bootIsoSource:
+                type: string
+              consumerRef:
+                properties:
+                  apiVersion:
+                    type: string
+                  fieldPath:
+                    type: string
+                  kind:
+                    type: string
+                  name:
+                    type: string
+                  namespace:
+                    type: string
+                  resourceVersion:
+                    type: string
+                  uid:
+                    type: string
+                type: object
+                x-kubernetes-map-type: atomic
+              redfishConnection:
+                properties:
+                  address:
+                    type: string
+                  credentialsSecretRef:
+                    type: string
+                  insecureSkipVerify:
+                    type: boolean
+                required:
+                - address
+                - credentialsSecretRef
+                type: object
+              userDataSecretRef:
+                properties:
+                  name:
+                    default: ""
+                    type: string
+                type: object
+                x-kubernetes-map-type: atomic
+            required:
+            - redfishConnection
+            type: object
+          status:
+            properties:
+              conditions:
+                items:
+                  properties:
+                    lastTransitionTime:
+                      format: date-time
+                      type: string
+                    message:
+                      maxLength: 10240
+                      minLength: 1
+                      type: string
+                    reason:
+                      maxLength: 256
+                      minLength: 1
+                      type: string
+                    severity:
+                      maxLength: 32
+                      type: string
+                    status:
+                      type: string
+                    type:
+                      maxLength: 256
+                      minLength: 1
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - status
+                  - type
+                  type: object
+                type: array
+              errorMessage:
+                type: string
+              hardwareDetails:
+                properties:
+                  manufacturer:
+                    type: string
+                  model:
+                    type: string
+                  serialNumber:
+                    type: string
+                  status:
+                    properties:
+                      Health:
+                        type: string
+                      HealthRollup:
+                        type: string
+                      State:
+                        type: string
+                    required:
+                    - Health
+                    - HealthRollup
+                    - State
+                    type: object
+                type: object
+              observedPowerState:
+                type: string
+              ready:
+                default: false
+                type: boolean
+              state:
+                type: string
+            required:
+            - ready
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: controller-manager
+  namespace: system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: manager-role
+  namespace: system
+rules:
+- apiGroups:
+  - rbac.authorization.k8s.io
+  resources:
+  - rolebindings
+  - roles
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: manager-role
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - secrets
+  verbs:
+  - get
+  - list
+  - watch // Needed for Redfish credentials
+  - watch // Needed for UserData
+- apiGroups:
+  - '*'
+  resources:
+  - '*'
+  verbs:
+  - '*'
+- apiGroups:
+  - cluster.x-k8s.io
+  resources:
+  - clusters
+  - clusters/status
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - cluster.x-k8s.io
+  resources:
+  - machines
+  - machines/status
+  verbs:
+  - get
+  - list
+  - watch // Needed to find control plane machine addresses
+  - watch // Needed to interact with Machine object
+- apiGroups:
+  - infrastructure.cluster.x-k8s.io
+  resources:
+  - beskar7clusters
+  - beskar7machines
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - infrastructure.cluster.x-k8s.io
+  resources:
+  - beskar7clusters/finalizers
+  - beskar7machines/finalizers
+  - physicalhosts/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - infrastructure.cluster.x-k8s.io
+  resources:
+  - beskar7clusters/status
+  - beskar7machines/status
+  - physicalhosts/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - infrastructure.cluster.x-k8s.io
+  resources:
+  - physicalhosts
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - patch // Needed to find and claim/patch PhysicalHost
+  - update
+  - watch
+  - watch // Needed to discover failure domains
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: manager-rolebinding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: manager-role
+subjects:
+- kind: ServiceAccount
+  name: controller-manager
+  namespace: system
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    control-plane: controller-manager
+  name: controller-manager
+  namespace: system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      control-plane: controller-manager
+  template:
+    metadata:
+      annotations:
+        kubectl.kubernetes.io/default-container: manager
+      labels:
+        control-plane: controller-manager
+    spec:
+      containers:
+      - args:
+        - --secure-listen-address=0.0.0.0:8443
+        - --upstream=http://127.0.0.1:8080/
+        - --logtostderr=true
+        - --v=0
+        image: gcr.io/kubebuilder/kube-rbac-proxy:v0.15.0
+        name: kube-rbac-proxy
+        ports:
+        - containerPort: 8443
+          name: https
+          protocol: TCP
+        resources:
+          limits:
+            cpu: 500m
+            memory: 128Mi
+          requests:
+            cpu: 5m
+            memory: 64Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+      - args:
+        - --health-probe-bind-address=:8081
+        - --metrics-bind-address=127.0.0.1:8080
+        - --leader-elect
+        command:
+        - /manager
+        image: ghcr.io/wrkode/beskar7:v0.1.0-dev
+        imagePullPolicy: Always
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8081
+          initialDelaySeconds: 15
+          periodSeconds: 20
+        name: manager
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: 8081
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        resources:
+          limits:
+            cpu: 500m
+            memory: 128Mi
+          requests:
+            cpu: 10m
+            memory: 64Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+      securityContext:
+        runAsNonRoot: true
+      serviceAccountName: controller-manager
+      terminationGracePeriodSeconds: 10
