@@ -658,7 +658,7 @@ spec:
         - --leader-elect
         command:
         - /manager
-        image: ghcr.io/wrkode/beskar7:v0.1.0-dev
+        image: ghcr.io/wrkode/beskar7/beskar7:v0.2.4
         imagePullPolicy: Always
         livenessProbe:
           httpGet:
