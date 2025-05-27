@@ -118,7 +118,12 @@ func (r *PhysicalHostReconciler) Reconcile(ctx context.Context, req ctrl.Request
 
 // reconcileNormal handles the logic when the PhysicalHost is not being deleted.
 func (r *PhysicalHostReconciler) reconcileNormal(ctx context.Context, logger logr.Logger, physicalHost *infrastructurev1alpha1.PhysicalHost) (ctrl.Result, error) {
-	logger.Info("Reconciling PhysicalHost create/update")
+	logger = logger.WithValues(
+		"currentState", physicalHost.Status.State,
+		"consumerRef", physicalHost.Spec.ConsumerRef,
+		"bootIsoSource", physicalHost.Spec.BootISOSource,
+	)
+	logger.Info("Starting normal reconciliation")
 
 	// Ensure the object has a finalizer for cleanup
 	if controllerutil.AddFinalizer(physicalHost, PhysicalHostFinalizer) {
@@ -130,6 +135,7 @@ func (r *PhysicalHostReconciler) reconcileNormal(ctx context.Context, logger log
 	// --- Fetch Redfish Credentials ---
 	secretName := physicalHost.Spec.RedfishConnection.CredentialsSecretRef
 	if secretName == "" {
+		logger.Info("Missing credentials reference", "reason", "CredentialsSecretRef is not set in Spec")
 		conditions.MarkFalse(physicalHost, infrastructurev1alpha1.RedfishConnectionReadyCondition, infrastructurev1alpha1.MissingCredentialsReason, clusterv1.ConditionSeverityError, "CredentialsSecretRef is not set in Spec")
 		return ctrl.Result{}, errors.New("CredentialsSecretRef is not set")
 	}
@@ -190,11 +196,18 @@ func (r *PhysicalHostReconciler) reconcileNormal(ctx context.Context, logger log
 			SerialNumber: systemInfo.SerialNumber,
 			Status:       systemInfo.Status,
 		}
+		logger.Info("Updated hardware details",
+			"manufacturer", systemInfo.Manufacturer,
+			"model", systemInfo.Model,
+			"serialNumber", systemInfo.SerialNumber,
+			"status", systemInfo.Status.State)
 	} else {
 		physicalHost.Status.HardwareDetails = nil
+		logger.Info("No hardware details available")
 	}
 	if psErr == nil {
 		physicalHost.Status.ObservedPowerState = powerState
+		logger.Info("Updated power state", "powerState", powerState)
 	}
 
 	// Check for Redfish query errors
@@ -215,7 +228,9 @@ func (r *PhysicalHostReconciler) reconcileNormal(ctx context.Context, logger log
 
 	// Determine desired state and update conditions
 	if physicalHost.Spec.ConsumerRef == nil {
-		logger.Info("Host is available (no ConsumerRef)")
+		logger.Info("Host is available (no ConsumerRef)",
+			"previousState", physicalHost.Status.State,
+			"newState", infrastructurev1alpha1.StateAvailable)
 		physicalHost.Status.State = infrastructurev1alpha1.StateAvailable
 		conditions.MarkTrue(physicalHost, infrastructurev1alpha1.HostAvailableCondition)
 		conditions.Delete(physicalHost, infrastructurev1alpha1.HostProvisionedCondition) // No longer provisioned for a consumer
@@ -223,38 +238,57 @@ func (r *PhysicalHostReconciler) reconcileNormal(ctx context.Context, logger log
 	} else {
 		conditions.Delete(physicalHost, infrastructurev1alpha1.HostAvailableCondition) // No longer available
 		if physicalHost.Spec.BootISOSource == nil || *physicalHost.Spec.BootISOSource == "" {
-			logger.Info("Host is claimed but BootISOSource is not set")
+			logger.Info("Host is claimed but BootISOSource is not set",
+				"previousState", physicalHost.Status.State,
+				"newState", infrastructurev1alpha1.StateClaimed,
+				"consumerRef", physicalHost.Spec.ConsumerRef)
 			physicalHost.Status.State = infrastructurev1alpha1.StateClaimed
 			conditions.MarkFalse(physicalHost, infrastructurev1alpha1.HostProvisionedCondition, infrastructurev1alpha1.WaitingForBootInfoReason, clusterv1.ConditionSeverityInfo, "Waiting for BootISOSource to be set by consumer")
 		} else {
-			logger.Info("Provisioning requested")
+			logger.Info("Provisioning requested",
+				"previousState", physicalHost.Status.State,
+				"newState", infrastructurev1alpha1.StateProvisioning,
+				"consumerRef", physicalHost.Spec.ConsumerRef,
+				"bootIsoSource", *physicalHost.Spec.BootISOSource)
 			physicalHost.Status.State = infrastructurev1alpha1.StateProvisioning
 			conditions.MarkFalse(physicalHost, infrastructurev1alpha1.HostProvisionedCondition, infrastructurev1alpha1.ProvisioningReason, clusterv1.ConditionSeverityInfo, "Setting boot source and powering on")
 
 			// Set Boot ISO via VirtualMedia
 			isoURL := *physicalHost.Spec.BootISOSource
 			if err := rfClient.SetBootSourceISO(ctx, isoURL); err != nil {
-				logger.Error(err, "Failed to set boot source ISO")
+				logger.Error(err, "Failed to set boot source ISO",
+					"isoURL", isoURL,
+					"currentState", physicalHost.Status.State)
 				conditions.MarkFalse(physicalHost, infrastructurev1alpha1.HostProvisionedCondition, infrastructurev1alpha1.SetBootISOFailedReason, clusterv1.ConditionSeverityError, "Failed to set boot source ISO: %v", err.Error())
 				physicalHost.Status.State = infrastructurev1alpha1.StateError
 				return ctrl.Result{}, err
 			}
+			logger.Info("Successfully set boot source ISO", "isoURL", isoURL)
 
 			// Power On the host
 			if powerState != redfish.OnPowerState {
+				logger.Info("Attempting to power on host",
+					"currentPowerState", powerState,
+					"desiredPowerState", redfish.OnPowerState)
 				if err := rfClient.SetPowerState(ctx, redfish.OnPowerState); err != nil {
-					logger.Error(err, "Failed to set power state to On")
+					logger.Error(err, "Failed to set power state to On",
+						"currentState", physicalHost.Status.State)
 					conditions.MarkFalse(physicalHost, infrastructurev1alpha1.HostProvisionedCondition, infrastructurev1alpha1.PowerOnFailedReason, clusterv1.ConditionSeverityError, "Failed to power on host: %v", err.Error())
 					physicalHost.Status.State = infrastructurev1alpha1.StateError
 					return ctrl.Result{}, err
 				}
 				physicalHost.Status.ObservedPowerState = redfish.OnPowerState // Optimistic update
+				logger.Info("Successfully powered on host")
+			} else {
+				logger.Info("Host already powered on")
 			}
 
 			// Provisioning steps initiated successfully
+			logger.Info("Host provisioning initiated successfully",
+				"previousState", physicalHost.Status.State,
+				"newState", infrastructurev1alpha1.StateProvisioned)
 			physicalHost.Status.State = infrastructurev1alpha1.StateProvisioned
 			conditions.MarkTrue(physicalHost, infrastructurev1alpha1.HostProvisionedCondition)
-			logger.Info("Host provisioning initiated successfully, state set to Provisioned")
 		}
 	}
 	// --- End Reconcile State ---
