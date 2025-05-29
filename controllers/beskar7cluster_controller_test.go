@@ -21,7 +21,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	infrastructurev1alpha1 "github.com/wrkode/beskar7/api/v1alpha1"
+	infrastructurev1beta1 "github.com/wrkode/beskar7/api/v1beta1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -35,7 +35,7 @@ var _ = Describe("Beskar7Cluster Reconciler", func() {
 	var (
 		ctx         context.Context
 		testNs      *corev1.Namespace
-		b7cluster   *infrastructurev1alpha1.Beskar7Cluster
+		b7cluster   *infrastructurev1beta1.Beskar7Cluster
 		capiCluster *clusterv1.Cluster
 		key         types.NamespacedName
 	)
@@ -59,7 +59,7 @@ var _ = Describe("Beskar7Cluster Reconciler", func() {
 			Spec: clusterv1.ClusterSpec{
 				// InfrastructureRef is needed for GetOwnerCluster
 				InfrastructureRef: &corev1.ObjectReference{
-					APIVersion: infrastructurev1alpha1.GroupVersion.String(),
+					APIVersion: infrastructurev1beta1.GroupVersion.String(),
 					Kind:       "Beskar7Cluster",
 					Name:       "test-b7cluster",
 					Namespace:  testNs.Name,
@@ -69,7 +69,7 @@ var _ = Describe("Beskar7Cluster Reconciler", func() {
 		Expect(k8sClient.Create(ctx, capiCluster)).To(Succeed())
 
 		// Basic Beskar7Cluster object
-		b7cluster = &infrastructurev1alpha1.Beskar7Cluster{
+		b7cluster = &infrastructurev1beta1.Beskar7Cluster{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "test-b7cluster",
 				Namespace: testNs.Name,
@@ -82,7 +82,7 @@ var _ = Describe("Beskar7Cluster Reconciler", func() {
 					},
 				},
 			},
-			Spec: infrastructurev1alpha1.Beskar7ClusterSpec{
+			Spec: infrastructurev1beta1.Beskar7ClusterSpec{
 				// ControlPlaneEndpoint will be derived by the controller
 			},
 		}
@@ -122,10 +122,10 @@ var _ = Describe("Beskar7Cluster Reconciler", func() {
 			// Check condition and status
 			Eventually(func(g Gomega) {
 				Expect(k8sClient.Get(ctx, key, b7cluster)).To(Succeed())
-				cond := conditions.Get(b7cluster, infrastructurev1alpha1.ControlPlaneEndpointReady)
+				cond := conditions.Get(b7cluster, infrastructurev1beta1.ControlPlaneEndpointReady)
 				g.Expect(cond).NotTo(BeNil())
 				g.Expect(cond.Status).To(Equal(corev1.ConditionFalse))
-				g.Expect(cond.Reason).To(Equal(infrastructurev1alpha1.ControlPlaneEndpointNotSetReason))
+				g.Expect(cond.Reason).To(Equal(infrastructurev1beta1.ControlPlaneEndpointNotSetReason))
 				g.Expect(b7cluster.Status.Ready).To(BeFalse())
 				g.Expect(b7cluster.Status.ControlPlaneEndpoint.IsZero()).To(BeTrue())
 			}, "5s", "100ms").Should(Succeed(), "ControlPlaneEndpointReady should be False")
@@ -193,7 +193,7 @@ var _ = Describe("Beskar7Cluster Reconciler", func() {
 			// Check condition and status
 			Eventually(func(g Gomega) {
 				Expect(k8sClient.Get(ctx, key, b7cluster)).To(Succeed())
-				cond := conditions.Get(b7cluster, infrastructurev1alpha1.ControlPlaneEndpointReady)
+				cond := conditions.Get(b7cluster, infrastructurev1beta1.ControlPlaneEndpointReady)
 				g.Expect(cond).NotTo(BeNil())
 				g.Expect(cond.Status).To(Equal(corev1.ConditionTrue))
 				g.Expect(b7cluster.Status.Ready).To(BeTrue())
@@ -216,21 +216,21 @@ var _ = Describe("Beskar7Cluster Reconciler", func() {
 
 			// Create PhysicalHosts with different zone labels
 			zoneLabel := "topology.kubernetes.io/zone"
-			ph1 := &infrastructurev1alpha1.PhysicalHost{
+			ph1 := &infrastructurev1beta1.PhysicalHost{
 				ObjectMeta: metav1.ObjectMeta{Name: "fd-host-1", Namespace: testNs.Name, Labels: map[string]string{zoneLabel: "zone-a"}},
-				Spec:       infrastructurev1alpha1.PhysicalHostSpec{RedfishConnection: infrastructurev1alpha1.RedfishConnectionInfo{Address: "dummy1", CredentialsSecretRef: "dummy"}},
+				Spec:       infrastructurev1beta1.PhysicalHostSpec{RedfishConnection: infrastructurev1beta1.RedfishConnection{Address: "dummy1", CredentialsSecretRef: "dummy"}},
 			}
-			ph2 := &infrastructurev1alpha1.PhysicalHost{
+			ph2 := &infrastructurev1beta1.PhysicalHost{
 				ObjectMeta: metav1.ObjectMeta{Name: "fd-host-2", Namespace: testNs.Name, Labels: map[string]string{zoneLabel: "zone-b"}},
-				Spec:       infrastructurev1alpha1.PhysicalHostSpec{RedfishConnection: infrastructurev1alpha1.RedfishConnectionInfo{Address: "dummy2", CredentialsSecretRef: "dummy"}},
+				Spec:       infrastructurev1beta1.PhysicalHostSpec{RedfishConnection: infrastructurev1beta1.RedfishConnection{Address: "dummy2", CredentialsSecretRef: "dummy"}},
 			}
-			ph3 := &infrastructurev1alpha1.PhysicalHost{
+			ph3 := &infrastructurev1beta1.PhysicalHost{
 				ObjectMeta: metav1.ObjectMeta{Name: "fd-host-3", Namespace: testNs.Name, Labels: map[string]string{zoneLabel: "zone-a"}}, // Duplicate zone
-				Spec:       infrastructurev1alpha1.PhysicalHostSpec{RedfishConnection: infrastructurev1alpha1.RedfishConnectionInfo{Address: "dummy3", CredentialsSecretRef: "dummy"}},
+				Spec:       infrastructurev1beta1.PhysicalHostSpec{RedfishConnection: infrastructurev1beta1.RedfishConnection{Address: "dummy3", CredentialsSecretRef: "dummy"}},
 			}
-			ph4 := &infrastructurev1alpha1.PhysicalHost{
+			ph4 := &infrastructurev1beta1.PhysicalHost{
 				ObjectMeta: metav1.ObjectMeta{Name: "fd-host-4", Namespace: testNs.Name}, // No zone label
-				Spec:       infrastructurev1alpha1.PhysicalHostSpec{RedfishConnection: infrastructurev1alpha1.RedfishConnectionInfo{Address: "dummy4", CredentialsSecretRef: "dummy"}},
+				Spec:       infrastructurev1beta1.PhysicalHostSpec{RedfishConnection: infrastructurev1beta1.RedfishConnection{Address: "dummy4", CredentialsSecretRef: "dummy"}},
 			}
 			Expect(k8sClient.Create(ctx, ph1)).To(Succeed())
 			Expect(k8sClient.Create(ctx, ph2)).To(Succeed())
@@ -273,7 +273,7 @@ var _ = Describe("Beskar7Cluster Reconciler", func() {
 
 			By("Checking if Beskar7Cluster is deleted")
 			Eventually(func() bool {
-				lookupCluster := &infrastructurev1alpha1.Beskar7Cluster{}
+				lookupCluster := &infrastructurev1beta1.Beskar7Cluster{}
 				err := k8sClient.Get(ctx, key, lookupCluster)
 				return client.IgnoreNotFound(err) == nil
 			}, "10s", "200ms").Should(BeTrue(), "Beskar7Cluster should be deleted")

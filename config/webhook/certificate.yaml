@@ -1,0 +1,18 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: beskar7-serving-cert
+  namespace: beskar7-system
+spec:
+  secretName: beskar7-webhook-server-cert
+  duration: 8760h # 1 year
+  renewBefore: 720h # 30 days
+  subject:
+    organizations:
+    - beskar7
+  commonName: beskar7-webhook-service.beskar7-system.svc
+  dnsNames:
+  - beskar7-webhook-service.beskar7-system.svc
+  issuerRef:
+    name: beskar7-selfsigned-issuer
+    kind: ClusterIssuer 

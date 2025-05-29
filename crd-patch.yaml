@@ -1,0 +1,247 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: beskar7clusters.infrastructure.cluster.x-k8s.io
+  labels:
+    cluster.x-k8s.io/contract: v1beta1
+    cluster.x-k8s.io/provider: beskar7
+  annotations:
+    cluster.x-k8s.io/contract: v1beta1
+spec:
+  group: infrastructure.cluster.x-k8s.io
+  names:
+    categories:
+    - cluster-api
+    kind: Beskar7Cluster
+    listKind: Beskar7ClusterList
+    plural: beskar7clusters
+    shortNames:
+    - b7c
+    singular: beskar7cluster
+  scope: Namespaced
+  versions:
+    - name: v1beta1
+      served: true
+      storage: true
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          apiVersion:
+            type: string
+          kind:
+            type: string
+          metadata:
+            type: object
+            properties:
+              labels:
+                type: object
+                properties:
+                  cluster.x-k8s.io/contract:
+                    type: string
+                    default: v1beta1
+                  cluster.x-k8s.io/provider:
+                    type: string
+                    default: beskar7
+          spec:
+            type: object
+            properties:
+              controlPlaneEndpoint:
+                type: object
+                required:
+                - host
+                - port
+                properties:
+                  host:
+                    type: string
+                    maxLength: 512
+                  port:
+                    type: integer
+                    format: int32
+          status:
+            type: object
+            properties:
+              ready:
+                type: boolean
+              conditions:
+                type: array
+                items:
+                  type: object
+                  required:
+                  - lastTransitionTime
+                  - status
+                  - type
+                  properties:
+                    lastTransitionTime:
+                      type: string
+                      format: date-time
+                    message:
+                      type: string
+                      minLength: 1
+                      maxLength: 10240
+                    reason:
+                      type: string
+                      minLength: 1
+                      maxLength: 256
+                    severity:
+                      type: string
+                      maxLength: 32
+                    status:
+                      type: string
+                    type:
+                      type: string
+                      minLength: 1
+                      maxLength: 256
+              controlPlaneEndpoint:
+                type: object
+                required:
+                - host
+                - port
+                properties:
+                  host:
+                    type: string
+                    maxLength: 512
+                  port:
+                    type: integer
+                    format: int32
+              failureDomains:
+                type: object
+                additionalProperties:
+                  type: object
+                  properties:
+                    attributes:
+                      type: object
+                      additionalProperties:
+                        type: string
+                    controlPlane:
+                      type: boolean
+    subresources:
+      status: {}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: beskar7machines.infrastructure.cluster.x-k8s.io
+  labels:
+    cluster.x-k8s.io/contract: v1beta1
+    cluster.x-k8s.io/provider: beskar7
+  annotations:
+    cluster.x-k8s.io/contract: v1beta1
+spec:
+  group: infrastructure.cluster.x-k8s.io
+  names:
+    kind: Beskar7Machine
+    listKind: Beskar7MachineList
+    plural: beskar7machines
+    singular: beskar7machine
+  scope: Namespaced
+  versions:
+    - name: v1beta1
+      served: true
+      storage: true
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          apiVersion:
+            type: string
+          kind:
+            type: string
+          metadata:
+            type: object
+            properties:
+              labels:
+                type: object
+                properties:
+                  cluster.x-k8s.io/contract:
+                    type: string
+                    default: v1beta1
+                  cluster.x-k8s.io/provider:
+                    type: string
+                    default: beskar7
+          spec:
+            type: object
+            required:
+            - imageURL
+            - osFamily
+            properties:
+              configURL:
+                type: string
+              imageURL:
+                type: string
+              osFamily:
+                type: string
+                enum:
+                - kairos
+                - talos
+                - flatcar
+                - LeapMicro
+              providerID:
+                type: string
+              provisioningMode:
+                type: string
+                enum:
+                - RemoteConfig
+                - PreBakedISO
+          status:
+            type: object
+            properties:
+              ready:
+                type: boolean
+              addresses:
+                type: array
+                items:
+                  type: object
+                  required:
+                  - address
+                  - type
+                  properties:
+                    address:
+                      type: string
+                      minLength: 1
+                      maxLength: 256
+                    type:
+                      type: string
+                      enum:
+                      - Hostname
+                      - ExternalIP
+                      - InternalIP
+                      - ExternalDNS
+                      - InternalDNS
+              phase:
+                type: string
+              failureReason:
+                type: string
+              failureMessage:
+                type: string
+              conditions:
+                type: array
+                items:
+                  type: object
+                  required:
+                  - lastTransitionTime
+                  - status
+                  - type
+                  properties:
+                    lastTransitionTime:
+                      type: string
+                      format: date-time
+                    message:
+                      type: string
+                      minLength: 1
+                      maxLength: 10240
+                    reason:
+                      type: string
+                      minLength: 1
+                      maxLength: 256
+                    severity:
+                      type: string
+                      maxLength: 32
+                    status:
+                      type: string
+                    type:
+                      type: string
+                      minLength: 1
+                      maxLength: 256
+    subresources:
+      status: {} 

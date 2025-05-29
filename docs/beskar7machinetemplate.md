@@ -4,7 +4,7 @@ The Beskar7MachineTemplate custom resource defines a template for creating Beska
 
 ## API Version
 
-`infrastructure.cluster.x-k8s.io/v1alpha1`
+`infrastructure.cluster.x-k8s.io/v1beta1`
 
 ## Kind
 
@@ -55,7 +55,7 @@ Yes
 ## Example
 
 ```yaml
-apiVersion: infrastructure.cluster.x-k8s.io/v1alpha1
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
 kind: Beskar7MachineTemplate
 metadata:
   name: example-template

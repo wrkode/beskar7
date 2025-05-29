@@ -1,10 +1,10 @@
 # Beskar7Machine
 
-The Beskar7Machine custom resource represents a machine in a Beskar7-managed cluster. It provides the infrastructure configuration for individual machines in the cluster.
+The `Beskar7Machine` resource represents a machine in the Beskar7 infrastructure provider.
 
 ## API Version
 
-`infrastructure.cluster.x-k8s.io/v1alpha1`
+`infrastructure.cluster.x-k8s.io/v1beta1`
 
 ## Kind
 
@@ -86,19 +86,17 @@ Array of conditions representing the latest available observations of the object
 ## Example
 
 ```yaml
-apiVersion: infrastructure.cluster.x-k8s.io/v1alpha1
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
 kind: Beskar7Machine
 metadata:
-  name: example-machine
+  name: my-machine
   namespace: default
-  labels:
-    cluster.x-k8s.io/cluster-name: example-cluster
 spec:
-  imageURL: "https://example.com/images/machine-image.iso"
-  osFamily: "talos"
-  configURL: "https://example.com/configs/machine-config.yaml"
-  providerID: "beskar7://machine-123"
-  provisioningMode: "RemoteConfig"
+  providerID: beskar7://default/my-host
+  imageURL: http://example.com/image.qcow2
+  configURL: http://example.com/config.yaml
+  osFamily: ubuntu
+  provisioningMode: image
 status:
   addresses:
     - type: "InternalIP"
@@ -113,4 +111,20 @@ status:
       message: "Machine is ready"
   phase: "Running"
   ready: true
-``` 
+```
+
+## Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `spec.providerID` | `string` | The unique identifier as specified by the cloud provider. |
+| `spec.imageURL` | `string` | The URL of the OS image to use for the machine. |
+| `spec.configURL` | `string` | The URL of the configuration to use for the machine. |
+| `spec.osFamily` | `string` | The operating system family to use for the machine. |
+| `spec.provisioningMode` | `string` | The mode to use for provisioning the machine. |
+| `status.ready` | `bool` | Indicates that the machine is ready. |
+| `status.addresses` | `[]MachineAddress` | The associated addresses for the machine. |
+| `status.phase` | `string` | The current phase of machine actuation. |
+| `status.failureReason` | `string` | A succinct value suitable for machine interpretation in case of terminal problems. |
+| `status.failureMessage` | `string` | A more verbose string suitable for logging and human consumption in case of terminal problems. |
+| `status.conditions` | `Conditions` | Current service state of the Beskar7Machine. | 

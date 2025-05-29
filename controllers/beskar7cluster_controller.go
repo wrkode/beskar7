@@ -22,17 +22,18 @@ import (
 
 	"github.com/go-logr/logr"
 	"github.com/pkg/errors"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
-	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
-	"sigs.k8s.io/controller-runtime/pkg/log"
-
-	infrastructurev1alpha1 "github.com/wrkode/beskar7/api/v1alpha1"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	"sigs.k8s.io/cluster-api/util"
-	conditions "sigs.k8s.io/cluster-api/util/conditions"
+	"sigs.k8s.io/cluster-api/util/conditions"
 	"sigs.k8s.io/cluster-api/util/patch"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+
+	infrastructurev1beta1 "github.com/wrkode/beskar7/api/v1beta1"
 )
 
 const (
@@ -44,6 +45,7 @@ const (
 type Beskar7ClusterReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
+	Log    logr.Logger
 }
 
 //+kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=beskar7clusters,verbs=get;list;watch;create;update;patch;delete
@@ -56,65 +58,66 @@ type Beskar7ClusterReconciler struct {
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
 func (r *Beskar7ClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ ctrl.Result, reterr error) {
-	logger := log.FromContext(ctx).WithValues("beskar7cluster", req.NamespacedName)
-	logger.Info("Starting reconciliation")
+	log := r.Log.WithValues("beskar7cluster", req.NamespacedName)
+	log.Info("Starting reconciliation")
 
-	// Fetch the Beskar7Cluster instance.
-	b7cluster := &infrastructurev1alpha1.Beskar7Cluster{}
-	if err := r.Get(ctx, req.NamespacedName, b7cluster); err != nil {
-		if client.IgnoreNotFound(err) != nil {
-			logger.Error(err, "Unable to fetch Beskar7Cluster")
-			return ctrl.Result{}, err
+	// Fetch the Beskar7Cluster instance
+	b7cluster := &infrastructurev1beta1.Beskar7Cluster{}
+	err := r.Get(ctx, req.NamespacedName, b7cluster)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			log.Info("Beskar7Cluster resource not found. Ignoring since object must be deleted")
+			return ctrl.Result{}, nil
 		}
-		logger.Info("Beskar7Cluster resource not found. Ignoring since object must be deleted")
-		return ctrl.Result{}, nil
+		log.Error(err, "Unable to fetch Beskar7Cluster")
+		return ctrl.Result{}, err
 	}
 
-	// Fetch the Cluster instance that owns this Beskar7Cluster.
+	// Set the ownerRefs on the Beskar7Cluster
 	cluster, err := util.GetOwnerCluster(ctx, r.Client, b7cluster.ObjectMeta)
 	if err != nil {
-		logger.Error(err, "Failed to get owner Cluster")
+		log.Error(err, "Failed to get owner Cluster")
 		return ctrl.Result{}, err
 	}
 	if cluster == nil {
-		logger.Info("Waiting for Cluster Controller to set OwnerRef on Beskar7Cluster")
+		log.Info("Waiting for Cluster Controller to set OwnerRef on Beskar7Cluster")
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 	}
 
-	logger = logger.WithValues("cluster", cluster.Name)
+	log = log.WithValues("cluster", cluster.Name)
 
 	// Initialize patch helper.
 	patchHelper, err := patch.NewHelper(b7cluster, r.Client)
 	if err != nil {
-		logger.Error(err, "Failed to init patch helper")
+		log.Error(err, "Failed to init patch helper")
 		return ctrl.Result{}, err
 	}
 
 	// Always attempt to Patch the Beskar7Cluster object and status after reconciliation.
 	defer func() {
 		// Set the summary condition based on ControlPlaneEndpointReady
-		conditions.SetSummary(b7cluster, conditions.WithConditions(infrastructurev1alpha1.ControlPlaneEndpointReady))
+		conditions.SetSummary(b7cluster, conditions.WithConditions(infrastructurev1beta1.ControlPlaneEndpointReady))
 
 		if err := patchHelper.Patch(ctx, b7cluster); err != nil {
-			logger.Error(err, "Failed to patch Beskar7Cluster")
+			log.Error(err, "Failed to patch Beskar7Cluster")
 			if reterr == nil {
 				reterr = err
 			}
 		}
-		logger.Info("Finished reconciliation")
+		log.Info("Finished reconciliation")
 	}()
 
 	// Handle deletion reconciliation
 	if !b7cluster.ObjectMeta.DeletionTimestamp.IsZero() {
-		return r.reconcileDelete(ctx, logger, b7cluster)
+		return r.reconcileDelete(ctx, log, b7cluster)
 	}
 
-	// Handle non-deletion reconciliation
-	return r.reconcileNormal(ctx, logger, cluster, b7cluster)
+	// Handle non-deleted clusters
+	return r.reconcileNormal(ctx, log, cluster, b7cluster)
 }
 
 // reconcileNormal handles the main reconciliation logic for Beskar7Cluster.
-func (r *Beskar7ClusterReconciler) reconcileNormal(ctx context.Context, logger logr.Logger, cluster *clusterv1.Cluster, b7cluster *infrastructurev1alpha1.Beskar7Cluster) (ctrl.Result, error) {
+func (r *Beskar7ClusterReconciler) reconcileNormal(ctx context.Context, logger logr.Logger, cluster *clusterv1.Cluster, b7cluster *infrastructurev1beta1.Beskar7Cluster) (ctrl.Result, error) {
 	logger.Info("Reconciling Beskar7Cluster create/update")
 
 	// If the Beskar7Cluster doesn't have our finalizer, add it.
@@ -128,9 +131,8 @@ func (r *Beskar7ClusterReconciler) reconcileNormal(ctx context.Context, logger l
 	// --- Reconcile Failure Domains ---
 	// Discover available failure domains from PhysicalHosts in the same namespace.
 	// Assumes hosts are labeled with `topology.kubernetes.io/zone=<zone-name>`.
-	phList := &infrastructurev1alpha1.PhysicalHostList{}
-	listOpts := []client.ListOption{client.InNamespace(b7cluster.Namespace)}
-	if err := r.List(ctx, phList, listOpts...); err != nil {
+	phList := &infrastructurev1beta1.PhysicalHostList{}
+	if err := r.List(ctx, phList, client.InNamespace(b7cluster.Namespace)); err != nil {
 		logger.Error(err, "Failed to list PhysicalHosts to determine failure domains")
 		// Continue reconciliation without failure domains if listing fails?
 		// Or return error? For now, log and continue, but consider returning err.
@@ -171,7 +173,7 @@ func (r *Beskar7ClusterReconciler) reconcileNormal(ctx context.Context, logger l
 
 	if cpEndpoint == nil {
 		logger.Info("Control plane endpoint not yet available, waiting for control plane machines.")
-		conditions.MarkFalse(b7cluster, infrastructurev1alpha1.ControlPlaneEndpointReady, infrastructurev1alpha1.ControlPlaneEndpointNotSetReason, clusterv1.ConditionSeverityInfo, "Waiting for control plane Beskar7Machine(s) to have IP addresses")
+		conditions.MarkFalse(b7cluster, infrastructurev1beta1.ControlPlaneEndpointReady, infrastructurev1beta1.ControlPlaneEndpointNotSetReason, clusterv1.ConditionSeverityInfo, "Waiting for control plane Beskar7Machine(s) to have IP addresses")
 		b7cluster.Status.Ready = false
 		// Requeue after a delay to check again
 		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
@@ -180,7 +182,7 @@ func (r *Beskar7ClusterReconciler) reconcileNormal(ctx context.Context, logger l
 	// Endpoint found, update status
 	logger.Info("Control plane endpoint found", "host", cpEndpoint.Host, "port", cpEndpoint.Port)
 	b7cluster.Status.ControlPlaneEndpoint = *cpEndpoint
-	conditions.MarkTrue(b7cluster, infrastructurev1alpha1.ControlPlaneEndpointReady)
+	conditions.MarkTrue(b7cluster, infrastructurev1beta1.ControlPlaneEndpointReady)
 	b7cluster.Status.Ready = true
 
 	logger.Info("Beskar7Cluster reconciliation complete")
@@ -250,11 +252,11 @@ func (r *Beskar7ClusterReconciler) findControlPlaneEndpoint(ctx context.Context,
 }
 
 // reconcileDelete handles the cleanup when a Beskar7Cluster is marked for deletion.
-func (r *Beskar7ClusterReconciler) reconcileDelete(ctx context.Context, logger logr.Logger, b7cluster *infrastructurev1alpha1.Beskar7Cluster) (ctrl.Result, error) {
+func (r *Beskar7ClusterReconciler) reconcileDelete(ctx context.Context, logger logr.Logger, b7cluster *infrastructurev1beta1.Beskar7Cluster) (ctrl.Result, error) {
 	logger.Info("Reconciling Beskar7Cluster deletion")
 
 	// Mark conditions False
-	conditions.MarkFalse(b7cluster, infrastructurev1alpha1.ControlPlaneEndpointReady, clusterv1.DeletingReason, clusterv1.ConditionSeverityInfo, "Beskar7Cluster is being deleted")
+	conditions.MarkFalse(b7cluster, infrastructurev1beta1.ControlPlaneEndpointReady, clusterv1.DeletingReason, clusterv1.ConditionSeverityInfo, "Beskar7Cluster is being deleted")
 
 	// TODO: Add any cluster-level cleanup logic here if this controller manages shared resources.
 	// Typically, the infra cluster object itself doesn't own external resources.
@@ -270,9 +272,9 @@ func (r *Beskar7ClusterReconciler) reconcileDelete(ctx context.Context, logger l
 }
 
 // SetupWithManager sets up the controller with the Manager.
-func (r *Beskar7ClusterReconciler) SetupWithManager(mgr ctrl.Manager) error {
+func (r *Beskar7ClusterReconciler) SetupWithManager(ctx context.Context, mgr ctrl.Manager, options controller.Options) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&infrastructurev1alpha1.Beskar7Cluster{}).
+		For(&infrastructurev1beta1.Beskar7Cluster{}).
 		// TODO: Add watches for CAPI Cluster if needed?
 		Complete(r)
 }

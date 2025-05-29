@@ -1,10 +1,10 @@
 # PhysicalHost
 
-The PhysicalHost custom resource represents a physical machine that can be managed through Redfish. It provides a way to manage and monitor physical hosts in a Kubernetes cluster.
+The `PhysicalHost` resource represents a physical host in the Beskar7 infrastructure provider.
 
 ## API Version
 
-`infrastructure.cluster.x-k8s.io/v1alpha1`
+`infrastructure.cluster.x-k8s.io/v1beta1`
 
 ## Kind
 
@@ -89,10 +89,10 @@ Array of conditions representing the latest available observations of the object
 ## Example
 
 ```yaml
-apiVersion: infrastructure.cluster.x-k8s.io/v1alpha1
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
 kind: PhysicalHost
 metadata:
-  name: example-host
+  name: my-host
   namespace: default
 spec:
   redfishConnection:
@@ -114,4 +114,21 @@ status:
       Health: "OK"
       HealthRollup: "OK"
       State: "Enabled"
-``` 
+  addresses:
+    - type: InternalIP
+      address: 192.168.1.100
+```
+
+## Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `spec.redfishConnection` | `RedfishConnection` | The Redfish connection configuration. |
+| `spec.bootIsoSource` | `string` | The URL of the ISO image to use for provisioning. |
+| `spec.userDataSecretRef` | `ObjectReference` | Reference to a secret containing cloud-init user data. |
+| `status.ready` | `boolean` | Indicates if the host is ready and enrolled. |
+| `status.state` | `string` | The current state of the host. |
+| `status.observedPowerState` | `string` | The last observed power state from the Redfish endpoint. |
+| `status.hardwareDetails` | `HardwareDetails` | Details about the hardware of the physical host. |
+| `status.errorMessage` | `string` | Error message if the host is in an error state. |
+| `status.addresses` | `[]MachineAddress` | The associated addresses for the host. | 

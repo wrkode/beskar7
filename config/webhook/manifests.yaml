@@ -1,0 +1,47 @@
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: beskar7-validating-webhook-configuration
+  labels:
+    cluster.x-k8s.io/provider: beskar7
+webhooks:
+- name: validation.beskar7.infrastructure.cluster.x-k8s.io
+  clientConfig:
+    service:
+      name: beskar7-webhook-service
+      namespace: beskar7-system
+      path: /validate-infrastructure-cluster-x-k8s-io-v1beta1-beskar7cluster
+  rules:
+  - apiGroups: ["infrastructure.cluster.x-k8s.io"]
+    apiVersions: ["v1beta1"]
+    operations: ["CREATE", "UPDATE"]
+    resources: ["beskar7clusters"]
+    scope: "Namespaced"
+  failurePolicy: Fail
+  sideEffects: None
+  admissionReviewVersions: ["v1"]
+  timeoutSeconds: 10
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingWebhookConfiguration
+metadata:
+  name: beskar7-mutating-webhook-configuration
+  labels:
+    cluster.x-k8s.io/provider: beskar7
+webhooks:
+- name: defaulting.beskar7.infrastructure.cluster.x-k8s.io
+  clientConfig:
+    service:
+      name: beskar7-webhook-service
+      namespace: beskar7-system
+      path: /mutate-infrastructure-cluster-x-k8s-io-v1beta1-beskar7cluster
+  rules:
+  - apiGroups: ["infrastructure.cluster.x-k8s.io"]
+    apiVersions: ["v1beta1"]
+    operations: ["CREATE", "UPDATE"]
+    resources: ["beskar7clusters"]
+    scope: "Namespaced"
+  failurePolicy: Fail
+  sideEffects: None
+  admissionReviewVersions: ["v1"]
+  timeoutSeconds: 10 

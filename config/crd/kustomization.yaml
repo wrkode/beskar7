@@ -11,16 +11,20 @@ resources:
 patchesStrategicMerge:
 # [WEBHOOK] To enable webhook, uncomment all the sections with [WEBHOOK] prefix.
 # patches here are for enabling the conversion webhook for each CRD
-#- patches/webhook_in_beskar7clusters.yaml
-#- patches/webhook_in_beskar7machines.yaml
+- patches/webhook_in_beskar7clusters.yaml
+- patches/webhook_in_beskar7machines.yaml
 #- patches/webhook_in_beskar7machinetemplates.yaml
 #- patches/webhook_in_physicalhosts.yaml
 # +kubebuilder:scaffold:crdkustomizewebhookpatch
 
 # [CERTMANAGER] To enable cert-manager, uncomment all the sections with [CERTMANAGER] prefix.
 # patches here are for enabling the CA injection for each CRD
-#- patches/cainjection_in_beskar7clusters.yaml
-#- patches/cainjection_in_beskar7machines.yaml
+- patches/cainjection_in_beskar7clusters.yaml
+- patches/cainjection_in_beskar7machines.yaml
 #- patches/cainjection_in_beskar7machinetemplates.yaml
 #- patches/cainjection_in_physicalhosts.yaml
-# +kubebuilder:scaffold:crdkustomizecainjectionpatch 
+# +kubebuilder:scaffold:crdkustomizecainjectionpatch
+
+commonLabels:
+  cluster.x-k8s.io/contract: v1beta1
+  cluster.x-k8s.io/provider: beskar7 

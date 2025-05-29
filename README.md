@@ -21,6 +21,10 @@ Beskar7 consists of several custom controllers that work together:
 *   [controller-gen](https://book.kubebuilder.io/reference/controller-gen.html) (`make install-controller-gen`)
 *   [kustomize](https://kubectl.docs.kubernetes.io/installation/kustomize/) (v4 or later for `make deploy`)
 *   A running Kubernetes cluster (e.g., kind, minikube, or a remote cluster) with `kubectl` configured.
+*   Kubernetes 1.19+
+*   Helm 3.2.0+
+*   Cluster API v1.4.0+
+*   cert-manager (optional, for webhook support)
 
 ## Getting Started
 
@@ -42,7 +46,7 @@ Beskar7 consists of several custom controllers that work together:
     # export CR_PAT=YOUR_GITHUB_PAT # Use a PAT with write:packages scope
     # echo $CR_PAT | docker login ghcr.io -u USERNAME --password-stdin
 
-    # Build and push the image (uses values from Makefile: ghcr.io/wrkode/beskar7:v0.1.0-dev)
+    # Build and push the image (uses values from Makefile: ghcr.io/wrkode/beskar7/beskar7:v0.2.0)
     make docker-build docker-push 
     ```
     *(Note: If using a different registry/repo/tag, override Makefile variables: `make docker-push IMG=my-registry/my-repo:my-tag`)*
@@ -64,19 +68,27 @@ Beskar7 consists of several custom controllers that work together:
 
 ## Installation / Deployment
 
-### Using Pre-built Manifests (Recommended)
+### Using Helm
 
-1.  **Ensure prerequisites are met:** `kubectl` configured for your target cluster.
-2.  **Install CRDs:**
-    ```bash
-    make install
-    ```
-3.  **Deploy the Controller Manager:**
-    This will deploy the controller using the image defined in the Makefile (`ghcr.io/wrkode/beskar7:v0.1.0-dev` by default).
-    ```bash
-    make deploy
-    ```
-    *(Note: If you pushed the image to a different location, you MUST either override `IMG` in the Makefile and re-run `make manifests` before `make deploy`, or manually edit the deployment manifest in `config/manager/manager.yaml` before running `make deploy`.)*
+#### Add the Helm repository
+
+```bash
+helm repo add beskar7 https://wrkode.github.io/beskar7
+helm repo update
+```
+
+#### Install the chart
+
+```bash
+# Install with default values
+helm install beskar7 beskar7/beskar7
+
+# Install with custom values
+helm install beskar7 beskar7/beskar7 -f values.yaml
+
+# Install in a specific namespace
+helm install beskar7 beskar7/beskar7 --namespace beskar7-system --create-namespace
+```
 
 ### Manual Deployment using Kustomize:
 
@@ -99,12 +111,12 @@ This provides more control if you need to customize the deployment.
 
 Each GitHub release will include a `beskar7-manifests-$(VERSION).yaml` file. This bundle contains all necessary CRDs, RBAC, and the Deployment for the controller manager, pre-configured with the correct image for that release.
 
-1.  **Download the release manifest** (e.g., `beskar7-manifests-v0.1.0-dev.yaml`) from the [GitHub Releases page](https://github.com/wrkode/beskar7/releases).
+1.  **Download the release manifest** (e.g., `beskar7-manifests-v0.2.0.yaml`) from the [GitHub Releases page](https://github.com/wrkode/beskar7/releases).
 2.  **Apply the manifest to your cluster:**
     ```bash
     kubectl apply -f beskar7-manifests-v0.1.0-dev.yaml
     ```
-    This will create the `system` namespace and all required Beskar7 components.
+    This will create the `beskar7-system` namespace and all required Beskar7 components.
 
 ## Usage Examples
 
@@ -139,7 +151,7 @@ This resource tells Beskar7 about a physical server it can manage.
 <summary>Example: `physicalhost.yaml`</summary>
 
 ```yaml
-apiVersion: infrastructure.cluster.x-k8s.io/v1alpha1
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
 kind: PhysicalHost
 metadata:
   name: server-01
@@ -174,7 +186,7 @@ When using `provisioningMode: "PreBakedISO"`, you are responsible for ensuring t
 <summary>Example: `b7machine-prebaked.yaml`</summary>
 
 ```yaml
-apiVersion: infrastructure.cluster.x-k8s.io/v1alpha1
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
 kind: Beskar7Machine
 metadata:
   name: node-01
@@ -202,7 +214,7 @@ This example uses a generic Kairos installer ISO and provides a URL to a Kairos 
 <summary>Example: `b7machine-kairos-remote.yaml`</summary>
 
 ```yaml
-apiVersion: infrastructure.cluster.x-k8s.io/v1alpha1
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
 kind: Beskar7Machine
 metadata:
   name: node-02
@@ -232,28 +244,9 @@ kubectl apply -f b7machine-kairos-remote.yaml
 
 *(This README will be updated as more features are implemented, including CAPI `Machine` and `Cluster` examples.)*
 
-## Future Work / Roadmap
+## Project Status and Roadmap
 
-The following key areas are planned or in progress:
-
-*   [x] Basic `PhysicalHost` reconciliation (Redfish connection, status update).
-*   [x] Basic `Beskar7Machine` reconciliation (Host claiming, status monitoring based on host).
-*   [x] `Beskar7Machine` deletion/finalizer handling (releasing the `PhysicalHost`).
-*   [x] BDD Testing setup (`envtest`, Ginkgo/Gomega).
-*   [x] Basic UserData handling (`Beskar7Machine` spec changes for OS-specific remote config).
-*   [x] Implement `PhysicalHost` Deprovisioning (Power off, eject media on delete).
-*   [x] Initial `SetBootParameters` implementation in Redfish client (UEFI target attempt).
-*   [x] Basic `Beskar7Cluster` reconciliation (handles finalizer and `ControlPlaneEndpointReady` based on spec).
-*   [x] Refine Status Reporting (CAPI Conditions for Beskar7Machine, PhysicalHost, Beskar7Cluster types and basic `Status.Ready` logic).
-*   [ ] **`SetBootParameters` Full Implementation:** Robustly handle setting boot parameters via Redfish across various BMCs, investigating `UefiTargetBootSourceOverride`, BIOS attributes, and other vendor-specific mechanisms. This is crucial for reliable "RemoteConfig" provisioning.
-*   [ ] **`Beskar7Cluster` Enhancements:**
-    *   Derive `ControlPlaneEndpoint` in `Status` from control plane `Beskar7Machine`s (this will first require `Beskar7MachineStatus` to include IP address information).
-    *   Implement `FailureDomains` reporting in `Beskar7ClusterStatus` if applicable to the target bare-metal environments.
-    *   Add comprehensive tests for `Beskar7ClusterReconciler`.
-*   [ ] **Testing & Validation:**
-    *   Comprehensive BDD Tests for all controllers and provisioning modes (especially "RemoteConfig" error cases and different OS families).
-    *   Real-world testing with a variety of physical hardware and Redfish implementations.
-*   [ ] **Documentation:** Advanced Usage, Troubleshooting, Contribution Guidelines.
+For detailed information about the project's current status and future plans, please see our [ROADMAP.md](ROADMAP.md) file.
 
 ## Contributing
 
@@ -273,3 +266,37 @@ go test ./controllers/... -v -ginkgo.v
 ```
 
 The test setup is designed to be portable and work across different systems. All required CRDs are downloaded locally and referenced from the repository, ensuring consistent test behavior across different environments.
+
+## Uninstalling
+
+### Using Helm
+
+```bash
+helm uninstall beskar7
+```
+
+### Manual Uninstallation
+
+1. **Undeploy the controller**
+
+   ```bash
+   make undeploy
+   ```
+
+2. **Uninstall CRDs**
+
+   ```bash
+   make uninstall
+   ```
+
+## Upgrading
+
+### Using Helm
+
+```bash
+helm upgrade beskar7 beskar7/beskar7
+```
+
+## License
+
+This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.

@@ -25,7 +25,7 @@ import (
 	. "github.com/onsi/gomega"
 	"github.com/stmcginnis/gofish/common"
 	"github.com/stmcginnis/gofish/redfish"
-	infrastructurev1alpha1 "github.com/wrkode/beskar7/api/v1alpha1"
+	infrastructurev1beta1 "github.com/wrkode/beskar7/api/v1beta1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -117,9 +117,9 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 	var (
 		ctx         context.Context
 		testNs      *corev1.Namespace
-		b7machine   *infrastructurev1alpha1.Beskar7Machine
+		b7machine   *infrastructurev1beta1.Beskar7Machine
 		capiMachine *clusterv1.Machine
-		host        *infrastructurev1alpha1.PhysicalHost
+		host        *infrastructurev1beta1.PhysicalHost
 		key         types.NamespacedName
 	)
 
@@ -146,7 +146,7 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 		Expect(k8sClient.Create(ctx, capiMachine)).To(Succeed())
 
 		// Basic Beskar7Machine object
-		b7machine = &infrastructurev1alpha1.Beskar7Machine{
+		b7machine = &infrastructurev1beta1.Beskar7Machine{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "test-b7machine",
 				Namespace: testNs.Name,
@@ -159,7 +159,7 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 					},
 				},
 			},
-			Spec: infrastructurev1alpha1.Beskar7MachineSpec{
+			Spec: infrastructurev1beta1.Beskar7MachineSpec{
 				ImageURL: "http://example.com/default.iso", // Corrected: Use ImageURL
 				OSFamily: "kairos",                         // Provide a default OSFamily
 			},
@@ -217,27 +217,27 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 			}, time.Second*5, time.Millisecond*200).Should(BeTrue())
 
 			// Check conditions
-			Expect(conditions.Has(b7machine, infrastructurev1alpha1.PhysicalHostAssociatedCondition)).To(BeTrue())
-			cond := conditions.Get(b7machine, infrastructurev1alpha1.PhysicalHostAssociatedCondition)
+			Expect(conditions.Has(b7machine, infrastructurev1beta1.PhysicalHostAssociatedCondition)).To(BeTrue())
+			cond := conditions.Get(b7machine, infrastructurev1beta1.PhysicalHostAssociatedCondition)
 			Expect(cond.Status).To(Equal(corev1.ConditionFalse))
-			Expect(cond.Reason).To(Equal(infrastructurev1alpha1.WaitingForPhysicalHostReason))
+			Expect(cond.Reason).To(Equal(infrastructurev1beta1.WaitingForPhysicalHostReason))
 		})
 
 		It("should claim an available PhysicalHost", func() {
 			// Create an available PhysicalHost with status populated
-			host = &infrastructurev1alpha1.PhysicalHost{
+			host = &infrastructurev1beta1.PhysicalHost{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "available-host",
 					Namespace: testNs.Name,
 				},
-				Spec: infrastructurev1alpha1.PhysicalHostSpec{
-					RedfishConnection: infrastructurev1alpha1.RedfishConnectionInfo{
+				Spec: infrastructurev1beta1.PhysicalHostSpec{
+					RedfishConnection: infrastructurev1beta1.RedfishConnection{
 						Address:              "redfish://dummy",
 						CredentialsSecretRef: "dummy-secret",
 					},
 				},
-				Status: infrastructurev1alpha1.PhysicalHostStatus{
-					State: infrastructurev1alpha1.StateAvailable,
+				Status: infrastructurev1beta1.PhysicalHostStatus{
+					State: infrastructurev1beta1.StateAvailable,
 					Ready: true,
 				},
 			}
@@ -245,11 +245,11 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 			// >>> Explicitly update the status after creation <<<
 			Eventually(func(g Gomega) {
 				// Fetch the created host first
-				createdHost := &infrastructurev1alpha1.PhysicalHost{}
+				createdHost := &infrastructurev1beta1.PhysicalHost{}
 				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: host.Name, Namespace: host.Namespace}, createdHost)).To(Succeed())
 				// Now update its status
-				createdHost.Status = infrastructurev1alpha1.PhysicalHostStatus{
-					State: infrastructurev1alpha1.StateAvailable,
+				createdHost.Status = infrastructurev1beta1.PhysicalHostStatus{
+					State: infrastructurev1beta1.StateAvailable,
 					Ready: true,
 				}
 				g.Expect(k8sClient.Status().Update(ctx, createdHost)).To(Succeed())
@@ -307,7 +307,7 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 			// Fetch the updated Beskar7Machine
 			Eventually(func() bool {
 				Expect(k8sClient.Get(ctx, key, b7machine)).To(Succeed())
-				return conditions.IsTrue(b7machine, infrastructurev1alpha1.PhysicalHostAssociatedCondition)
+				return conditions.IsTrue(b7machine, infrastructurev1beta1.PhysicalHostAssociatedCondition)
 			}, time.Second*5, time.Millisecond*200).Should(BeTrue(), "PhysicalHostAssociatedCondition should be True")
 
 			// Check ProviderID is not set yet
@@ -318,13 +318,13 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 			// Create a PhysicalHost claimed by our machine and in Provisioning state
 			hostName := "provisioning-host"
 			imageUrl := "http://example.com/prov-test.iso"
-			host = &infrastructurev1alpha1.PhysicalHost{
+			host = &infrastructurev1beta1.PhysicalHost{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      hostName,
 					Namespace: testNs.Name,
 				},
-				Spec: infrastructurev1alpha1.PhysicalHostSpec{
-					RedfishConnection: infrastructurev1alpha1.RedfishConnectionInfo{
+				Spec: infrastructurev1beta1.PhysicalHostSpec{
+					RedfishConnection: infrastructurev1beta1.RedfishConnection{
 						Address:              "redfish://dummy",
 						CredentialsSecretRef: "dummy-secret",
 					},
@@ -375,15 +375,15 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 			Expect(result.Requeue).To(BeTrue())
 
 			// Update host status to Provisioning
-			host.Status.State = infrastructurev1alpha1.StateProvisioning
+			host.Status.State = infrastructurev1beta1.StateProvisioning
 			host.Status.Ready = false
 			Expect(k8sClient.Status().Update(ctx, host)).To(Succeed())
 
 			// Wait for status update to be processed
 			Eventually(func() bool {
-				var updatedHost infrastructurev1alpha1.PhysicalHost
+				var updatedHost infrastructurev1beta1.PhysicalHost
 				err := k8sClient.Get(ctx, types.NamespacedName{Name: host.Name, Namespace: host.Namespace}, &updatedHost)
-				return err == nil && updatedHost.Status.State == infrastructurev1alpha1.StateProvisioning
+				return err == nil && updatedHost.Status.State == infrastructurev1beta1.StateProvisioning
 			}, time.Second*5, time.Millisecond*200).Should(BeTrue())
 
 			// Second reconcile (finds provisioning host)
@@ -394,10 +394,10 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 			// Verify Beskar7Machine status
 			Eventually(func(g Gomega) {
 				g.Expect(k8sClient.Get(ctx, key, b7machine)).To(Succeed())
-				g.Expect(conditions.Has(b7machine, infrastructurev1alpha1.InfrastructureReadyCondition)).To(BeTrue())
-				cond := conditions.Get(b7machine, infrastructurev1alpha1.InfrastructureReadyCondition)
+				g.Expect(conditions.Has(b7machine, infrastructurev1beta1.InfrastructureReadyCondition)).To(BeTrue())
+				cond := conditions.Get(b7machine, infrastructurev1beta1.InfrastructureReadyCondition)
 				g.Expect(cond.Status).To(Equal(corev1.ConditionFalse))
-				g.Expect(cond.Reason).To(Equal(infrastructurev1alpha1.PhysicalHostNotReadyReason))
+				g.Expect(cond.Reason).To(Equal(infrastructurev1beta1.PhysicalHostNotReadyReason))
 				g.Expect(cond.Message).To(ContainSubstring("is still provisioning"))
 				g.Expect(b7machine.Status.Phase).NotTo(BeNil())
 				g.Expect(*b7machine.Status.Phase).To(Equal("Provisioning"))
@@ -408,13 +408,13 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 			// Create a PhysicalHost claimed by our machine and in Provisioned state
 			hostName := "provisioned-host"
 			imageUrl := "http://example.com/ready-test.iso"
-			host = &infrastructurev1alpha1.PhysicalHost{
+			host = &infrastructurev1beta1.PhysicalHost{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      hostName,
 					Namespace: testNs.Name,
 				},
-				Spec: infrastructurev1alpha1.PhysicalHostSpec{
-					RedfishConnection: infrastructurev1alpha1.RedfishConnectionInfo{
+				Spec: infrastructurev1beta1.PhysicalHostSpec{
+					RedfishConnection: infrastructurev1beta1.RedfishConnection{
 						Address:              "redfish://dummy",
 						CredentialsSecretRef: "dummy-secret",
 					},
@@ -461,15 +461,15 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 			Expect(result.Requeue).To(BeTrue())
 
 			// Update host status to Provisioned
-			host.Status.State = infrastructurev1alpha1.StateProvisioned
+			host.Status.State = infrastructurev1beta1.StateProvisioned
 			host.Status.Ready = true
 			Expect(k8sClient.Status().Update(ctx, host)).To(Succeed())
 
 			// Wait for status update to be processed
 			Eventually(func() bool {
-				var updatedHost infrastructurev1alpha1.PhysicalHost
+				var updatedHost infrastructurev1beta1.PhysicalHost
 				err := k8sClient.Get(ctx, types.NamespacedName{Name: host.Name, Namespace: host.Namespace}, &updatedHost)
-				return err == nil && updatedHost.Status.State == infrastructurev1alpha1.StateProvisioned
+				return err == nil && updatedHost.Status.State == infrastructurev1beta1.StateProvisioned
 			}, time.Second*5, time.Millisecond*200).Should(BeTrue())
 
 			// Second reconcile (finds provisioned host)
@@ -484,7 +484,7 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 				g.Expect(b7machine.Spec.ProviderID).NotTo(BeNil())
 				expectedProviderID := providerID(host.Namespace, host.Name)
 				g.Expect(*b7machine.Spec.ProviderID).To(Equal(expectedProviderID))
-				g.Expect(conditions.IsTrue(b7machine, infrastructurev1alpha1.InfrastructureReadyCondition)).To(BeTrue())
+				g.Expect(conditions.IsTrue(b7machine, infrastructurev1beta1.InfrastructureReadyCondition)).To(BeTrue())
 				g.Expect(b7machine.Status.Phase).NotTo(BeNil())
 				g.Expect(*b7machine.Status.Phase).To(Equal("Provisioned"))
 			}, time.Second*5, time.Millisecond*200).Should(Succeed())
@@ -494,13 +494,13 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 			// Create a PhysicalHost claimed by our machine and in Error state
 			hostName := "error-host"
 			imageUrl := "http://example.com/error-test.iso"
-			host = &infrastructurev1alpha1.PhysicalHost{
+			host = &infrastructurev1beta1.PhysicalHost{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      hostName,
 					Namespace: testNs.Name,
 				},
-				Spec: infrastructurev1alpha1.PhysicalHostSpec{
-					RedfishConnection: infrastructurev1alpha1.RedfishConnectionInfo{
+				Spec: infrastructurev1beta1.PhysicalHostSpec{
+					RedfishConnection: infrastructurev1beta1.RedfishConnection{
 						Address:              "redfish://dummy",
 						CredentialsSecretRef: "dummy-secret",
 					},
@@ -546,16 +546,16 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 			Expect(result.Requeue).To(BeTrue())
 
 			// Update host status to Error
-			host.Status.State = infrastructurev1alpha1.StateError
+			host.Status.State = infrastructurev1beta1.StateError
 			host.Status.ErrorMessage = "Redfish connection failed repeatedly"
 			host.Status.Ready = false
 			Expect(k8sClient.Status().Update(ctx, host)).To(Succeed())
 
 			// Wait for status update to be processed
 			Eventually(func() bool {
-				var updatedHost infrastructurev1alpha1.PhysicalHost
+				var updatedHost infrastructurev1beta1.PhysicalHost
 				err := k8sClient.Get(ctx, types.NamespacedName{Name: host.Name, Namespace: host.Namespace}, &updatedHost)
-				return err == nil && updatedHost.Status.State == infrastructurev1alpha1.StateError
+				return err == nil && updatedHost.Status.State == infrastructurev1beta1.StateError
 			}, time.Second*5, time.Millisecond*200).Should(BeTrue())
 
 			// Second reconcile (finds error host)
@@ -567,10 +567,10 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 			// Verify Beskar7Machine status
 			Eventually(func(g Gomega) {
 				g.Expect(k8sClient.Get(ctx, key, b7machine)).To(Succeed())
-				g.Expect(conditions.Has(b7machine, infrastructurev1alpha1.InfrastructureReadyCondition)).To(BeTrue())
-				cond := conditions.Get(b7machine, infrastructurev1alpha1.InfrastructureReadyCondition)
+				g.Expect(conditions.Has(b7machine, infrastructurev1beta1.InfrastructureReadyCondition)).To(BeTrue())
+				cond := conditions.Get(b7machine, infrastructurev1beta1.InfrastructureReadyCondition)
 				g.Expect(cond.Status).To(Equal(corev1.ConditionFalse))
-				g.Expect(cond.Reason).To(Equal(infrastructurev1alpha1.PhysicalHostErrorReason))
+				g.Expect(cond.Reason).To(Equal(infrastructurev1beta1.PhysicalHostErrorReason))
 				g.Expect(cond.Message).To(ContainSubstring("Redfish connection failed repeatedly"))
 				g.Expect(b7machine.Status.Phase).NotTo(BeNil())
 				g.Expect(*b7machine.Status.Phase).To(Equal("Failed"))
@@ -585,13 +585,13 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 			// Create a PhysicalHost claimed by our machine
 			hostName := "to-be-released-host"
 			imageUrl := "http://example.com/release-test.iso"
-			host = &infrastructurev1alpha1.PhysicalHost{
+			host = &infrastructurev1beta1.PhysicalHost{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      hostName,
 					Namespace: testNs.Name,
 				},
-				Spec: infrastructurev1alpha1.PhysicalHostSpec{
-					RedfishConnection: infrastructurev1alpha1.RedfishConnectionInfo{
+				Spec: infrastructurev1beta1.PhysicalHostSpec{
+					RedfishConnection: infrastructurev1beta1.RedfishConnection{
 						Address:              "redfish://dummy",
 						CredentialsSecretRef: "dummy-secret",
 					},
@@ -603,8 +603,8 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 					},
 					BootISOSource: &imageUrl,
 				},
-				Status: infrastructurev1alpha1.PhysicalHostStatus{
-					State: infrastructurev1alpha1.StateProvisioned, // Start as if it was provisioned
+				Status: infrastructurev1beta1.PhysicalHostStatus{
+					State: infrastructurev1beta1.StateProvisioned, // Start as if it was provisioned
 					Ready: true,
 				},
 			}
@@ -615,7 +615,7 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 			Eventually(func(g Gomega) {
 				getErr := k8sClient.Get(ctx, hostKey, host)
 				g.Expect(getErr).NotTo(HaveOccurred())
-				g.Expect(host.Status.State).To(Equal(infrastructurev1alpha1.StateProvisioned))
+				g.Expect(host.Status.State).To(Equal(infrastructurev1beta1.StateProvisioned))
 			}, time.Second*5, time.Millisecond*200).Should(Succeed())
 
 			// Set ProviderID on Beskar7Machine to link it
@@ -650,22 +650,22 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 
 			// --- Simulate the PhysicalHost controller updating the status ---
 			Eventually(func(g Gomega) {
-				latest := &infrastructurev1alpha1.PhysicalHost{}
+				latest := &infrastructurev1beta1.PhysicalHost{}
 				getErr := k8sClient.Get(ctx, hostKey, latest)
 				g.Expect(getErr).NotTo(HaveOccurred(), "Failed to get host for status update")
-				latest.Status.State = infrastructurev1alpha1.StateProvisioned
+				latest.Status.State = infrastructurev1beta1.StateProvisioned
 				latest.Status.Ready = true
 				g.Expect(k8sClient.Status().Update(ctx, latest)).To(Succeed(), "Failed to update host status")
 			}, time.Second*5, time.Millisecond*200).Should(Succeed(), "Failed to update PhysicalHost status")
 
 			// Check the PhysicalHost is released
 			Eventually(func(g Gomega) {
-				latest := &infrastructurev1alpha1.PhysicalHost{}
+				latest := &infrastructurev1beta1.PhysicalHost{}
 				getErr := k8sClient.Get(ctx, hostKey, latest)
 				g.Expect(getErr).NotTo(HaveOccurred(), "Failed to get host for release check")
 				g.Expect(latest.Spec.ConsumerRef).To(BeNil(), "ConsumerRef should be nil after release")
 				g.Expect(latest.Spec.BootISOSource).To(BeNil(), "BootISOSource should be nil after release")
-				g.Expect(latest.Status.State).To(Equal(infrastructurev1alpha1.StateProvisioned), "Host should remain in Provisioned state after release")
+				g.Expect(latest.Status.State).To(Equal(infrastructurev1beta1.StateProvisioned), "Host should remain in Provisioned state after release")
 			}, time.Second*15, time.Millisecond*250).Should(Succeed(), "PhysicalHost should be released and remain in Provisioned state")
 
 			// Delete the Beskar7Machine
@@ -746,11 +746,11 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 			b7machine.Spec.ConfigURL = "" // Should be ignored
 
 			// Create a PhysicalHost that the reconciler will find and claim
-			host = &infrastructurev1alpha1.PhysicalHost{
+			host = &infrastructurev1beta1.PhysicalHost{
 				ObjectMeta: metav1.ObjectMeta{Name: "available-host-prebaked", Namespace: testNs.Name},
 				// Ensure RedfishConnection has all required fields for getRedfishClientForHost
-				Spec: infrastructurev1alpha1.PhysicalHostSpec{
-					RedfishConnection: infrastructurev1alpha1.RedfishConnectionInfo{
+				Spec: infrastructurev1beta1.PhysicalHostSpec{
+					RedfishConnection: infrastructurev1beta1.RedfishConnection{
 						Address:              "redfish://dummy-prebaked",
 						CredentialsSecretRef: "dummy-secret-prebaked", // Needs a corresponding dummy secret
 					},
@@ -758,9 +758,9 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 			}
 			Expect(k8sClient.Create(ctx, host)).To(Succeed())
 			Eventually(func(g Gomega) {
-				createdHost := &infrastructurev1alpha1.PhysicalHost{}
+				createdHost := &infrastructurev1beta1.PhysicalHost{}
 				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: host.Name, Namespace: host.Namespace}, createdHost)).To(Succeed())
-				createdHost.Status = infrastructurev1alpha1.PhysicalHostStatus{State: infrastructurev1alpha1.StateAvailable, Ready: true}
+				createdHost.Status = infrastructurev1beta1.PhysicalHostStatus{State: infrastructurev1beta1.StateAvailable, Ready: true}
 				g.Expect(k8sClient.Status().Update(ctx, createdHost)).To(Succeed())
 			}, "10s", "100ms").Should(Succeed(), "Failed to update PhysicalHost status for prebaked test")
 
@@ -791,7 +791,7 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 
 			// Ensure ConsumerRef was set on PhysicalHost by the second reconcile
 			Eventually(func(g Gomega) {
-				updatedHost := &infrastructurev1alpha1.PhysicalHost{}
+				updatedHost := &infrastructurev1beta1.PhysicalHost{}
 				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: host.Name, Namespace: host.Namespace}, updatedHost)).To(Succeed())
 				g.Expect(updatedHost.Spec.ConsumerRef).NotTo(BeNil())
 				g.Expect(updatedHost.Spec.ConsumerRef.Name).To(Equal(b7machine.Name))
@@ -806,7 +806,7 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 			// Verify Beskar7Machine conditions
 			Eventually(func(g Gomega) {
 				Expect(k8sClient.Get(ctx, key, b7machine)).To(Succeed())
-				g.Expect(conditions.IsTrue(b7machine, infrastructurev1alpha1.PhysicalHostAssociatedCondition)).To(BeTrue())
+				g.Expect(conditions.IsTrue(b7machine, infrastructurev1beta1.PhysicalHostAssociatedCondition)).To(BeTrue())
 			}, "5s", "100ms").Should(Succeed(), "PhysicalHostAssociatedCondition should be True")
 		})
 
@@ -820,10 +820,10 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 			b7machine.Spec.ConfigURL = remoteConfigURL
 
 			// Create a PhysicalHost that the reconciler will find and claim
-			host = &infrastructurev1alpha1.PhysicalHost{
+			host = &infrastructurev1beta1.PhysicalHost{
 				ObjectMeta: metav1.ObjectMeta{Name: "available-host-remote", Namespace: testNs.Name},
-				Spec: infrastructurev1alpha1.PhysicalHostSpec{
-					RedfishConnection: infrastructurev1alpha1.RedfishConnectionInfo{
+				Spec: infrastructurev1beta1.PhysicalHostSpec{
+					RedfishConnection: infrastructurev1beta1.RedfishConnection{
 						Address:              "redfish://dummy-remote",
 						CredentialsSecretRef: "dummy-secret-remote",
 					},
@@ -831,9 +831,9 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 			}
 			Expect(k8sClient.Create(ctx, host)).To(Succeed())
 			Eventually(func(g Gomega) {
-				createdHost := &infrastructurev1alpha1.PhysicalHost{}
+				createdHost := &infrastructurev1beta1.PhysicalHost{}
 				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: host.Name, Namespace: host.Namespace}, createdHost)).To(Succeed())
-				createdHost.Status = infrastructurev1alpha1.PhysicalHostStatus{State: infrastructurev1alpha1.StateAvailable, Ready: true}
+				createdHost.Status = infrastructurev1beta1.PhysicalHostStatus{State: infrastructurev1beta1.StateAvailable, Ready: true}
 				g.Expect(k8sClient.Status().Update(ctx, createdHost)).To(Succeed())
 			}, "10s", "100ms").Should(Succeed(), "Failed to update PhysicalHost status for remote config test")
 
@@ -863,7 +863,7 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 			Expect(result.RequeueAfter).To(BeNumerically(">", 0), "Should requeue to wait for PhysicalHost controller")
 
 			Eventually(func(g Gomega) {
-				updatedHost := &infrastructurev1alpha1.PhysicalHost{}
+				updatedHost := &infrastructurev1beta1.PhysicalHost{}
 				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: host.Name, Namespace: host.Namespace}, updatedHost)).To(Succeed())
 				g.Expect(updatedHost.Spec.ConsumerRef).NotTo(BeNil())
 			}, "15s", "200ms").Should(Succeed(), "PhysicalHost should be claimed after second reconcile for remote config")
@@ -876,7 +876,7 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 			// Verify Beskar7Machine conditions
 			Eventually(func(g Gomega) {
 				Expect(k8sClient.Get(ctx, key, b7machine)).To(Succeed())
-				g.Expect(conditions.IsTrue(b7machine, infrastructurev1alpha1.PhysicalHostAssociatedCondition)).To(BeTrue())
+				g.Expect(conditions.IsTrue(b7machine, infrastructurev1beta1.PhysicalHostAssociatedCondition)).To(BeTrue())
 			}, "5s", "100ms").Should(Succeed(), "PhysicalHostAssociatedCondition should be True")
 		})
 
@@ -890,10 +890,10 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 			b7machine.Spec.ConfigURL = remoteConfigURL
 
 			// Create a PhysicalHost that the reconciler will find and claim
-			host = &infrastructurev1alpha1.PhysicalHost{
+			host = &infrastructurev1beta1.PhysicalHost{
 				ObjectMeta: metav1.ObjectMeta{Name: "available-host-flatcar", Namespace: testNs.Name},
-				Spec: infrastructurev1alpha1.PhysicalHostSpec{
-					RedfishConnection: infrastructurev1alpha1.RedfishConnectionInfo{
+				Spec: infrastructurev1beta1.PhysicalHostSpec{
+					RedfishConnection: infrastructurev1beta1.RedfishConnection{
 						Address:              "redfish://dummy-flatcar",
 						CredentialsSecretRef: "dummy-secret-flatcar",
 					},
@@ -901,9 +901,9 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 			}
 			Expect(k8sClient.Create(ctx, host)).To(Succeed())
 			Eventually(func(g Gomega) {
-				createdHost := &infrastructurev1alpha1.PhysicalHost{}
+				createdHost := &infrastructurev1beta1.PhysicalHost{}
 				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: host.Name, Namespace: host.Namespace}, createdHost)).To(Succeed())
-				createdHost.Status = infrastructurev1alpha1.PhysicalHostStatus{State: infrastructurev1alpha1.StateAvailable, Ready: true}
+				createdHost.Status = infrastructurev1beta1.PhysicalHostStatus{State: infrastructurev1beta1.StateAvailable, Ready: true}
 				g.Expect(k8sClient.Status().Update(ctx, createdHost)).To(Succeed())
 			}, "10s", "100ms").Should(Succeed(), "Failed to update PhysicalHost status for flatcar test")
 
@@ -933,7 +933,7 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 			Expect(result.RequeueAfter).To(BeNumerically(">", 0), "Should requeue to wait for PhysicalHost controller")
 
 			Eventually(func(g Gomega) {
-				updatedHost := &infrastructurev1alpha1.PhysicalHost{}
+				updatedHost := &infrastructurev1beta1.PhysicalHost{}
 				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: host.Name, Namespace: host.Namespace}, updatedHost)).To(Succeed())
 				g.Expect(updatedHost.Spec.ConsumerRef).NotTo(BeNil())
 			}, "15s", "200ms").Should(Succeed(), "PhysicalHost should be claimed after second reconcile for flatcar")
@@ -955,10 +955,10 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 			b7machine.Spec.ConfigURL = remoteConfigURL
 
 			// Create a PhysicalHost that the reconciler will find and claim
-			host = &infrastructurev1alpha1.PhysicalHost{
+			host = &infrastructurev1beta1.PhysicalHost{
 				ObjectMeta: metav1.ObjectMeta{Name: "available-host-leapmicro", Namespace: testNs.Name},
-				Spec: infrastructurev1alpha1.PhysicalHostSpec{
-					RedfishConnection: infrastructurev1alpha1.RedfishConnectionInfo{
+				Spec: infrastructurev1beta1.PhysicalHostSpec{
+					RedfishConnection: infrastructurev1beta1.RedfishConnection{
 						Address:              "redfish://dummy-leapmicro",
 						CredentialsSecretRef: "dummy-secret-leapmicro",
 					},
@@ -966,9 +966,9 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 			}
 			Expect(k8sClient.Create(ctx, host)).To(Succeed())
 			Eventually(func(g Gomega) {
-				createdHost := &infrastructurev1alpha1.PhysicalHost{}
+				createdHost := &infrastructurev1beta1.PhysicalHost{}
 				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: host.Name, Namespace: host.Namespace}, createdHost)).To(Succeed())
-				createdHost.Status = infrastructurev1alpha1.PhysicalHostStatus{State: infrastructurev1alpha1.StateAvailable, Ready: true}
+				createdHost.Status = infrastructurev1beta1.PhysicalHostStatus{State: infrastructurev1beta1.StateAvailable, Ready: true}
 				g.Expect(k8sClient.Status().Update(ctx, createdHost)).To(Succeed())
 			}, "10s", "100ms").Should(Succeed(), "Failed to update PhysicalHost status for leapmicro test")
 
@@ -998,7 +998,7 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 			Expect(result.RequeueAfter).To(BeNumerically(">", 0), "Should requeue to wait for PhysicalHost controller")
 
 			Eventually(func(g Gomega) {
-				updatedHost := &infrastructurev1alpha1.PhysicalHost{}
+				updatedHost := &infrastructurev1beta1.PhysicalHost{}
 				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: host.Name, Namespace: host.Namespace}, updatedHost)).To(Succeed())
 				g.Expect(updatedHost.Spec.ConsumerRef).NotTo(BeNil())
 			}, "15s", "200ms").Should(Succeed(), "PhysicalHost should be claimed after second reconcile for leapmicro")
@@ -1020,10 +1020,10 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 			b7machine.Spec.ConfigURL = remoteConfigURL
 
 			// Create a PhysicalHost that the reconciler will find and claim
-			host = &infrastructurev1alpha1.PhysicalHost{
+			host = &infrastructurev1beta1.PhysicalHost{
 				ObjectMeta: metav1.ObjectMeta{Name: "available-host-talos", Namespace: testNs.Name},
-				Spec: infrastructurev1alpha1.PhysicalHostSpec{
-					RedfishConnection: infrastructurev1alpha1.RedfishConnectionInfo{
+				Spec: infrastructurev1beta1.PhysicalHostSpec{
+					RedfishConnection: infrastructurev1beta1.RedfishConnection{
 						Address:              "redfish://dummy-talos",
 						CredentialsSecretRef: "dummy-secret-talos",
 					},
@@ -1031,9 +1031,9 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 			}
 			Expect(k8sClient.Create(ctx, host)).To(Succeed())
 			Eventually(func(g Gomega) {
-				createdHost := &infrastructurev1alpha1.PhysicalHost{}
+				createdHost := &infrastructurev1beta1.PhysicalHost{}
 				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: host.Name, Namespace: host.Namespace}, createdHost)).To(Succeed())
-				createdHost.Status = infrastructurev1alpha1.PhysicalHostStatus{State: infrastructurev1alpha1.StateAvailable, Ready: true}
+				createdHost.Status = infrastructurev1beta1.PhysicalHostStatus{State: infrastructurev1beta1.StateAvailable, Ready: true}
 				g.Expect(k8sClient.Status().Update(ctx, createdHost)).To(Succeed())
 			}, "10s", "100ms").Should(Succeed(), "Failed to update PhysicalHost status for talos test")
 
@@ -1063,7 +1063,7 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 			Expect(result.RequeueAfter).To(BeNumerically(">", 0), "Should requeue to wait for PhysicalHost controller")
 
 			Eventually(func(g Gomega) {
-				updatedHost := &infrastructurev1alpha1.PhysicalHost{}
+				updatedHost := &infrastructurev1beta1.PhysicalHost{}
 				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: host.Name, Namespace: host.Namespace}, updatedHost)).To(Succeed())
 				g.Expect(updatedHost.Spec.ConsumerRef).NotTo(BeNil())
 			}, "15s", "200ms").Should(Succeed(), "PhysicalHost should be claimed after second reconcile for talos")

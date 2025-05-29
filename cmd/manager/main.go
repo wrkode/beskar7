@@ -17,6 +17,7 @@ limitations under the License.
 package main
 
 import (
+	"context"
 	"flag"
 	"os"
 
@@ -28,13 +29,15 @@ import (
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/manager/signals"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
-	infrastructurev1alpha1 "github.com/wrkode/beskar7/api/v1alpha1"
+	infrastructurev1beta1 "github.com/wrkode/beskar7/api/v1beta1"
+	"github.com/wrkode/beskar7/api/v1beta1/webhooks"
 	"github.com/wrkode/beskar7/controllers"
 	internalredfish "github.com/wrkode/beskar7/internal/redfish"
 	//+kubebuilder:scaffold:imports
@@ -48,7 +51,7 @@ var (
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 
-	utilruntime.Must(infrastructurev1alpha1.AddToScheme(scheme))
+	utilruntime.Must(infrastructurev1beta1.AddToScheme(scheme))
 	//+kubebuilder:scaffold:scheme
 }
 
@@ -105,21 +108,37 @@ func main() {
 		setupLog.Error(err, "unable to create controller", "controller", "PhysicalHost")
 		os.Exit(1)
 	}
-	// TODO: Add Beskar7Cluster and Beskar7Machine reconcilers
+
 	if err = (&controllers.Beskar7ClusterReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
-	}).SetupWithManager(mgr); err != nil {
+	}).SetupWithManager(context.Background(), mgr, controller.Options{}); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Beskar7Cluster")
 		os.Exit(1)
 	}
+
 	if err = (&controllers.Beskar7MachineReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
-	}).SetupWithManager(mgr); err != nil {
+	}).SetupWithManager(context.Background(), mgr, controller.Options{}); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Beskar7Machine")
 		os.Exit(1)
 	}
+
+	// Setup webhooks
+	if err = (&webhooks.Beskar7ClusterWebhook{}).SetupWebhookWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create webhook", "webhook", "Beskar7Cluster")
+		os.Exit(1)
+	}
+
+	if err = (&webhooks.Beskar7MachineWebhook{}).SetupWebhookWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create webhook", "webhook", "Beskar7Machine")
+		os.Exit(1)
+	}
+
+	// Setup conversion webhook
+	conversionWebhook := webhooks.NewBeskar7ConversionWebhook(mgr.GetScheme())
+	mgr.GetWebhookServer().Register("/convert", conversionWebhook)
 
 	//+kubebuilder:scaffold:builder
 

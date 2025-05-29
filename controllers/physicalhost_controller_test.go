@@ -15,7 +15,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	infrastructurev1alpha1 "github.com/wrkode/beskar7/api/v1alpha1"
+	infrastructurev1beta1 "github.com/wrkode/beskar7/api/v1beta1"
 	internalredfish "github.com/wrkode/beskar7/internal/redfish" // Import internal redfish
 )
 
@@ -30,7 +30,7 @@ var _ = Describe("PhysicalHost Controller", func() {
 	)
 
 	Context("When reconciling a PhysicalHost", func() {
-		var physicalHost *infrastructurev1alpha1.PhysicalHost
+		var physicalHost *infrastructurev1beta1.PhysicalHost
 		var credentialSecret *corev1.Secret
 		var mockRfClient *internalredfish.MockClient // Added mock client variable
 		var reconciler *PhysicalHostReconciler       // Added reconciler variable
@@ -54,13 +54,13 @@ var _ = Describe("PhysicalHost Controller", func() {
 			Expect(k8sClient.Create(ctx, credentialSecret)).To(Succeed())
 
 			// Define the PhysicalHost resource
-			physicalHost = &infrastructurev1alpha1.PhysicalHost{
+			physicalHost = &infrastructurev1beta1.PhysicalHost{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      PhName,
 					Namespace: PhNamespace,
 				},
-				Spec: infrastructurev1alpha1.PhysicalHostSpec{
-					RedfishConnection: infrastructurev1alpha1.RedfishConnectionInfo{
+				Spec: infrastructurev1beta1.PhysicalHostSpec{
+					RedfishConnection: infrastructurev1beta1.RedfishConnection{
 						Address:              "redfish-mock.example.com", // Doesn't matter for mock
 						CredentialsSecretRef: SecretName,
 					},
@@ -100,7 +100,7 @@ var _ = Describe("PhysicalHost Controller", func() {
 			Expect(err).NotTo(HaveOccurred(), "First reconcile loop failed")
 
 			// First reconcile adds finalizer and requeues
-			createdPh := &infrastructurev1alpha1.PhysicalHost{}
+			createdPh := &infrastructurev1beta1.PhysicalHost{}
 			Eventually(func(g Gomega) {
 				g.Expect(k8sClient.Get(ctx, phLookupKey, createdPh)).To(Succeed())
 				g.Expect(createdPh.Finalizers).To(ContainElement(PhysicalHostFinalizer))
@@ -113,8 +113,8 @@ var _ = Describe("PhysicalHost Controller", func() {
 			// Now expect the state to become Available
 			Eventually(func(g Gomega) {
 				g.Expect(k8sClient.Get(ctx, phLookupKey, createdPh)).To(Succeed())
-				g.Expect(createdPh.Status.State).To(Equal(infrastructurev1alpha1.StateAvailable))
-				g.Expect(createdPh.Status.ObservedPowerState).To(Equal(redfish.OffPowerState)) // Mock default
+				g.Expect(createdPh.Status.State).To(Equal(infrastructurev1beta1.StateAvailable))
+				g.Expect(createdPh.Status.ObservedPowerState).To(Equal(string(redfish.OffPowerState))) // Mock default
 				g.Expect(createdPh.Status.HardwareDetails).NotTo(BeNil())
 				// TODO: Add condition checks using conditions.IsTrue, etc.
 			}, Timeout, Interval).Should(Succeed(), "PhysicalHost should become Available")
@@ -140,8 +140,8 @@ var _ = Describe("PhysicalHost Controller", func() {
 			phToCreate.Spec.RedfishConnection.CredentialsSecretRef = deleteSecretName // Point to unique secret
 			phToCreate.Finalizers = []string{PhysicalHostFinalizer}
 			// Simulate it was provisioned and then released (ConsumerRef is nil)
-			phToCreate.Status.State = infrastructurev1alpha1.StateProvisioned // Set to a state that allows deprovisioning
-			phToCreate.Spec.ConsumerRef = nil                                 // Ensure it's not considered in use
+			phToCreate.Status.State = infrastructurev1beta1.StateProvisioned // Set to a state that allows deprovisioning
+			phToCreate.Spec.ConsumerRef = nil                                // Ensure it's not considered in use
 
 			// Create unique secret for this test
 			deleteSecret := credentialSecret.DeepCopy()
@@ -151,10 +151,10 @@ var _ = Describe("PhysicalHost Controller", func() {
 
 			Expect(k8sClient.Create(ctx, phToCreate)).To(Succeed())
 			Eventually(func(g Gomega) {
-				getStatusPh := &infrastructurev1alpha1.PhysicalHost{}
+				getStatusPh := &infrastructurev1beta1.PhysicalHost{}
 				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: deletePhName, Namespace: PhNamespace}, getStatusPh)).To(Succeed())
-				getStatusPh.Status.State = infrastructurev1alpha1.StateProvisioned
-				getStatusPh.Status.ObservedPowerState = redfish.OnPowerState
+				getStatusPh.Status.State = infrastructurev1beta1.StateProvisioned
+				getStatusPh.Status.ObservedPowerState = string(redfish.OnPowerState)
 				g.Expect(k8sClient.Status().Update(ctx, getStatusPh)).To(Succeed())
 			}, Timeout, Interval).Should(Succeed(), "Failed to set initial status for deletion test")
 
@@ -178,20 +178,20 @@ var _ = Describe("PhysicalHost Controller", func() {
 			// Check if state moved to deprovisioning. This might be racy if the object is deleted too fast.
 			// It's more important to check that the Redfish calls were made and the object is gone.
 			// We can attempt to get it once, but if it's already gone, that's also a success for finalizer removal.
-			deletedPh := &infrastructurev1alpha1.PhysicalHost{}
+			deletedPh := &infrastructurev1beta1.PhysicalHost{}
 			err = k8sClient.Get(ctx, phLookupKey, deletedPh)
 			if err == nil { // If we can still get it, check its status
-				Expect(deletedPh.Status.State).To(Equal(infrastructurev1alpha1.StateDeprovisioning))
-				cond := conditions.Get(deletedPh, infrastructurev1alpha1.HostProvisionedCondition)
+				Expect(deletedPh.Status.State).To(Equal(infrastructurev1beta1.StateDeprovisioning))
+				cond := conditions.Get(deletedPh, infrastructurev1beta1.HostProvisionedCondition)
 				Expect(cond).NotTo(BeNil())
-				Expect(cond.Reason).To(SatisfyAny(Equal(infrastructurev1alpha1.DeprovisioningReason), Equal(clusterv1.DeletingReason)))
+				Expect(cond.Reason).To(SatisfyAny(Equal(infrastructurev1beta1.DeprovisioningReason), Equal(clusterv1.DeletingReason)))
 			} else {
 				Expect(client.IgnoreNotFound(err)).To(BeNil(), "Error getting PH, should be NotFound or nil")
 			}
 
 			By("Ensuring PhysicalHost is eventually deleted from API server (finalizer removed)")
 			Eventually(func() bool {
-				ph := &infrastructurev1alpha1.PhysicalHost{}
+				ph := &infrastructurev1beta1.PhysicalHost{}
 				errGet := k8sClient.Get(ctx, phLookupKey, ph)
 				return client.IgnoreNotFound(errGet) == nil
 			}, Timeout*2, Interval).Should(BeTrue(), "PhysicalHost should be deleted from API server")

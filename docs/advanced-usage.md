@@ -26,7 +26,7 @@ If a Dell BMC requires setting the `KernelArgs` BIOS attribute instead of using 
 
 ```yaml
 # physicalhost.yaml
-apiVersion: infrastructure.cluster.x-k8s.io/v1alpha1
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
 kind: PhysicalHost
 metadata:
   name: dell-server-01
@@ -52,7 +52,7 @@ To use failure domains, ensure your `PhysicalHost` resources are labeled appropr
 
 ```yaml
 # physicalhost-rack1.yaml
-apiVersion: infrastructure.cluster.x-k8s.io/v1alpha1
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
 kind: PhysicalHost
 metadata:
   name: server-rack1-01

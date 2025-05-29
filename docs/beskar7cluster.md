@@ -1,10 +1,10 @@
 # Beskar7Cluster
 
-The Beskar7Cluster custom resource represents a cluster infrastructure managed by Beskar7. It provides the infrastructure configuration for a Kubernetes cluster.
+The `Beskar7Cluster` resource represents a cluster in the Beskar7 infrastructure provider.
 
 ## API Version
 
-`infrastructure.cluster.x-k8s.io/v1alpha1`
+`infrastructure.cluster.x-k8s.io/v1beta1`
 
 ## Kind
 
@@ -57,7 +57,29 @@ Map of failure domains with their current status:
 ## Example
 
 ```yaml
-apiVersion: infrastructure.cluster.x-k8s.io/v1alpha1
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+kind: Beskar7Cluster
+metadata:
+  name: my-cluster
+  namespace: default
+spec:
+  controlPlaneEndpoint:
+    host: 192.168.1.100
+    port: 6443
+```
+
+## Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `spec.controlPlaneEndpoint` | `APIEndpoint` | The endpoint used to communicate with the control plane. |
+| `status.ready` | `bool` | Indicates that the cluster is ready. |
+| `status.controlPlaneEndpoint` | `APIEndpoint` | The endpoint used to communicate with the control plane. |
+| `status.failureDomains` | `FailureDomains` | A list of failure domain objects synced from the infrastructure provider. |
+| `status.conditions` | `Conditions` | Current service state of the Beskar7Cluster. |
+
+```yaml
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
 kind: Beskar7Cluster
 metadata:
   name: example-cluster

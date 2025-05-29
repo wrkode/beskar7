@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: beskar7-webhook-service
+  namespace: beskar7-system
+  labels:
+    cluster.x-k8s.io/provider: beskar7
+spec:
+  ports:
+  - port: 443
+    targetPort: 9443
+    protocol: TCP
+  selector:
+    control-plane: beskar7-controller-manager 
