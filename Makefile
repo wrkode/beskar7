@@ -12,7 +12,7 @@ CONTROLLER_GEN = $(GOBIN)/controller-gen
 KUSTOMIZE ?= kustomize
 
 # Image URL to use all building/pushing image targets
-VERSION ?= v0.2.5
+VERSION ?= v0.2.6
 IMAGE_REGISTRY ?= ghcr.io/wrkode/beskar7
 IMAGE_REPO ?= beskar7
 IMG ?= $(IMAGE_REGISTRY)/$(IMAGE_REPO):$(VERSION)
