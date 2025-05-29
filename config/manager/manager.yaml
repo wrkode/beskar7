@@ -32,8 +32,8 @@ spec:
         - /manager
         args:
         - --leader-elect
-        image: controller:latest # This will be patched by Kustomize
-        imagePullPolicy: Always # Ensure image is always pulled
+        image: ghcr.io/wrkode/beskar7/beskar7:v0.2.6
+        imagePullPolicy: Always
         name: manager
         securityContext:
           allowPrivilegeEscalation: false

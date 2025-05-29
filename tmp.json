@@ -1,0 +1,63 @@
+{
+    "apiVersion": "v1",
+    "kind": "Namespace",
+    "metadata": {
+        "annotations": {
+            "kubectl.kubernetes.io/last-applied-configuration": "{\"apiVersion\":\"v1\",\"kind\":\"Namespace\",\"metadata\":{\"annotations\":{},\"labels\":{\"control-plane\":\"controller-manager\"},\"name\":\"beskar7-system\"}}\n"
+        },
+        "creationTimestamp": "2025-05-29T09:16:06Z",
+        "deletionTimestamp": "2025-05-29T10:32:06Z",
+        "labels": {
+            "control-plane": "controller-manager",
+            "kubernetes.io/metadata.name": "beskar7-system"
+        },
+        "name": "beskar7-system",
+        "resourceVersion": "315518",
+        "uid": "5c3173cd-fc71-4326-aa9d-c1069d0056e1"
+    },
+    "spec": {
+        "finalizers": [
+            
+        ]
+    },
+    "status": {
+        "conditions": [
+            {
+                "lastTransitionTime": "2025-05-29T10:37:14Z",
+                "message": "All resources successfully discovered",
+                "reason": "ResourcesDiscovered",
+                "status": "False",
+                "type": "NamespaceDeletionDiscoveryFailure"
+            },
+            {
+                "lastTransitionTime": "2025-05-29T10:37:14Z",
+                "message": "All legacy kube types successfully parsed",
+                "reason": "ParsedGroupVersions",
+                "status": "False",
+                "type": "NamespaceDeletionGroupVersionParsingFailure"
+            },
+            {
+                "lastTransitionTime": "2025-05-29T10:37:14Z",
+                "message": "Failed to delete all resource types, 1 remaining: storage is (re)initializing: failed to list infrastructure.cluster.x-k8s.io/v1beta1, Kind=PhysicalHost: request to convert CR from an invalid group/version: infrastructure.cluster.x-k8s.io/v1alpha1",
+                "reason": "ContentDeletionFailed",
+                "status": "True",
+                "type": "NamespaceDeletionContentFailure"
+            },
+            {
+                "lastTransitionTime": "2025-05-29T10:37:14Z",
+                "message": "All content successfully removed",
+                "reason": "ContentRemoved",
+                "status": "False",
+                "type": "NamespaceContentRemaining"
+            },
+            {
+                "lastTransitionTime": "2025-05-29T10:37:14Z",
+                "message": "All content-preserving finalizers finished",
+                "reason": "ContentHasNoFinalizers",
+                "status": "False",
+                "type": "NamespaceFinalizersRemaining"
+            }
+        ],
+        "phase": "Terminating"
+    }
+}

@@ -5,12 +5,4 @@ metadata:
   namespace: beskar7-system
 spec:
   conversion:
-    strategy: Webhook
-    webhook:
-      clientConfig:
-        service:
-          namespace: beskar7-system
-          name: webhook-service
-          path: /convert
-      conversionReviewVersions:
-      - v1 
+    strategy: None 

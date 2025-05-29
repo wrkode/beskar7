@@ -136,10 +136,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Setup conversion webhook
-	conversionWebhook := webhooks.NewBeskar7ConversionWebhook(mgr.GetScheme())
-	mgr.GetWebhookServer().Register("/convert", conversionWebhook)
-
 	//+kubebuilder:scaffold:builder
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
