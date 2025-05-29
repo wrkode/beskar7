@@ -4,17 +4,17 @@ This document provides guidance on troubleshooting common issues encountered whe
 
 ## Controller Logs
 
-The first place to look for issues is the logs of the Beskar7 controller manager pod, usually running in the `system` namespace.
+The first place to look for issues is the logs of the Beskar7 controller manager pod, usually running in the `beskar7-system` namespace.
 
 ```bash
-# Find the pod name
-kubectl get pods -n system -l control-plane=controller-manager
+# List the controller manager pods
+kubectl get pods -n beskar7-system -l control-plane=controller-manager
 
-# Stream logs
-kubectl logs -n system -f <pod-name> -c manager 
+# View the logs
+kubectl logs -n beskar7-system -f <pod-name> -c manager
 ```
 
-Increase verbosity by editing the manager Deployment (`config/manager/manager.yaml` or via `kubectl edit deployment -n system controller-manager`) and adding a `-v=X` argument (e.g., `-v=5`) to the manager container's args list, then restart the pod.
+Increase verbosity by editing the manager Deployment (`config/manager/manager.yaml` or via `kubectl edit deployment -n beskar7-system controller-manager`) and adding a `-v=X` argument (e.g., `-v=5`) to the manager container's args list, then restart the pod.
 
 ## Common Issues & Solutions
 

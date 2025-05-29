@@ -68,9 +68,9 @@ This guide provides the steps to get the Beskar7 controller manager built, deplo
     *(Note: If you pushed the image to a different location than specified in the Makefile, ensure the `IMG` variable was set correctly during the `make deploy` step, or modify the deployment manifests manually/via kustomize before applying).*
 
 4.  **Verify Deployment:**
-    Check that the controller manager pod is running in the `system` namespace:
+    Check that the controller manager pod is running in the `beskar7-system` namespace:
     ```bash
-    kubectl get pods -n system -l control-plane=controller-manager
+    kubectl get pods -n beskar7-system -l control-plane=controller-manager
     ```
 
 ## Basic Usage

@@ -56,7 +56,7 @@ func init() {
 }
 
 //+kubebuilder:rbac:groups=*,resources=*,verbs=*
-//+kubebuilder:rbac:namespace=system,groups=rbac.authorization.k8s.io,resources=roles;rolebindings,verbs=create;delete;get;list;patch;update;watch
+//+kubebuilder:rbac:namespace=beskar7-system,groups=rbac.authorization.k8s.io,resources=roles;rolebindings,verbs=create;delete;get;list;patch;update;watch
 
 func main() {
 	var metricsAddr string
