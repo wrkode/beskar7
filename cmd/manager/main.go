@@ -100,12 +100,13 @@ func main() {
 	}
 
 	// Setup controllers here
-	if err = (&controllers.PhysicalHostReconciler{
-		Client:               mgr.GetClient(),
-		Scheme:               mgr.GetScheme(),
+	if err = (&controllers.Beskar7MachineReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+		// Use the default NewClient, which will be shared.
 		RedfishClientFactory: internalredfish.NewClient,
-	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "PhysicalHost")
+	}).SetupWithManager(context.Background(), mgr, controller.Options{MaxConcurrentReconciles: 10}); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "Beskar7Machine")
 		os.Exit(1)
 	}
 
@@ -117,11 +118,12 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err = (&controllers.Beskar7MachineReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
-	}).SetupWithManager(context.Background(), mgr, controller.Options{}); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "Beskar7Machine")
+	if err = (&controllers.PhysicalHostReconciler{
+		Client:               mgr.GetClient(),
+		Scheme:               mgr.GetScheme(),
+		RedfishClientFactory: internalredfish.NewClient,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "PhysicalHost")
 		os.Exit(1)
 	}
 
