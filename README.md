@@ -6,6 +6,17 @@ Beskar7 is a Kubernetes operator that implements the Cluster API infrastructure 
 
 **Alpha:** This project is currently under active development. Key features are being implemented, and the APIs may change. Not yet suitable for production use.
 
+## 📚 Documentation
+
+Comprehensive documentation is available in the [`docs/`](docs/) directory:
+
+- **[Getting Started](docs/README.md)** - Complete documentation index and navigation
+- **[Quick Start Guide](docs/quick-start.md)** - Get up and running quickly
+- **[API Reference](docs/api-reference.md)** - Complete API documentation
+- **[Hardware Compatibility](docs/hardware-compatibility.md)** - Vendor support matrix
+- **[Deployment Best Practices](docs/deployment-best-practices.md)** - Production deployment guidance
+- **[Troubleshooting](docs/troubleshooting.md)** - Common issues and solutions
+
 ## Architecture Overview
 
 Beskar7 consists of several custom controllers that work together:
@@ -190,6 +201,8 @@ After a short while, the `PhysicalHost` should transition to an `Available` stat
 kubectl get physicalhost server-01 -o wide
 ```
 
+If the PhysicalHost doesn't reach `Available` state, see the **[Troubleshooting Guide](docs/troubleshooting.md)** for common issues and solutions.
+
 ### 3. Create a `Beskar7Machine` (Pre-Baked ISO Mode)
 
 This example assumes you have an ISO image (`http://example.com/my-kairos-prebaked.iso`) that has Kairos OS and its configuration already embedded using Kairos's own tooling.
@@ -259,7 +272,28 @@ kubectl apply -f b7machine-kairos-remote.yaml
 *   For Flatcar, `flatcar.ignition.config.url=<ConfigURL>`.
 *   For openSUSE Leap Micro, `combustion.path=<ConfigURL>`.
 
-*(This README will be updated as more features are implemented, including CAPI `Machine` and `Cluster` examples.)*
+## Hardware Compatibility
+
+Beskar7 supports any Redfish-compliant BMC. Tested vendors include:
+
+- **Dell Technologies** (iDRAC9) - Excellent support with minor RemoteConfig limitations
+- **HPE** (iLO 5) - Excellent Redfish compliance and feature support  
+- **Lenovo** (XCC) - Good overall compatibility with reliable boot parameter injection
+- **Supermicro** (BMC) - Variable support, newer X12+ series recommended
+
+For detailed compatibility information, hardware-specific workarounds, and testing procedures, see the **[Hardware Compatibility Matrix](docs/hardware-compatibility.md)**.
+
+## Production Deployment
+
+For production deployments, review:
+
+- **[Deployment Best Practices](docs/deployment-best-practices.md)** - Security, scaling, and operational guidance
+- **[Troubleshooting Guide](docs/troubleshooting.md)** - Common issues and vendor-specific solutions
+- **[Metrics Documentation](docs/metrics.md)** - Monitoring and observability setup
+
+## Contributing
+
+For information about contributing to Beskar7, see the `CONTRIBUTING.md` file and the issue tracker at https://github.com/wrkode/beskar7/issues.
 
 ## Project Status and Roadmap
 

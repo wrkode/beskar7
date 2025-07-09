@@ -34,10 +34,16 @@ Yes
 
 ##### spec.osFamily
 - **osFamily** (string, required): The operating system family to use. Must be one of:
-  - `kairos`
-  - `talos`
-  - `flatcar`
-  - `LeapMicro`
+  - `kairos` - Kairos cloud-native OS
+  - `talos` - Talos Linux
+  - `flatcar` - Flatcar Container Linux
+  - `LeapMicro` - openSUSE Leap Micro
+  - `ubuntu` - Ubuntu Server
+  - `rhel` - Red Hat Enterprise Linux
+  - `centos` - CentOS
+  - `fedora` - Fedora Server
+  - `debian` - Debian
+  - `opensuse` - openSUSE
 
 ### Optional Fields
 
@@ -48,9 +54,11 @@ Yes
 - **providerID** (string, optional): Provider-specific identifier for the machine
 
 ##### spec.provisioningMode
-- **provisioningMode** (string, optional): The mode to use for provisioning. Must be one of:
-  - `RemoteConfig`
-  - `PreBakedISO`
+- **provisioningMode** (string, optional, default: "RemoteConfig"): The mode to use for provisioning. Must be one of:
+  - `RemoteConfig` - Boot generic ISO with configuration URL
+  - `PreBakedISO` - Boot pre-configured ISO
+  - `PXE` - PXE boot (future implementation)
+  - `iPXE` - iPXE boot (future implementation)
 
 ## Example
 

@@ -25,5 +25,20 @@ Beskar7 is currently in the **Alpha** stage. Core functionality is being develop
 
 ## Next Steps
 
-*   **[Quick Start](./quick-start.md):** Get Beskar7 built and deployed.
-*   **[Architecture](./architecture.md):** Understand the components and how they interact. 
+### For New Users
+1. **[Quick Start Guide](./quick-start.md)** - Get Beskar7 built and deployed
+2. **[Hardware Compatibility](./hardware-compatibility.md)** - Check your hardware compatibility
+3. **[API Reference](./api-reference.md)** - Learn about the available resources
+
+### For Operators
+1. **[Deployment Best Practices](./deployment-best-practices.md)** - Production deployment guidance
+2. **[Troubleshooting](./troubleshooting.md)** - Common issues and solutions
+3. **[Metrics](./metrics.md)** - Monitoring and observability
+
+### For Developers
+1. **[Architecture](./architecture.md)** - Understand the components and how they interact
+2. **[Advanced Usage](./advanced-usage.md)** - Advanced configuration scenarios
+3. **[API Reference](./api-reference.md)** - Complete API documentation
+
+### Complete Documentation
+See **[Documentation Index](./README.md)** for a complete overview of all available documentation. 
