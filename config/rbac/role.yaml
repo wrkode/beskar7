@@ -4,21 +4,44 @@ kind: ClusterRole
 metadata:
   name: manager-role
 rules:
+# Core infrastructure resources - full access needed for our CRDs
 - apiGroups:
-  - ""
+  - infrastructure.cluster.x-k8s.io
   resources:
-  - secrets
+  - beskar7clusters
+  - beskar7machines
+  - beskar7machinetemplates
+  - physicalhosts
   verbs:
+  - create
+  - delete
   - get
   - list
-  - watch // Needed for Redfish credentials
-  - watch // Needed for UserData
+  - patch
+  - update
+  - watch
 - apiGroups:
-  - '*'
+  - infrastructure.cluster.x-k8s.io
   resources:
-  - '*'
+  - beskar7clusters/finalizers
+  - beskar7machines/finalizers
+  - beskar7machinetemplates/finalizers
+  - physicalhosts/finalizers
   verbs:
-  - '*'
+  - update
+- apiGroups:
+  - infrastructure.cluster.x-k8s.io
+  resources:
+  - beskar7clusters/status
+  - beskar7machines/status
+  - beskar7machinetemplates/status
+  - physicalhosts/status
+  verbs:
+  - get
+  - patch
+  - update
+
+# Cluster API integration - read-only access to CAPI resources
 - apiGroups:
   - cluster.x-k8s.io
   resources:
@@ -36,53 +59,75 @@ rules:
   verbs:
   - get
   - list
-  - watch // Needed to find control plane machine addresses
-  - watch // Needed to interact with Machine object
+  - watch
+
+# Secret access - limited to reading credentials and userdata
 - apiGroups:
-  - infrastructure.cluster.x-k8s.io
+  - ""
   resources:
-  - beskar7clusters
-  - beskar7machines
+  - secrets
   verbs:
-  - create
-  - delete
   - get
   - list
-  - patch
-  - update
   - watch
+  resourceNames: [] # Will be validated by webhook to ensure only BMC credential secrets
+
+# Events for status reporting and audit trail
 - apiGroups:
-  - infrastructure.cluster.x-k8s.io
+  - ""
   resources:
-  - beskar7clusters/finalizers
-  - beskar7machines/finalizers
-  - physicalhosts/finalizers
-  verbs:
-  - update
-- apiGroups:
-  - infrastructure.cluster.x-k8s.io
-  resources:
-  - beskar7clusters/status
-  - beskar7machines/status
-  - physicalhosts/status
-  verbs:
-  - get
-  - patch
-  - update
-- apiGroups:
-  - infrastructure.cluster.x-k8s.io
-  resources:
-  - physicalhosts
+  - events
   verbs:
   - create
-  - delete
+  - patch
+
+# Node access for failure domain discovery - read-only
+- apiGroups:
+  - ""
+  resources:
+  - nodes
+  verbs:
   - get
   - list
-  - patch
-  - patch // Needed to find and claim/patch PhysicalHost
+  - watch
+
+# ConfigMaps for configuration - read-only, specific names only
+- apiGroups:
+  - ""
+  resources:
+  - configmaps
+  verbs:
+  - get
+  - list
+  - watch
+  resourceNames:
+  - beskar7-config
+  - beskar7-ca-bundle
+
+# Leader election resources
+- apiGroups:
+  - coordination.k8s.io
+  resources:
+  - leases
+  verbs:
+  - create
+  - get
+  - list
   - update
   - watch
-  - watch // Needed to discover failure domains
+
+# Webhook certificate management - minimal cert-manager integration
+- apiGroups:
+  - cert-manager.io
+  resources:
+  - certificates
+  - issuers
+  - clusterissuers
+  verbs:
+  - get
+  - list
+  - watch
+
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
@@ -90,11 +135,37 @@ metadata:
   name: manager-role
   namespace: beskar7-system
 rules:
+# Namespace-scoped RBAC management for webhook configuration
 - apiGroups:
   - rbac.authorization.k8s.io
   resources:
   - rolebindings
   - roles
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+
+# Service account management within our namespace
+- apiGroups:
+  - ""
+  resources:
+  - serviceaccounts
+  verbs:
+  - get
+  - list
+  - watch
+
+# ConfigMaps and Secrets within our namespace
+- apiGroups:
+  - ""
+  resources:
+  - configmaps
+  - secrets
   verbs:
   - create
   - delete

@@ -27,6 +27,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	"k8s.io/client-go/kubernetes"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -41,6 +42,7 @@ import (
 	"github.com/wrkode/beskar7/controllers"
 	internalmetrics "github.com/wrkode/beskar7/internal/metrics"
 	internalredfish "github.com/wrkode/beskar7/internal/redfish"
+	"github.com/wrkode/beskar7/internal/security"
 	//+kubebuilder:scaffold:imports
 )
 
@@ -63,11 +65,14 @@ func main() {
 	var metricsAddr string
 	var enableLeaderElection bool
 	var probeAddr string
+	var enableSecurityMonitoring bool
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
 		"Enable leader election for controller manager. "+
 			"Enabling this will ensure there is only one active controller manager.")
+	flag.BoolVar(&enableSecurityMonitoring, "enable-security-monitoring", true,
+		"Enable security monitoring for TLS, RBAC, and credential validation.")
 	opts := zap.Options{
 		Development: true,
 	}
@@ -148,6 +153,33 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Setup security monitoring
+	if enableSecurityMonitoring {
+		kubernetesClient, err := kubernetes.NewForConfig(mgr.GetConfig())
+		if err != nil {
+			setupLog.Error(err, "unable to create Kubernetes client for security monitoring")
+			os.Exit(1)
+		}
+
+		securityMonitor := security.NewSecurityMonitor(
+			mgr.GetClient(),
+			kubernetesClient,
+			"beskar7-system", // Default namespace
+		)
+
+		// Start security monitoring in the background
+		if err := mgr.Add(&securityMonitorManager{
+			monitor: securityMonitor,
+		}); err != nil {
+			setupLog.Error(err, "unable to add security monitor to manager")
+			os.Exit(1)
+		}
+
+		setupLog.Info("Security monitoring enabled")
+	} else {
+		setupLog.Info("Security monitoring disabled")
+	}
+
 	//+kubebuilder:scaffold:builder
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
@@ -164,4 +196,13 @@ func main() {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)
 	}
+}
+
+// securityMonitorManager wraps the security monitor to implement manager.Runnable
+type securityMonitorManager struct {
+	monitor *security.SecurityMonitor
+}
+
+func (s *securityMonitorManager) Start(ctx context.Context) error {
+	return s.monitor.StartMonitoring(ctx)
 }

@@ -19,55 +19,103 @@ spec:
     spec:
       securityContext:
         runAsNonRoot: true
-        # TODO(user): For common cases that do not require escalating privileges
-        # it is recommended to ensure that all your Pods/Containers are restrictive.
-        # More info: https://kubernetes.io/docs/concepts/security/pod-security-standards/#restricted
-        # Please uncomment the following code if your project does NOT have functionality that requires root privileges.
-        # Pòds created after enabling this option won'''t be able to gain root privileges even if the securityContext
-        # at the Container level requests root privileges. Uncomment the following block to apply this:
-        # seccompProfile: 
-        #   type: RuntimeDefault
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+        sysctls: []
       volumes:
       - name: webhook-server-cert
         secret:
           secretName: beskar7-webhook-server-cert
+          defaultMode: 0400
+      - name: tmp
+        emptyDir:
+          sizeLimit: 100Mi
       containers:
       - command:
         - /manager
         args:
         - --leader-elect
+        - --enable-security-monitoring=true
+        - --metrics-bind-address=:8080
+        - --health-probe-bind-address=:8081
         image: ghcr.io/wrkode/beskar7/beskar7:v0.2.6
         imagePullPolicy: Always
         name: manager
         securityContext:
           allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          runAsUser: 65532
+          runAsGroup: 65532
           capabilities:
             drop:
               - "ALL"
+          seccompProfile:
+            type: RuntimeDefault
+        env:
+        - name: GODEBUG
+          value: "netdns=go"
+        - name: GOMAXPROCS
+          valueFrom:
+            resourceFieldRef:
+              resource: limits.cpu
         volumeMounts:
         - name: webhook-server-cert
           mountPath: /tmp/k8s-webhook-server/serving-certs
           readOnly: true
+        - name: tmp
+          mountPath: /tmp
+          readOnly: false
+        ports:
+        - containerPort: 8080
+          name: metrics
+          protocol: TCP
+        - containerPort: 8081
+          name: healthz
+          protocol: TCP
+        - containerPort: 9443
+          name: webhook
+          protocol: TCP
         livenessProbe:
           httpGet:
             path: /healthz
             port: 8081
+            scheme: HTTP
           initialDelaySeconds: 15
           periodSeconds: 20
+          timeoutSeconds: 5
+          successThreshold: 1
+          failureThreshold: 3
         readinessProbe:
           httpGet:
             path: /readyz
             port: 8081
+            scheme: HTTP
           initialDelaySeconds: 5
           periodSeconds: 10
-        # TODO(user): Configure the resources accordingly based on the project estimation
-        # More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+          timeoutSeconds: 5
+          successThreshold: 1
+          failureThreshold: 3
         resources:
           limits:
             cpu: 500m
-            memory: 128Mi
+            memory: 512Mi
+            ephemeral-storage: 1Gi
           requests:
-            cpu: 10m
-            memory: 64Mi
+            cpu: 100m
+            memory: 128Mi
+            ephemeral-storage: 100Mi
       serviceAccountName: controller-manager
-      terminationGracePeriodSeconds: 10 
+      terminationGracePeriodSeconds: 10
+      automountServiceAccountToken: true
+      enableServiceLinks: false
+      hostNetwork: false
+      hostPID: false
+      hostIPC: false
+      dnsPolicy: ClusterFirst
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      priorityClassName: system-cluster-critical 

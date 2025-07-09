@@ -1,0 +1,7 @@
+resources:
+- security-policy.yaml
+- network-policy.yaml
+
+commonLabels:
+  app.kubernetes.io/name: beskar7
+  app.kubernetes.io/component: security 
