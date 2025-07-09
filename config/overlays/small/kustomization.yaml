@@ -1,0 +1,45 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: beskar7-system
+
+resources:
+- ../../crd
+- ../../rbac
+- ../../manager
+- ../../webhook
+- ../../certmanager
+
+patches:
+- target:
+    group: apps
+    version: v1
+    kind: Deployment
+    name: controller-manager
+  patch: |-
+    - op: replace
+      path: /spec/template/spec/containers/0/resources
+      value:
+        limits:
+          cpu: 500m
+          memory: 512Mi
+          ephemeral-storage: 1Gi
+        requests:
+          cpu: 100m
+          memory: 128Mi
+          ephemeral-storage: 100Mi
+    - op: replace
+      path: /spec/replicas
+      value: 1
+
+labels:
+- includeSelectors: true
+  pairs:
+    app.kubernetes.io/name: beskar7
+    app.kubernetes.io/version: v0.2.6
+    deployment-size: small
+
+images:
+- name: controller
+  newName: ghcr.io/wrkode/beskar7/beskar7
+  newTag: v0.2.6 

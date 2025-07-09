@@ -86,6 +86,8 @@ BMCs → Configuration Server: HTTP/HTTPS (80/443)
 
 **Controller Manager Resource Requirements:**
 
+See the comprehensive [Resource Planning Guide](resource-planning.md) for detailed sizing recommendations.
+
 | Deployment Size | CPU Request | Memory Request | CPU Limit | Memory Limit | Replicas |
 |----------------|-------------|----------------|-----------|--------------|----------|
 | Small (< 50 hosts) | 100m | 128Mi | 500m | 512Mi | 1 |
