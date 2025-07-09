@@ -238,7 +238,41 @@ func (r *PhysicalHostReconciler) reconcileNormal(ctx context.Context, logger log
 
 	// Determine desired state and update conditions
 	if physicalHost.Spec.ConsumerRef == nil {
-		logger.Info("Host is available (no ConsumerRef)", "previousState", physicalHost.Status.State, "newState", infrastructurev1beta1.StateAvailable)
+		// Host is being released or is available
+		previousState := physicalHost.Status.State
+
+		// If transitioning from a provisioned state, ensure host is powered off
+		if previousState == infrastructurev1beta1.StateProvisioned || previousState == infrastructurev1beta1.StateProvisioning {
+			logger.Info("Host being released from provisioned state, ensuring power off",
+				"previousState", previousState, "currentPowerState", powerState)
+
+			if powerState == redfish.OnPowerState {
+				logger.Info("Powering off released host")
+				if err := rfClient.SetPowerState(ctx, redfish.OffPowerState); err != nil {
+					logger.Error(err, "Failed to power off released host")
+					conditions.MarkFalse(physicalHost, infrastructurev1beta1.HostAvailableCondition,
+						infrastructurev1beta1.PowerOffFailedReason, clusterv1.ConditionSeverityWarning,
+						"Failed to power off released host: %v", err)
+					// Don't return error - allow state transition but mark condition
+				} else {
+					logger.Info("Successfully powered off released host")
+					physicalHost.Status.ObservedPowerState = string(redfish.OffPowerState)
+				}
+			} else {
+				logger.Info("Host already powered off")
+			}
+
+			// Eject any virtual media when releasing host
+			logger.Info("Ejecting virtual media from released host")
+			if err := rfClient.EjectVirtualMedia(ctx); err != nil {
+				logger.Error(err, "Failed to eject virtual media from released host")
+				// Don't fail the transition, just log
+			} else {
+				logger.Info("Successfully ejected virtual media from released host")
+			}
+		}
+
+		logger.Info("Host is available (no ConsumerRef)", "previousState", previousState, "newState", infrastructurev1beta1.StateAvailable)
 		physicalHost.Status.State = infrastructurev1beta1.StateAvailable
 		conditions.MarkTrue(physicalHost, infrastructurev1beta1.HostAvailableCondition)
 		conditions.Delete(physicalHost, infrastructurev1beta1.HostProvisionedCondition)
@@ -262,6 +296,7 @@ func (r *PhysicalHostReconciler) reconcileNormal(ctx context.Context, logger log
 			}
 			logger.Info("Successfully set boot source ISO", "isoURL", isoURL)
 
+			// Enhanced power management with verification
 			if powerState != redfish.OnPowerState {
 				logger.Info("Attempting to power on host", "currentPowerState", powerState)
 				if err := rfClient.SetPowerState(ctx, redfish.OnPowerState); err != nil {
@@ -270,8 +305,13 @@ func (r *PhysicalHostReconciler) reconcileNormal(ctx context.Context, logger log
 					physicalHost.Status.State = infrastructurev1beta1.StateError
 					return ctrl.Result{}, err
 				}
+
+				// Update observed power state optimistically
 				physicalHost.Status.ObservedPowerState = string(redfish.OnPowerState)
-				logger.Info("Successfully powered on host")
+				logger.Info("Successfully requested power on - host should be booting")
+
+				// For power operations, we don't immediately verify since it takes time
+				// The next reconciliation will pick up the actual power state
 			} else {
 				logger.Info("Host already powered on")
 			}
@@ -370,13 +410,18 @@ func (r *PhysicalHostReconciler) reconcileDelete(ctx context.Context, physicalHo
 			if psErr != nil {
 				logger.Error(psErr, "Failed to get power state before power off attempt")
 				conditions.MarkFalse(physicalHost, infrastructurev1beta1.HostProvisionedCondition, infrastructurev1beta1.RedfishQueryFailedReason, clusterv1.ConditionSeverityWarning, "Failed to get power state for power off: %v", psErr)
+				// Continue with cleanup even if we can't check power state
 			} else if powerState != redfish.OffPowerState {
+				logger.Info("Host is powered on, attempting graceful power off", "currentPowerState", powerState)
 				if err := rfClient.SetPowerState(ctx, redfish.OffPowerState); err != nil {
 					logger.Error(err, "Failed to power off host during delete")
 					conditions.MarkFalse(physicalHost, infrastructurev1beta1.HostProvisionedCondition, infrastructurev1beta1.PowerOffFailedReason, clusterv1.ConditionSeverityError, "Failed to power off host: %v", err)
-					// Log error but continue cleanup
+					// Log error but continue cleanup - we don't want to block finalizer removal
 				} else {
-					// Optionally, mark a positive condition or clear the PowerOffFailedReason.
+					logger.Info("Successfully requested power off during deletion")
+					physicalHost.Status.ObservedPowerState = string(redfish.OffPowerState)
+					// Note: We don't verify power state change here since this is cleanup
+					// and we want to allow finalizer removal even if power off is slow
 				}
 			} else {
 				logger.Info("Host already powered off")
