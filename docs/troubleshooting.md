@@ -129,8 +129,74 @@ Increase verbosity by editing the manager Deployment (`config/manager/manager.ya
         *   Check BMC logs/status for virtual media errors.
         *   Ensure the BMC supports mounting ISOs from the specified URL type (e.g., HTTP, HTTPS, NFS - Beskar7 currently assumes HTTP/S via `gofish`).
 
+## Webhook Validation Errors
+
+### Resource Creation/Update Rejected by Webhooks
+
+*   **Error: `admission webhook denied the request`**
+    *   **Cause:** Resource specification violates validation rules enforced by admission webhooks.
+    *   **Common validation failures:**
+
+#### PhysicalHost Validation Errors
+
+*   **Error: `insecureSkipVerify=true is not allowed in production environments`**
+    *   **Cause:** TLS certificate validation is disabled in non-development environment
+    *   **Solution:** Configure proper TLS certificates or add development annotations
+
+*   **Error: `invalid Redfish address format`**
+    *   **Cause:** Address doesn't match expected format (IP or FQDN with optional scheme)
+    *   **Solution:** Use format like `https://192.168.1.100` or `192.168.1.100`
+
+*   **Error: `credentialsSecretRef is required`**
+    *   **Cause:** Missing reference to credentials secret
+    *   **Solution:** Create credentials secret and reference it properly
+
+#### Beskar7Machine Validation Errors
+
+*   **Error: `invalid URL format for imageURL`**
+    *   **Cause:** ImageURL doesn't point to supported image format
+    *   **Solution:** Use URLs ending in .iso, .img, .qcow2, etc.
+
+*   **Error: `osFamily 'xyz' is not supported`**
+    *   **Cause:** Unsupported operating system family specified
+    *   **Solution:** Use supported OS families: kairos, talos, flatcar, ubuntu, etc.
+
+*   **Error: `configURL is required for RemoteConfig mode`**
+    *   **Cause:** Missing configuration URL for RemoteConfig provisioning
+    *   **Solution:** Provide valid configURL or change to PreBakedISO mode
+
+*   **Error: `configURL is not allowed for PreBakedISO mode`**
+    *   **Cause:** Configuration URL specified for pre-baked ISO mode
+    *   **Solution:** Remove configURL or change to RemoteConfig mode
+
+#### Beskar7MachineTemplate Validation Errors
+
+*   **Error: `providerID should not be set in machine templates`**
+    *   **Cause:** ProviderID is managed by controllers and forbidden in templates
+    *   **Solution:** Remove providerID from template specification
+
+*   **Error: `imageURL is immutable in machine templates`**
+    *   **Cause:** Attempting to modify immutable field after creation
+    *   **Solution:** Create new template version instead of modifying existing one
+
+*   **Error: `template validation failed`**
+    *   **Cause:** Template spec violates Beskar7Machine validation rules
+    *   **Solution:** Fix template spec according to Beskar7Machine requirements
+
+### Webhook Service Connectivity Issues
+
+*   **Error: `failed calling webhook ... connection refused`**
+    *   **Cause:** Kubernetes API server cannot reach webhook service
+    *   **Troubleshooting:**
+        1. Check webhook service exists: `kubectl get svc -n beskar7-system beskar7-webhook-service`
+        2. Check webhook configuration: `kubectl get validatingwebhookconfiguration,mutatingwebhookconfiguration`
+        3. Verify webhook pods are running: `kubectl get pods -n beskar7-system`
+        4. Check webhook endpoints: `kubectl get endpoints -n beskar7-system`
+
 ### General Tips
 
 *   **Check CRD Status:** `kubectl get crd physicalhosts.infrastructure.cluster.x-k8s.io -o yaml`, etc. Ensure they are established.
-*   **Check Resource Status:** Use `kubectl get physicalhost <name> -o yaml` and `kubectl get beskar7machine <name> -o yaml` to inspect the full status, including conditions and reported states.
-*   **Check BMC:** Log in directly to the BMC (Web UI, SSH) to verify its status, Redfish service state, virtual media status, and power state. 
+*   **Check Resource Status:** Use `kubectl get physicalhost <n> -o yaml` and `kubectl get beskar7machine <n> -o yaml` to inspect the full status, including conditions and reported states.
+*   **Check BMC:** Log in directly to the BMC (Web UI, SSH) to verify its status, Redfish service state, virtual media status, and power state.
+*   **Validate Before Apply:** Use `kubectl apply --dry-run=server` to validate resources before creation
+*   **Check Webhook Logs:** View webhook validation details in controller manager logs with increased verbosity (-v=5) 
