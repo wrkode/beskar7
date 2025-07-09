@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -209,6 +210,406 @@ var _ = Describe("PhysicalHost Controller", func() {
 		//   - Check SetPowerState called
 		//   - Check status becomes Provisioned
 
+		It("should handle Redfish connection failure", func() {
+			By("Creating PhysicalHost with mock that fails connection")
+			failedConnPhName := PhName + "-connection-fail"
+			failedConnSecretName := SecretName + "-connection-fail"
+
+			// Create credentials secret
+			failedSecret := credentialSecret.DeepCopy()
+			failedSecret.Name = failedConnSecretName
+			failedSecret.ResourceVersion = ""
+			Expect(k8sClient.Create(ctx, failedSecret)).To(Succeed())
+
+			// Create PhysicalHost
+			failedConnPh := physicalHost.DeepCopy()
+			failedConnPh.Name = failedConnPhName
+			failedConnPh.Spec.RedfishConnection.CredentialsSecretRef = failedConnSecretName
+
+			// Create reconciler that simulates connection failure
+			failedReconciler := &PhysicalHostReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+				RedfishClientFactory: func(ctx context.Context, address, username, password string, insecure bool) (internalredfish.Client, error) {
+					return nil, fmt.Errorf("connection timeout: unable to connect to %s", address)
+				},
+			}
+
+			Expect(k8sClient.Create(ctx, failedConnPh)).To(Succeed())
+
+			phLookupKey := types.NamespacedName{Name: failedConnPhName, Namespace: PhNamespace}
+
+			By("First reconcile adds finalizer")
+			result, err := failedReconciler.Reconcile(ctx, ctrl.Request{NamespacedName: phLookupKey})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.Requeue).To(BeTrue())
+
+			By("Second reconcile should fail due to connection error")
+			result, err = failedReconciler.Reconcile(ctx, ctrl.Request{NamespacedName: phLookupKey})
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("connection timeout"))
+
+			By("Checking that proper conditions are set")
+			Eventually(func(g Gomega) {
+				Expect(k8sClient.Get(ctx, phLookupKey, failedConnPh)).To(Succeed())
+				cond := conditions.Get(failedConnPh, infrastructurev1beta1.RedfishConnectionReadyCondition)
+				g.Expect(cond).NotTo(BeNil())
+				g.Expect(cond.Status).To(Equal(corev1.ConditionFalse))
+				g.Expect(cond.Reason).To(Equal(infrastructurev1beta1.RedfishConnectionFailedReason))
+				g.Expect(cond.Message).To(ContainSubstring("Failed to connect to Redfish"))
+				g.Expect(failedConnPh.Status.State).To(Equal(infrastructurev1beta1.StateError))
+			}, Timeout, Interval).Should(Succeed())
+
+			// Cleanup
+			Expect(k8sClient.Delete(ctx, failedConnPh)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, failedSecret)).To(Succeed())
+		})
+
+		It("should handle secret not found", func() {
+			By("Creating PhysicalHost with reference to non-existent secret")
+			noSecretPhName := PhName + "-no-secret"
+			noSecretPh := physicalHost.DeepCopy()
+			noSecretPh.Name = noSecretPhName
+			noSecretPh.Spec.RedfishConnection.CredentialsSecretRef = "non-existent-secret"
+
+			Expect(k8sClient.Create(ctx, noSecretPh)).To(Succeed())
+
+			phLookupKey := types.NamespacedName{Name: noSecretPhName, Namespace: PhNamespace}
+
+			By("First reconcile adds finalizer")
+			result, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: phLookupKey})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.Requeue).To(BeTrue())
+
+			By("Second reconcile should fail due to missing secret")
+			result, err = reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: phLookupKey})
+			Expect(err).To(HaveOccurred())
+			Expect(client.IgnoreNotFound(err)).To(BeNil()) // Should be NotFound error
+
+			By("Checking that proper conditions are set")
+			Eventually(func(g Gomega) {
+				Expect(k8sClient.Get(ctx, phLookupKey, noSecretPh)).To(Succeed())
+				cond := conditions.Get(noSecretPh, infrastructurev1beta1.RedfishConnectionReadyCondition)
+				g.Expect(cond).NotTo(BeNil())
+				g.Expect(cond.Status).To(Equal(corev1.ConditionFalse))
+				g.Expect(cond.Reason).To(Equal(infrastructurev1beta1.SecretNotFoundReason))
+				g.Expect(cond.Message).To(ContainSubstring("not found"))
+			}, Timeout, Interval).Should(Succeed())
+
+			// Cleanup
+			Expect(k8sClient.Delete(ctx, noSecretPh)).To(Succeed())
+		})
+
+		It("should handle secret with missing data", func() {
+			By("Creating secret with missing username/password")
+			invalidDataSecretName := SecretName + "-invalid-data"
+			invalidDataSecret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      invalidDataSecretName,
+					Namespace: PhNamespace,
+				},
+				Data: map[string][]byte{
+					"username": []byte("testuser"),
+					// password is missing
+				},
+			}
+			Expect(k8sClient.Create(ctx, invalidDataSecret)).To(Succeed())
+
+			invalidDataPhName := PhName + "-invalid-data"
+			invalidDataPh := physicalHost.DeepCopy()
+			invalidDataPh.Name = invalidDataPhName
+			invalidDataPh.Spec.RedfishConnection.CredentialsSecretRef = invalidDataSecretName
+
+			Expect(k8sClient.Create(ctx, invalidDataPh)).To(Succeed())
+
+			phLookupKey := types.NamespacedName{Name: invalidDataPhName, Namespace: PhNamespace}
+
+			By("First reconcile adds finalizer")
+			result, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: phLookupKey})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.Requeue).To(BeTrue())
+
+			By("Second reconcile should detect invalid secret data")
+			result, err = reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: phLookupKey})
+			Expect(err).NotTo(HaveOccurred()) // This is permanent error, no requeue
+			Expect(result.Requeue).To(BeFalse())
+
+			By("Checking that proper conditions are set")
+			Eventually(func(g Gomega) {
+				Expect(k8sClient.Get(ctx, phLookupKey, invalidDataPh)).To(Succeed())
+				cond := conditions.Get(invalidDataPh, infrastructurev1beta1.RedfishConnectionReadyCondition)
+				g.Expect(cond).NotTo(BeNil())
+				g.Expect(cond.Status).To(Equal(corev1.ConditionFalse))
+				g.Expect(cond.Reason).To(Equal(infrastructurev1beta1.MissingSecretDataReason))
+				g.Expect(cond.Message).To(ContainSubstring("Username or password missing"))
+			}, Timeout, Interval).Should(Succeed())
+
+			// Cleanup
+			Expect(k8sClient.Delete(ctx, invalidDataPh)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, invalidDataSecret)).To(Succeed())
+		})
+
+		It("should handle Redfish query failures", func() {
+			By("Creating PhysicalHost with mock that fails queries")
+			queryFailPhName := PhName + "-query-fail"
+			queryFailSecretName := SecretName + "-query-fail"
+
+			// Create credentials secret
+			queryFailSecret := credentialSecret.DeepCopy()
+			queryFailSecret.Name = queryFailSecretName
+			queryFailSecret.ResourceVersion = ""
+			Expect(k8sClient.Create(ctx, queryFailSecret)).To(Succeed())
+
+			// Create mock client that connects but fails queries
+			queryFailMockClient := internalredfish.NewMockClient()
+			queryFailMockClient.ShouldFail["GetSystemInfo"] = fmt.Errorf("redfish query failed: 500 Internal Server Error")
+			queryFailMockClient.ShouldFail["GetPowerState"] = fmt.Errorf("power state query failed")
+
+			// Create reconciler with failing query client
+			queryFailReconciler := &PhysicalHostReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+				RedfishClientFactory: func(ctx context.Context, address, username, password string, insecure bool) (internalredfish.Client, error) {
+					return queryFailMockClient, nil // Connection succeeds, queries fail
+				},
+			}
+
+			// Create PhysicalHost
+			queryFailPh := physicalHost.DeepCopy()
+			queryFailPh.Name = queryFailPhName
+			queryFailPh.Spec.RedfishConnection.CredentialsSecretRef = queryFailSecretName
+
+			Expect(k8sClient.Create(ctx, queryFailPh)).To(Succeed())
+
+			phLookupKey := types.NamespacedName{Name: queryFailPhName, Namespace: PhNamespace}
+
+			By("First reconcile adds finalizer")
+			result, err := queryFailReconciler.Reconcile(ctx, ctrl.Request{NamespacedName: phLookupKey})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.Requeue).To(BeTrue())
+
+			By("Second reconcile should fail due to query errors")
+			_, err = queryFailReconciler.Reconcile(ctx, ctrl.Request{NamespacedName: phLookupKey})
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("redfish query failed"))
+
+			By("Checking that proper conditions are set")
+			Eventually(func(g Gomega) {
+				Expect(k8sClient.Get(ctx, phLookupKey, queryFailPh)).To(Succeed())
+				// Connection should be ready (since connection succeeded)
+				connCond := conditions.Get(queryFailPh, infrastructurev1beta1.RedfishConnectionReadyCondition)
+				g.Expect(connCond).NotTo(BeNil())
+				g.Expect(connCond.Status).To(Equal(corev1.ConditionTrue))
+
+				// Host should not be available due to query failure
+				hostCond := conditions.Get(queryFailPh, infrastructurev1beta1.HostAvailableCondition)
+				g.Expect(hostCond).NotTo(BeNil())
+				g.Expect(hostCond.Status).To(Equal(corev1.ConditionFalse))
+				g.Expect(hostCond.Reason).To(Equal(infrastructurev1beta1.RedfishQueryFailedReason))
+				g.Expect(queryFailPh.Status.State).To(Equal(infrastructurev1beta1.StateError))
+			}, Timeout, Interval).Should(Succeed())
+
+			// Cleanup
+			Expect(k8sClient.Delete(ctx, queryFailPh)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, queryFailSecret)).To(Succeed())
+		})
+
+		It("should handle provisioning flow when claimed by machine", func() {
+			By("Creating PhysicalHost that gets claimed for provisioning")
+			provisionPhName := PhName + "-provision"
+			provisionSecretName := SecretName + "-provision"
+			isoURL := "http://example.com/provision-test.iso"
+
+			// Create credentials secret
+			provisionSecret := credentialSecret.DeepCopy()
+			provisionSecret.Name = provisionSecretName
+			provisionSecret.ResourceVersion = ""
+			Expect(k8sClient.Create(ctx, provisionSecret)).To(Succeed())
+
+			// Create mock client that tracks calls
+			provisionMockClient := internalredfish.NewMockClient()
+
+			// Create reconciler with provision tracking client
+			provisionReconciler := &PhysicalHostReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+				RedfishClientFactory: func(ctx context.Context, address, username, password string, insecure bool) (internalredfish.Client, error) {
+					return provisionMockClient, nil
+				},
+			}
+
+			// Create PhysicalHost
+			provisionPh := physicalHost.DeepCopy()
+			provisionPh.Name = provisionPhName
+			provisionPh.Spec.RedfishConnection.CredentialsSecretRef = provisionSecretName
+
+			Expect(k8sClient.Create(ctx, provisionPh)).To(Succeed())
+
+			phLookupKey := types.NamespacedName{Name: provisionPhName, Namespace: PhNamespace}
+
+			By("First reconcile adds finalizer and makes host Available")
+			result, err := provisionReconciler.Reconcile(ctx, ctrl.Request{NamespacedName: phLookupKey})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.Requeue).To(BeTrue())
+
+			_, err = provisionReconciler.Reconcile(ctx, ctrl.Request{NamespacedName: phLookupKey})
+			Expect(err).NotTo(HaveOccurred())
+
+			By("Verifying host becomes Available initially")
+			Eventually(func(g Gomega) {
+				Expect(k8sClient.Get(ctx, phLookupKey, provisionPh)).To(Succeed())
+				g.Expect(provisionPh.Status.State).To(Equal(infrastructurev1beta1.StateAvailable))
+				g.Expect(conditions.IsTrue(provisionPh, infrastructurev1beta1.HostAvailableCondition)).To(BeTrue())
+			}, Timeout, Interval).Should(Succeed())
+
+			By("Claiming the host for provisioning")
+			// Simulate a machine claiming the host
+			provisionPh.Spec.ConsumerRef = &corev1.ObjectReference{
+				Kind:       "Beskar7Machine",
+				APIVersion: "infrastructure.cluster.x-k8s.io/v1beta1",
+				Name:       "test-machine",
+				Namespace:  PhNamespace,
+			}
+			provisionPh.Spec.BootISOSource = &isoURL
+			Expect(k8sClient.Update(ctx, provisionPh)).To(Succeed())
+
+			By("Reconciling after claim - should trigger provisioning")
+			_, err = provisionReconciler.Reconcile(ctx, ctrl.Request{NamespacedName: phLookupKey})
+			Expect(err).NotTo(HaveOccurred())
+
+			By("Verifying provisioning actions were called")
+			Expect(provisionMockClient.SetBootSourceCalled).To(BeTrue(), "SetBootSourceISO should have been called")
+			Expect(provisionMockClient.InsertedISO).To(Equal(isoURL), "SetBootSourceISO should have been called with correct ISO URL")
+			Expect(provisionMockClient.SetPowerStateCalled).To(BeTrue(), "SetPowerState should have been called")
+			Expect(provisionMockClient.PowerState).To(Equal(redfish.OnPowerState), "Host should be powered on for provisioning")
+
+			By("Verifying host state becomes Provisioning")
+			Eventually(func(g Gomega) {
+				Expect(k8sClient.Get(ctx, phLookupKey, provisionPh)).To(Succeed())
+				g.Expect(provisionPh.Status.State).To(Equal(infrastructurev1beta1.StateProvisioning))
+				cond := conditions.Get(provisionPh, infrastructurev1beta1.HostProvisionedCondition)
+				g.Expect(cond).NotTo(BeNil())
+				g.Expect(cond.Status).To(Equal(corev1.ConditionFalse))
+				g.Expect(cond.Reason).To(Equal(infrastructurev1beta1.ProvisioningReason))
+			}, Timeout, Interval).Should(Succeed())
+
+			// Cleanup
+			Expect(k8sClient.Delete(ctx, provisionPh)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, provisionSecret)).To(Succeed())
+		})
+
+		It("should handle address detection failures gracefully", func() {
+			By("Creating PhysicalHost with mock that fails address detection")
+			addrFailPhName := PhName + "-addr-fail"
+			addrFailSecretName := SecretName + "-addr-fail"
+
+			// Create credentials secret
+			addrFailSecret := credentialSecret.DeepCopy()
+			addrFailSecret.Name = addrFailSecretName
+			addrFailSecret.ResourceVersion = ""
+			Expect(k8sClient.Create(ctx, addrFailSecret)).To(Succeed())
+
+			// Create mock client that fails address detection but succeeds other operations
+			addrFailMockClient := internalredfish.NewMockClient()
+			addrFailMockClient.GetNetworkAddressesFunc = func(ctx context.Context) ([]internalredfish.NetworkAddress, error) {
+				return nil, fmt.Errorf("network interface discovery failed")
+			}
+
+			// Create reconciler with address detection failure
+			addrFailReconciler := &PhysicalHostReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+				RedfishClientFactory: func(ctx context.Context, address, username, password string, insecure bool) (internalredfish.Client, error) {
+					return addrFailMockClient, nil
+				},
+			}
+
+			// Create PhysicalHost
+			addrFailPh := physicalHost.DeepCopy()
+			addrFailPh.Name = addrFailPhName
+			addrFailPh.Spec.RedfishConnection.CredentialsSecretRef = addrFailSecretName
+
+			Expect(k8sClient.Create(ctx, addrFailPh)).To(Succeed())
+
+			phLookupKey := types.NamespacedName{Name: addrFailPhName, Namespace: PhNamespace}
+
+			By("Reconciling should succeed despite address detection failure")
+			_, err := addrFailReconciler.Reconcile(ctx, ctrl.Request{NamespacedName: phLookupKey})
+			Expect(err).NotTo(HaveOccurred())
+
+			_, err = addrFailReconciler.Reconcile(ctx, ctrl.Request{NamespacedName: phLookupKey})
+			Expect(err).NotTo(HaveOccurred())
+
+			By("Verifying host still becomes Available (address detection is non-fatal)")
+			Eventually(func(g Gomega) {
+				Expect(k8sClient.Get(ctx, phLookupKey, addrFailPh)).To(Succeed())
+				g.Expect(addrFailPh.Status.State).To(Equal(infrastructurev1beta1.StateAvailable))
+				g.Expect(conditions.IsTrue(addrFailPh, infrastructurev1beta1.HostAvailableCondition)).To(BeTrue())
+				// Addresses should be empty/nil due to detection failure
+				g.Expect(addrFailPh.Status.Addresses).To(BeEmpty())
+			}, Timeout, Interval).Should(Succeed())
+
+			// Cleanup
+			Expect(k8sClient.Delete(ctx, addrFailPh)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, addrFailSecret)).To(Succeed())
+		})
+
+		It("should handle deletion when Redfish connection fails", func() {
+			By("Creating PhysicalHost and then simulating connection failure during deletion")
+			deleteFailPhName := PhName + "-delete-fail"
+			deleteFailSecretName := SecretName + "-delete-fail"
+
+			// Create credentials secret
+			deleteFailSecret := credentialSecret.DeepCopy()
+			deleteFailSecret.Name = deleteFailSecretName
+			deleteFailSecret.ResourceVersion = ""
+			Expect(k8sClient.Create(ctx, deleteFailSecret)).To(Succeed())
+
+			// Create PhysicalHost
+			deleteFailPh := physicalHost.DeepCopy()
+			deleteFailPh.Name = deleteFailPhName
+			deleteFailPh.Spec.RedfishConnection.CredentialsSecretRef = deleteFailSecretName
+
+			Expect(k8sClient.Create(ctx, deleteFailPh)).To(Succeed())
+
+			phLookupKey := types.NamespacedName{Name: deleteFailPhName, Namespace: PhNamespace}
+
+			By("First reconcile makes host available")
+			_, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: phLookupKey})
+			Expect(err).NotTo(HaveOccurred())
+			_, err = reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: phLookupKey})
+			Expect(err).NotTo(HaveOccurred())
+
+			Eventually(func(g Gomega) {
+				Expect(k8sClient.Get(ctx, phLookupKey, deleteFailPh)).To(Succeed())
+				g.Expect(deleteFailPh.Status.State).To(Equal(infrastructurev1beta1.StateAvailable))
+			}, Timeout, Interval).Should(Succeed())
+
+			By("Creating reconciler that fails connections during deletion")
+			deleteFailReconciler := &PhysicalHostReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+				RedfishClientFactory: func(ctx context.Context, address, username, password string, insecure bool) (internalredfish.Client, error) {
+					return nil, fmt.Errorf("connection failed during deletion")
+				},
+			}
+
+			By("Deleting the PhysicalHost")
+			Expect(k8sClient.Delete(ctx, deleteFailPh)).To(Succeed())
+
+			By("Reconciling during deletion should handle connection failure gracefully")
+			_, err = deleteFailReconciler.Reconcile(ctx, ctrl.Request{NamespacedName: phLookupKey})
+			Expect(err).NotTo(HaveOccurred()) // Should not error, should allow finalizer removal
+
+			By("PhysicalHost should eventually be deleted despite connection failure")
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, phLookupKey, deleteFailPh)
+				return client.IgnoreNotFound(err) == nil
+			}, Timeout*2, Interval).Should(BeTrue(), "PhysicalHost should be deleted despite connection failure")
+
+			// Cleanup
+			Expect(k8sClient.Delete(ctx, deleteFailSecret)).To(Succeed())
+		})
 	})
 
 	Describe("PhysicalHost pause functionality", func() {
