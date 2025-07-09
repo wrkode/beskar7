@@ -34,13 +34,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
-	"sigs.k8s.io/controller-runtime/pkg/handler"
 
 	infrastructurev1beta1 "github.com/wrkode/beskar7/api/v1beta1"
 	"github.com/wrkode/beskar7/internal/redfish"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/types"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
 const (
@@ -86,12 +83,6 @@ func (r *Beskar7MachineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrl.Result{}, err
 	}
 
-	// Check if the Beskar7Machine is paused
-	if isPaused(b7machine) {
-		log.Info("Beskar7Machine reconciliation is paused")
-		return ctrl.Result{}, nil
-	}
-
 	// Fetch the Machine instance.
 	machine, err := util.GetOwnerMachine(ctx, r.Client, b7machine.ObjectMeta)
 	if err != nil {
@@ -104,19 +95,6 @@ func (r *Beskar7MachineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	}
 
 	log = log.WithValues("machine", machine.Name)
-
-	// Get the owner cluster to check if it's paused
-	cluster, err := util.GetClusterFromMetadata(ctx, r.Client, machine.ObjectMeta)
-	if err != nil {
-		log.Error(err, "Failed to get cluster from machine metadata")
-		return ctrl.Result{}, err
-	}
-
-	// Check if the owner cluster is paused
-	if isClusterPaused(cluster) {
-		log.Info("Beskar7Machine reconciliation is paused because owner cluster is paused")
-		return ctrl.Result{}, nil
-	}
 
 	// Initialize patch helper
 	patchHelper, err := patch.NewHelper(b7machine, r.Client)
@@ -158,31 +136,41 @@ func (r *Beskar7MachineReconciler) reconcileNormal(ctx context.Context, logger l
 		return ctrl.Result{Requeue: true}, nil
 	}
 
+	// TODO: Check if paused
+
 	// Find or retrieve the associated PhysicalHost.
 	physicalHost, result, err := r.findAndClaimOrGetAssociatedHost(ctx, logger, b7machine)
 	if err != nil {
-		// Transient error during host association
 		logger.Error(err, "Failed to find, claim, or get associated PhysicalHost")
-		conditions.MarkFalse(b7machine, infrastructurev1beta1.PhysicalHostAssociatedCondition, infrastructurev1beta1.PhysicalHostAssociationFailedReason, clusterv1.ConditionSeverityWarning, "Failed to associate with PhysicalHost: %v", err)
-		return result, err // Requeue with backoff
+		conditions.MarkFalse(b7machine, infrastructurev1beta1.PhysicalHostAssociatedCondition, infrastructurev1beta1.PhysicalHostAssociationFailedReason, clusterv1.ConditionSeverityWarning, "Failed to associate with PhysicalHost: %v", err.Error())
+		return result, err
 	}
 
+	// ---> Set Condition True if host is found/claimed, even if requeuing <---
 	if physicalHost != nil {
 		logger.Info("Successfully associated with PhysicalHost", "physicalhost", physicalHost.Name)
 		conditions.MarkTrue(b7machine, infrastructurev1beta1.PhysicalHostAssociatedCondition)
 	} else {
-		// No host found yet, this is a transient condition
-		logger.Info("No available or associated PhysicalHost found, requeuing")
+		// No host found yet
 		conditions.MarkFalse(b7machine, infrastructurev1beta1.PhysicalHostAssociatedCondition, infrastructurev1beta1.WaitingForPhysicalHostReason, clusterv1.ConditionSeverityInfo, "No available PhysicalHost found")
-		return ctrl.Result{RequeueAfter: time.Minute}, nil
+		// If result is also zero here, it's an unexpected state, but the later check handles it.
 	}
 
 	if !result.IsZero() {
 		logger.Info("Requeuing requested by findAndClaimOrGetAssociatedHost")
+		// Condition is already set based on whether physicalHost was nil or not above
 		return result, nil
+	}
+	if physicalHost == nil {
+		// Should not happen if result is zero and err is nil, but check defensively.
+		logger.Info("No associated or available PhysicalHost found (unexpected state after check), requeuing")
+		conditions.MarkFalse(b7machine, infrastructurev1beta1.PhysicalHostAssociatedCondition, infrastructurev1beta1.WaitingForPhysicalHostReason, clusterv1.ConditionSeverityInfo, "No available PhysicalHost found")
+		return ctrl.Result{RequeueAfter: time.Minute}, nil
 	}
 
 	logger = logger.WithValues("physicalhost", physicalHost.Name)
+	// logger.Info("Successfully associated with PhysicalHost") // Moved up
+	// conditions.MarkTrue(b7machine, infrastructurev1beta1.PhysicalHostAssociatedCondition) // Moved up
 
 	// Reconcile based on PhysicalHost status
 	switch physicalHost.Status.State {
@@ -193,24 +181,10 @@ func (r *Beskar7MachineReconciler) reconcileNormal(ctx context.Context, logger l
 			logger.Info("Setting ProviderID", "ProviderID", currentProviderID)
 			b7machine.Spec.ProviderID = &currentProviderID
 		}
-
-		// Copy addresses from PhysicalHost to Beskar7Machine
-		if len(physicalHost.Status.Addresses) > 0 {
-			b7machine.Status.Addresses = physicalHost.Status.Addresses
-			logger.Info("Copied network addresses from PhysicalHost", "addressCount", len(physicalHost.Status.Addresses))
-			for _, addr := range physicalHost.Status.Addresses {
-				logger.V(1).Info("Copied address", "type", addr.Type, "address", addr.Address)
-			}
-		} else {
-			logger.V(1).Info("No addresses available on PhysicalHost to copy")
-		}
-
 		conditions.MarkTrue(b7machine, infrastructurev1beta1.InfrastructureReadyCondition)
-		b7machine.Status.Ready = true
 		phase := "Provisioned"
 		b7machine.Status.Phase = &phase
 		logger.Info("Beskar7Machine infrastructure is Ready")
-		return ctrl.Result{}, nil
 
 	case infrastructurev1beta1.StateProvisioning:
 		logger.Info("Waiting for associated PhysicalHost to finish provisioning")
@@ -227,13 +201,12 @@ func (r *Beskar7MachineReconciler) reconcileNormal(ctx context.Context, logger l
 		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 
 	case infrastructurev1beta1.StateError:
-		// Permanent error: the associated PhysicalHost is in a terminal error state.
-		logger.Error(nil, "Associated PhysicalHost is in error state", "errorMessage", physicalHost.Status.ErrorMessage)
-		conditions.MarkFalse(b7machine, infrastructurev1beta1.InfrastructureReadyCondition, infrastructurev1beta1.PhysicalHostErrorReason, clusterv1.ConditionSeverityError, "PhysicalHost %q in error state: %s", physicalHost.Name, physicalHost.Status.ErrorMessage)
+		errMsg := fmt.Sprintf("PhysicalHost %q is in error state: %s", physicalHost.Name, physicalHost.Status.ErrorMessage)
+		logger.Error(nil, errMsg)
+		conditions.MarkFalse(b7machine, infrastructurev1beta1.InfrastructureReadyCondition, infrastructurev1beta1.PhysicalHostErrorReason, clusterv1.ConditionSeverityError, "%s", errMsg)
 		phase := "Failed"
 		b7machine.Status.Phase = &phase
-		b7machine.Status.Ready = false
-		return ctrl.Result{}, nil // Stop reconciliation
+		return ctrl.Result{}, nil // No automatic requeue
 
 	default:
 		logger.Info("Associated PhysicalHost is in unknown or intermediate state", "hostState", physicalHost.Status.State)
@@ -242,6 +215,8 @@ func (r *Beskar7MachineReconciler) reconcileNormal(ctx context.Context, logger l
 		b7machine.Status.Phase = &phase
 		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 	}
+
+	return ctrl.Result{}, nil
 }
 
 // reconcileDelete handles the logic when the Beskar7Machine is marked for deletion.
@@ -500,10 +475,13 @@ func (r *Beskar7MachineReconciler) findAndClaimOrGetAssociatedHost(ctx context.C
 			}
 			logger.Info("Calculated kernel parameters", "Params", kernelParams)
 
+			// TODO: Replace with actual Redfish client calls
+			logger.Info("TODO: Call rfClient.SetBootParameters", "Params", kernelParams)
 			if err := rfClient.SetBootParameters(ctx, kernelParams); err != nil {
 				logger.Error(err, "Failed to set boot parameters for RemoteConfig", "Params", kernelParams)
 				return nil, ctrl.Result{}, err // Requeue
 			}
+			logger.Info("TODO: Call rfClient.SetBootSourceISO", "URL", b7machine.Spec.ImageURL)
 			if err := rfClient.SetBootSourceISO(ctx, b7machine.Spec.ImageURL); err != nil {
 				logger.Error(err, "Failed to set boot source ISO for RemoteConfig", "ImageURL", b7machine.Spec.ImageURL)
 				return nil, ctrl.Result{}, err // Requeue
@@ -511,10 +489,13 @@ func (r *Beskar7MachineReconciler) findAndClaimOrGetAssociatedHost(ctx context.C
 
 		case "PreBakedISO":
 			logger.Info("Configuring boot for PreBakedISO mode")
+			// TODO: Replace with actual Redfish client calls
+			logger.Info("TODO: Call rfClient.SetBootParameters with nil")
 			if err := rfClient.SetBootParameters(ctx, nil); err != nil { // Clear any existing boot params
 				logger.Error(err, "Failed to clear boot parameters for PreBakedISO")
 				return nil, ctrl.Result{}, err // Requeue
 			}
+			logger.Info("TODO: Call rfClient.SetBootSourceISO", "URL", b7machine.Spec.ImageURL)
 			if err := rfClient.SetBootSourceISO(ctx, b7machine.Spec.ImageURL); err != nil {
 				logger.Error(err, "Failed to set boot source ISO for PreBakedISO", "ImageURL", b7machine.Spec.ImageURL)
 				return nil, ctrl.Result{}, err // Requeue
@@ -541,123 +522,9 @@ func (r *Beskar7MachineReconciler) findAndClaimOrGetAssociatedHost(ctx context.C
 func (r *Beskar7MachineReconciler) SetupWithManager(ctx context.Context, mgr ctrl.Manager, options controller.Options) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&infrastructurev1beta1.Beskar7Machine{}).
-		Watches(&infrastructurev1beta1.PhysicalHost{}, handler.EnqueueRequestsFromMapFunc(r.PhysicalHostToBeskar7Machine)).
-		Watches(&clusterv1.Machine{}, handler.EnqueueRequestsFromMapFunc(r.MachineToBeskar7Machine)).
+		// TODO: Add watches for CAPI Machine, PhysicalHost?
+		// Watches(&source.Kind{Type: &infrastructurev1beta1.PhysicalHost{}}, handler.EnqueueRequestsFromMapFunc(r.PhysicalHostToBeskar7Machine))?
 		Complete(r)
-}
-
-// PhysicalHostToBeskar7Machine maps PhysicalHost events to Beskar7Machine reconcile requests.
-// When a PhysicalHost changes, find any Beskar7Machine that references it and trigger reconciliation.
-func (r *Beskar7MachineReconciler) PhysicalHostToBeskar7Machine(ctx context.Context, obj client.Object) []reconcile.Request {
-	physicalHost, ok := obj.(*infrastructurev1beta1.PhysicalHost)
-	if !ok {
-		return nil
-	}
-
-	// Find Beskar7Machines that reference this PhysicalHost via ConsumerRef
-	var requests []reconcile.Request
-
-	// Check if this PhysicalHost has a ConsumerRef that points to a Beskar7Machine
-	if physicalHost.Spec.ConsumerRef != nil {
-		// The ConsumerRef should point to a Beskar7Machine
-		if physicalHost.Spec.ConsumerRef.Kind == "Beskar7Machine" &&
-			physicalHost.Spec.ConsumerRef.APIVersion == "infrastructure.cluster.x-k8s.io/v1beta1" {
-			requests = append(requests, reconcile.Request{
-				NamespacedName: types.NamespacedName{
-					Namespace: physicalHost.Spec.ConsumerRef.Namespace,
-					Name:      physicalHost.Spec.ConsumerRef.Name,
-				},
-			})
-		}
-	}
-
-	// Also find Beskar7Machines that might have already claimed this host
-	// by listing all Beskar7Machines and checking their status or spec for references
-	b7machineList := &infrastructurev1beta1.Beskar7MachineList{}
-	if err := r.List(ctx, b7machineList, client.InNamespace(physicalHost.Namespace)); err != nil {
-		// Log error but don't fail the mapping
-		ctrl.LoggerFrom(ctx).Error(err, "Failed to list Beskar7Machines for PhysicalHost mapping", "PhysicalHost", physicalHost.Name)
-		return requests
-	}
-
-	// Check if any Beskar7Machine has this PhysicalHost in its ProviderID or status
-	for _, b7machine := range b7machineList.Items {
-		shouldReconcile := false
-
-		// Check if the ProviderID matches this PhysicalHost
-		if b7machine.Spec.ProviderID != nil {
-			namespace, name, err := parseProviderID(*b7machine.Spec.ProviderID)
-			if err == nil && namespace == physicalHost.Namespace && name == physicalHost.Name {
-				shouldReconcile = true
-			}
-		}
-
-		if shouldReconcile {
-			// Avoid duplicates
-			req := reconcile.Request{
-				NamespacedName: types.NamespacedName{
-					Namespace: b7machine.Namespace,
-					Name:      b7machine.Name,
-				},
-			}
-
-			// Check if we already have this request
-			found := false
-			for _, existingReq := range requests {
-				if existingReq == req {
-					found = true
-					break
-				}
-			}
-			if !found {
-				requests = append(requests, req)
-			}
-		}
-	}
-
-	ctrl.LoggerFrom(ctx).V(1).Info("PhysicalHost change mapped to Beskar7Machine reconcile requests",
-		"PhysicalHost", physicalHost.Name, "requests", len(requests))
-	return requests
-}
-
-// MachineToBeskar7Machine maps Machine events to Beskar7Machine reconcile requests.
-// When a CAPI Machine changes, find the corresponding Beskar7Machine and trigger reconciliation.
-func (r *Beskar7MachineReconciler) MachineToBeskar7Machine(ctx context.Context, obj client.Object) []reconcile.Request {
-	machine, ok := obj.(*clusterv1.Machine)
-	if !ok {
-		return nil
-	}
-
-	// Find the Beskar7Machine that is owned by this Machine
-	// The Beskar7Machine should have the Machine as its owner reference
-	b7machineList := &infrastructurev1beta1.Beskar7MachineList{}
-	if err := r.List(ctx, b7machineList, client.InNamespace(machine.Namespace)); err != nil {
-		ctrl.LoggerFrom(ctx).Error(err, "Failed to list Beskar7Machines for Machine mapping", "Machine", machine.Name)
-		return nil
-	}
-
-	var requests []reconcile.Request
-	for _, b7machine := range b7machineList.Items {
-		// Check if this Beskar7Machine is owned by the Machine
-		for _, ownerRef := range b7machine.OwnerReferences {
-			if ownerRef.Kind == "Machine" &&
-				ownerRef.APIVersion == "cluster.x-k8s.io/v1beta1" &&
-				ownerRef.Name == machine.Name &&
-				ownerRef.UID == machine.UID {
-				requests = append(requests, reconcile.Request{
-					NamespacedName: types.NamespacedName{
-						Namespace: b7machine.Namespace,
-						Name:      b7machine.Name,
-					},
-				})
-				break // Found the match, no need to check other owner refs
-			}
-		}
-	}
-
-	ctrl.LoggerFrom(ctx).V(1).Info("Machine change mapped to Beskar7Machine reconcile requests",
-		"Machine", machine.Name, "requests", len(requests))
-	return requests
 }
 
 // getRedfishClientForHost retrieves credentials and establishes a connection
@@ -693,6 +560,24 @@ func (r *Beskar7MachineReconciler) getRedfishClientForHost(ctx context.Context, 
 	username := string(usernameBytes)
 	password := string(passwordBytes)
 	// --- End Fetch Redfish Credentials ---
+
+	// --- Read Vendor-Specific Configuration (Example: Annotation for BIOS Attribute) ---
+	// Check for an annotation on the PhysicalHost that might specify a vendor-specific
+	// BIOS attribute to use for setting kernel parameters if the standard UEFI method fails.
+	var biosKernelArgAttribute string
+	if physicalHost.Annotations != nil {
+		biosKernelArgAttribute = physicalHost.Annotations["beskar7.infrastructure.cluster.x-k8s.io/bios-kernel-arg-attribute"]
+	}
+	if biosKernelArgAttribute != "" {
+		log.Info("Found annotation for BIOS kernel argument attribute", "attributeName", biosKernelArgAttribute)
+		// TODO: Pass this attribute name to the Redfish client implementation somehow.
+		// This might involve modifying the RedfishClientFactory signature or having a
+		// dedicated method on the client interface like `SetVendorOptions(...)`.
+		// For now, we just log its presence.
+	} else {
+		log.V(1).Info("No specific BIOS kernel argument attribute annotation found.")
+	}
+	// --- End Vendor-Specific Configuration ---
 
 	// --- Connect to Redfish ---
 	clientFactory := r.RedfishClientFactory

@@ -43,7 +43,7 @@ rbac:
 
 # Generate CRD manifests
 crd:
-	$(CONTROLLER_GEN) crd:generateEmbeddedObjectMeta=true,maxDescLen=0,crdVersions=v1 paths="./api/..." output:crd:artifacts:config=config/crd/bases
+	$(CONTROLLER_GEN) crd:generateEmbeddedObjectMeta=true,maxDescLen=0 paths="./api/..." output:crd:artifacts:config=config/crd/bases
 
 # Run tests
 test:

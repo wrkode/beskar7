@@ -32,5 +32,3 @@ Thumbs.db
 
 # Test CRDs
 config/test-crds/ 
-
-fix-go-env.sh

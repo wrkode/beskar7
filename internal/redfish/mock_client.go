@@ -20,10 +20,6 @@ type MockClient struct {
 	InsertedISO     string
 	BootSourceIsISO bool
 
-	// Network address fields
-	NetworkAddresses        []NetworkAddress
-	GetNetworkAddressesFunc func(ctx context.Context) ([]NetworkAddress, error)
-
 	// Counters (optional, for verification)
 	CloseCalled         bool
 	GetSystemInfoCalled bool
@@ -32,10 +28,9 @@ type MockClient struct {
 	SetBootSourceCalled bool
 	EjectMediaCalled    bool
 	// Add fields for SetBootParameters
-	SetBootParametersFunc     func(ctx context.Context, params []string) error
-	SetBootParametersCalled   bool
-	StoredBootParams          []string // To store the parameters for assertion
-	GetNetworkAddressesCalled bool
+	SetBootParametersFunc   func(ctx context.Context, params []string) error
+	SetBootParametersCalled bool
+	StoredBootParams        []string // To store the parameters for assertion
 }
 
 // NewMockClient creates a new mock client with default values.
@@ -157,27 +152,6 @@ func (m *MockClient) SetBootParameters(ctx context.Context, params []string) err
 		return m.SetBootParametersFunc(ctx, params)
 	}
 	return nil
-}
-
-// GetNetworkAddresses mock implementation.
-func (m *MockClient) GetNetworkAddresses(ctx context.Context) ([]NetworkAddress, error) {
-	m.mu.Lock()
-	m.GetNetworkAddressesCalled = true
-	m.mu.Unlock()
-
-	if err := m.failIfNeeded("GetNetworkAddresses"); err != nil {
-		return nil, err
-	}
-	if m.GetNetworkAddressesFunc != nil {
-		return m.GetNetworkAddressesFunc(ctx)
-	}
-
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	// Return a copy of the stored network addresses
-	addresses := make([]NetworkAddress, len(m.NetworkAddresses))
-	copy(addresses, m.NetworkAddresses)
-	return addresses, nil
 }
 
 // Close mock implementation.

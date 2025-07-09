@@ -27,10 +27,6 @@ spec:
         # at the Container level requests root privileges. Uncomment the following block to apply this:
         # seccompProfile: 
         #   type: RuntimeDefault
-      volumes:
-      - name: webhook-server-cert
-        secret:
-          secretName: beskar7-webhook-server-cert
       containers:
       - command:
         - /manager
@@ -44,10 +40,6 @@ spec:
           capabilities:
             drop:
               - "ALL"
-        volumeMounts:
-        - name: webhook-server-cert
-          mountPath: /tmp/k8s-webhook-server/serving-certs
-          readOnly: true
         livenessProbe:
           httpGet:
             path: /healthz

@@ -16,50 +16,6 @@ kubectl logs -n beskar7-system -f <pod-name> -c manager
 
 Increase verbosity by editing the manager Deployment (`config/manager/manager.yaml` or via `kubectl edit deployment -n beskar7-system controller-manager`) and adding a `-v=X` argument (e.g., `-v=5`) to the manager container's args list, then restart the pod.
 
-## Webhook and Certificate Issues
-
-### Controller Fails with Missing TLS Certificate
-
-*   **Error:** `open /tmp/k8s-webhook-server/serving-certs/tls.crt: no such file or directory`
-    *   **Cause:** The controller-manager cannot find the webhook TLS certificate. This is almost always because cert-manager is not installed, not running, or the certificate/secret is missing.
-    *   **Troubleshooting:**
-        1. **Ensure cert-manager is installed and running:**
-            ```bash
-            kubectl get pods -n cert-manager
-            ```
-            All pods should be `Running`.
-        2. **Check for the certificate and secret:**
-            ```bash
-            kubectl get certificate -n beskar7-system
-            kubectl get secret -n beskar7-system
-            ```
-            You should see a certificate (e.g., `beskar7-serving-cert`) and a secret (e.g., `beskar7-webhook-server-cert`).
-        3. **If missing, re-apply the certificate manifest:**
-            ```bash
-            kubectl apply -f config/certmanager/certificate.yaml
-            ```
-        4. **Check cert-manager logs for errors:**
-            ```bash
-            kubectl logs -n cert-manager -l app=cert-manager
-            ```
-        5. **If you see errors about the namespace being terminated, ensure the `beskar7-system` namespace is `Active` and not stuck in `Terminating`.
-
-*   **Error:** `the server could not find the requested resource (post certificates.cert-manager.io)`
-    *   **Cause:** cert-manager CRDs are not installed.
-    *   **Troubleshooting:**
-        1. Install cert-manager CRDs:
-            ```bash
-            kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.12.0/cert-manager.crds.yaml
-            ```
-        2. Install cert-manager:
-            ```bash
-            kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.12.0/cert-manager.yaml
-            ```
-        3. Wait for all cert-manager pods to be running:
-            ```bash
-            kubectl get pods -n cert-manager
-            ```
-
 ## Common Issues & Solutions
 
 ### `PhysicalHost` Reconciliation Errors

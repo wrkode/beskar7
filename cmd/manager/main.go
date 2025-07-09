@@ -100,13 +100,12 @@ func main() {
 	}
 
 	// Setup controllers here
-	if err = (&controllers.Beskar7MachineReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
-		// Use the default NewClient, which will be shared.
+	if err = (&controllers.PhysicalHostReconciler{
+		Client:               mgr.GetClient(),
+		Scheme:               mgr.GetScheme(),
 		RedfishClientFactory: internalredfish.NewClient,
-	}).SetupWithManager(context.Background(), mgr, controller.Options{MaxConcurrentReconciles: 10}); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "Beskar7Machine")
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "PhysicalHost")
 		os.Exit(1)
 	}
 
@@ -118,12 +117,11 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err = (&controllers.PhysicalHostReconciler{
-		Client:               mgr.GetClient(),
-		Scheme:               mgr.GetScheme(),
-		RedfishClientFactory: internalredfish.NewClient,
-	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "PhysicalHost")
+	if err = (&controllers.Beskar7MachineReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(context.Background(), mgr, controller.Options{}); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "Beskar7Machine")
 		os.Exit(1)
 	}
 
@@ -135,11 +133,6 @@ func main() {
 
 	if err = (&webhooks.Beskar7MachineWebhook{}).SetupWebhookWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create webhook", "webhook", "Beskar7Machine")
-		os.Exit(1)
-	}
-
-	if err = (&webhooks.PhysicalHostWebhook{}).SetupWebhookWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create webhook", "webhook", "PhysicalHost")
 		os.Exit(1)
 	}
 

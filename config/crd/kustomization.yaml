@@ -14,7 +14,7 @@ patchesStrategicMerge:
 - patches/webhook_in_beskar7clusters.yaml
 - patches/webhook_in_beskar7machines.yaml
 #- patches/webhook_in_beskar7machinetemplates.yaml
-- patches/webhook_in_physicalhosts.yaml
+#- patches/webhook_in_physicalhosts.yaml
 # +kubebuilder:scaffold:crdkustomizewebhookpatch
 
 # [CERTMANAGER] To enable cert-manager, uncomment all the sections with [CERTMANAGER] prefix.
@@ -22,7 +22,7 @@ patchesStrategicMerge:
 - patches/cainjection_in_beskar7clusters.yaml
 - patches/cainjection_in_beskar7machines.yaml
 #- patches/cainjection_in_beskar7machinetemplates.yaml
-- patches/cainjection_in_physicalhosts.yaml
+#- patches/cainjection_in_physicalhosts.yaml
 # +kubebuilder:scaffold:crdkustomizecainjectionpatch
 
 commonLabels:

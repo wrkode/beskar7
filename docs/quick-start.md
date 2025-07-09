@@ -14,22 +14,6 @@ This guide provides the steps to get the Beskar7 controller manager built, deplo
 *   [kustomize](https://kubectl.docs.kubernetes.io/installation/kustomize/) (v4 or later)
 *   A running Kubernetes cluster (e.g., kind, minikube, or a remote cluster) with `kubectl` configured.
 *   Access to a container registry (like ghcr.io, Docker Hub, etc.) where the manager image can be pushed.
-*   **cert-manager (required, for webhook support and TLS certificates)**
-
-### Install cert-manager (Required)
-
-Beskar7 requires cert-manager to be installed in your cluster to manage webhook TLS certificates. Install cert-manager and its CRDs before deploying Beskar7:
-
-```bash
-kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.12.0/cert-manager.crds.yaml
-kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.12.0/cert-manager.yaml
-```
-
-Wait for all cert-manager pods to be running:
-
-```bash
-kubectl get pods -n cert-manager
-```
 
 ## Getting Started Steps
 
@@ -71,7 +55,7 @@ kubectl get pods -n cert-manager
 
 ## Installation / Deployment
 
-1.  **Ensure prerequisites are met:** `kubectl` configured for your target cluster, the manager image pushed to an accessible registry, and **cert-manager installed** (see above).
+1.  **Ensure prerequisites are met:** `kubectl` configured for your target cluster, and the manager image pushed to an accessible registry.
 2.  **Install CRDs:**
     ```bash
     make install
