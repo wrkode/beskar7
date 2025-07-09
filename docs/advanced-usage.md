@@ -16,9 +16,11 @@ Beskar7 supports two primary provisioning modes controlled by the `spec.provisio
     *   Beskar7 simply instructs the BMC to boot from this provided ISO without injecting any extra parameters.
     *   The user is responsible for ensuring the pre-baked ISO is bootable (BIOS/UEFI) and self-sufficient.
 
-## Vendor-Specific Boot Configuration (Future Work)
+## Vendor-Specific Boot Configuration
 
 Currently, the `RemoteConfig` mode relies on the somewhat standard `UefiTargetBootSourceOverride` Redfish mechanism. If this fails for specific hardware, future versions of Beskar7 might support vendor-specific methods, potentially configured via annotations on the `PhysicalHost` resource.
+
+For detailed information about vendor-specific behavior and compatibility, see the **[Hardware Compatibility Matrix](./hardware-compatibility.md)**.
 
 **Example (Conceptual):**
 
@@ -67,10 +69,9 @@ spec:
 
 *(To be added: Details on configuring timeouts or other Redfish client parameters, if such configuration options are implemented in the future.)*
 
-Potential topics:
+For additional advanced topics, see:
 
-*   Configuring specific Redfish timeouts or retries (if implemented).
-*   Details on configuring different OS families in "RemoteConfig" mode.
-*   Using annotations for hardware-specific hints (e.g., BIOS attributes for boot parameters).
-*   Failure domain configuration and usage.
-*   Troubleshooting specific hardware/BMC interactions. 
+*   **[Hardware Compatibility Matrix](./hardware-compatibility.md)** - Vendor-specific configurations and limitations
+*   **[Troubleshooting Guide](./troubleshooting.md)** - Hardware/BMC interaction issues
+*   **[Deployment Best Practices](./deployment-best-practices.md)** - Production configuration scenarios
+*   **[API Reference](./api-reference.md)** - Complete field documentation and validation rules 

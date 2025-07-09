@@ -23,10 +23,16 @@ Yes
 
 #### osFamily
 - **osFamily** (string, required): The operating system family to use. Must be one of:
-  - `kairos`
-  - `talos`
-  - `flatcar`
-  - `LeapMicro`
+  - `kairos` - Kairos cloud-native OS
+  - `talos` - Talos Linux
+  - `flatcar` - Flatcar Container Linux
+  - `LeapMicro` - openSUSE Leap Micro
+  - `ubuntu` - Ubuntu Server
+  - `rhel` - Red Hat Enterprise Linux
+  - `centos` - CentOS
+  - `fedora` - Fedora Server
+  - `debian` - Debian
+  - `opensuse` - openSUSE
 
 ### Optional Fields
 
@@ -37,9 +43,11 @@ Yes
 - **providerID** (string, optional): Provider-specific identifier for the machine
 
 #### provisioningMode
-- **provisioningMode** (string, optional): The mode to use for provisioning. Must be one of:
-  - `RemoteConfig`
-  - `PreBakedISO`
+- **provisioningMode** (string, optional, default: "RemoteConfig"): The mode to use for provisioning. Must be one of:
+  - `RemoteConfig` - Boot generic ISO with configuration URL (requires configURL)
+  - `PreBakedISO` - Boot pre-configured ISO (configURL should not be set)
+  - `PXE` - PXE boot (future implementation)
+  - `iPXE` - iPXE boot (future implementation)
 
 ## Status
 
@@ -89,28 +97,35 @@ Array of conditions representing the latest available observations of the object
 apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
 kind: Beskar7Machine
 metadata:
-  name: my-machine
+  name: control-plane-01
   namespace: default
+  labels:
+    cluster.x-k8s.io/cluster-name: "my-cluster"
+    cluster.x-k8s.io/control-plane: ""
 spec:
-  providerID: beskar7://default/my-host
-  imageURL: http://example.com/image.qcow2
-  configURL: http://example.com/config.yaml
-  osFamily: ubuntu
-  provisioningMode: image
+  imageURL: "https://releases.kairos.io/v2.8.1/kairos-alpine-v2.8.1-amd64.iso"
+  configURL: "https://config.example.com/control-plane.yaml"
+  osFamily: "kairos"
+  provisioningMode: "RemoteConfig"
 status:
+  ready: true
+  phase: "Running"
   addresses:
     - type: "InternalIP"
-      address: "192.168.1.100"
-    - type: "Hostname"
-      address: "example-machine"
+      address: "10.0.1.10"
+    - type: "ExternalIP"
+      address: "203.0.113.10"
   conditions:
-    - type: "Ready"
+    - type: "InfrastructureReady"
       status: "True"
       lastTransitionTime: "2024-01-01T00:00:00Z"
-      reason: "MachineReady"
-      message: "Machine is ready"
-  phase: "Running"
-  ready: true
+      reason: "ProvisioningComplete"
+      message: "Infrastructure is ready"
+    - type: "PhysicalHostAssociated"
+      status: "True"
+      lastTransitionTime: "2024-01-01T00:00:00Z"
+      reason: "HostClaimed"
+      message: "Successfully associated with PhysicalHost server-01"
 ```
 
 ## Fields
