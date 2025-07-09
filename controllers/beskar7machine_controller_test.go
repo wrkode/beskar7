@@ -25,16 +25,15 @@ import (
 	. "github.com/onsi/gomega"
 	"github.com/stmcginnis/gofish/common"
 	"github.com/stmcginnis/gofish/redfish"
-	infrastructurev1beta1 "github.com/wrkode/beskar7/api/v1beta1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
-	"sigs.k8s.io/cluster-api/util/conditions"
+	conditions "sigs.k8s.io/cluster-api/util/conditions"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	// Import for our internal Redfish client interface and mocks
+	infrastructurev1beta1 "github.com/wrkode/beskar7/api/v1beta1"
 	internalredfish "github.com/wrkode/beskar7/internal/redfish"
 )
 
@@ -1094,6 +1093,297 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 
 		// TODO: Add test for "RemoteConfig" mode with missing ConfigURL (error expected)
 		// TODO: Add test for "RemoteConfig" mode with unsupported OSFamily (error expected)
+
+		It("should handle missing ConfigURL in RemoteConfig mode", func() {
+			b7machine.Spec.OSFamily = "kairos"
+			b7machine.Spec.ImageURL = "http://example.com/generic.iso"
+			b7machine.Spec.ProvisioningMode = "RemoteConfig"
+			b7machine.Spec.ConfigURL = "" // Missing ConfigURL should cause error
+
+			// Create a PhysicalHost that the reconciler will find and claim
+			host = &infrastructurev1beta1.PhysicalHost{
+				ObjectMeta: metav1.ObjectMeta{Name: "available-host-missing-config", Namespace: testNs.Name},
+				Spec: infrastructurev1beta1.PhysicalHostSpec{
+					RedfishConnection: infrastructurev1beta1.RedfishConnection{
+						Address:              "redfish://dummy-missing-config",
+						CredentialsSecretRef: "dummy-secret-missing-config",
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, host)).To(Succeed())
+			Eventually(func(g Gomega) {
+				createdHost := &infrastructurev1beta1.PhysicalHost{}
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: host.Name, Namespace: host.Namespace}, createdHost)).To(Succeed())
+				createdHost.Status = infrastructurev1beta1.PhysicalHostStatus{State: infrastructurev1beta1.StateAvailable, Ready: true}
+				g.Expect(k8sClient.Status().Update(ctx, createdHost)).To(Succeed())
+			}, "10s", "100ms").Should(Succeed())
+
+			// Create dummy secret
+			dummySecret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{Name: "dummy-secret-missing-config", Namespace: testNs.Name},
+				Data:       map[string][]byte{"username": []byte("user"), "password": []byte("pass")},
+			}
+			Expect(k8sClient.Create(ctx, dummySecret)).To(Succeed())
+
+			Expect(k8sClient.Create(ctx, b7machine)).To(Succeed())
+
+			reconciler := &Beskar7MachineReconciler{
+				Client:               k8sClient,
+				Scheme:               k8sClient.Scheme(),
+				RedfishClientFactory: NewMockRedfishClientFactory(mockRfClient),
+			}
+
+			By("First reconcile adds finalizer")
+			result, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: key})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.Requeue).To(BeTrue())
+
+			By("Second reconcile should handle ConfigURL validation error")
+			result, err = reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: key})
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("ConfigURL is required for RemoteConfig provisioning mode"))
+
+			// Check that conditions reflect the error
+			Eventually(func(g Gomega) {
+				Expect(k8sClient.Get(ctx, key, b7machine)).To(Succeed())
+				cond := conditions.Get(b7machine, infrastructurev1beta1.PhysicalHostAssociatedCondition)
+				g.Expect(cond).NotTo(BeNil())
+				g.Expect(cond.Status).To(Equal(corev1.ConditionFalse))
+				g.Expect(cond.Reason).To(Equal(infrastructurev1beta1.PhysicalHostAssociationFailedReason))
+			}, "5s", "100ms").Should(Succeed())
+		})
+
+		It("should handle unsupported OSFamily in RemoteConfig mode", func() {
+			b7machine.Spec.OSFamily = "unsupported-os"
+			b7machine.Spec.ImageURL = "http://example.com/generic.iso"
+			b7machine.Spec.ProvisioningMode = "RemoteConfig"
+			b7machine.Spec.ConfigURL = "http://example.com/config.yaml"
+
+			// Create a PhysicalHost that the reconciler will find and claim
+			host = &infrastructurev1beta1.PhysicalHost{
+				ObjectMeta: metav1.ObjectMeta{Name: "available-host-unsupported-os", Namespace: testNs.Name},
+				Spec: infrastructurev1beta1.PhysicalHostSpec{
+					RedfishConnection: infrastructurev1beta1.RedfishConnection{
+						Address:              "redfish://dummy-unsupported-os",
+						CredentialsSecretRef: "dummy-secret-unsupported-os",
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, host)).To(Succeed())
+			Eventually(func(g Gomega) {
+				createdHost := &infrastructurev1beta1.PhysicalHost{}
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: host.Name, Namespace: host.Namespace}, createdHost)).To(Succeed())
+				createdHost.Status = infrastructurev1beta1.PhysicalHostStatus{State: infrastructurev1beta1.StateAvailable, Ready: true}
+				g.Expect(k8sClient.Status().Update(ctx, createdHost)).To(Succeed())
+			}, "10s", "100ms").Should(Succeed())
+
+			// Create dummy secret
+			dummySecret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{Name: "dummy-secret-unsupported-os", Namespace: testNs.Name},
+				Data:       map[string][]byte{"username": []byte("user"), "password": []byte("pass")},
+			}
+			Expect(k8sClient.Create(ctx, dummySecret)).To(Succeed())
+
+			Expect(k8sClient.Create(ctx, b7machine)).To(Succeed())
+
+			reconciler := &Beskar7MachineReconciler{
+				Client:               k8sClient,
+				Scheme:               k8sClient.Scheme(),
+				RedfishClientFactory: NewMockRedfishClientFactory(mockRfClient),
+			}
+
+			By("First reconcile adds finalizer")
+			result, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: key})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.Requeue).To(BeTrue())
+
+			By("Second reconcile should handle unsupported OSFamily error")
+			result, err = reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: key})
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("unsupported OSFamily"))
+
+			// Check that conditions reflect the error
+			Eventually(func(g Gomega) {
+				Expect(k8sClient.Get(ctx, key, b7machine)).To(Succeed())
+				cond := conditions.Get(b7machine, infrastructurev1beta1.PhysicalHostAssociatedCondition)
+				g.Expect(cond).NotTo(BeNil())
+				g.Expect(cond.Status).To(Equal(corev1.ConditionFalse))
+				g.Expect(cond.Reason).To(Equal(infrastructurev1beta1.PhysicalHostAssociationFailedReason))
+			}, "5s", "100ms").Should(Succeed())
+		})
+
+		It("should handle Redfish connection failure during boot configuration", func() {
+			b7machine.Spec.OSFamily = "kairos"
+			b7machine.Spec.ImageURL = "http://example.com/test.iso"
+			b7machine.Spec.ProvisioningMode = "PreBakedISO"
+
+			// Create a PhysicalHost that the reconciler will find and claim
+			host = &infrastructurev1beta1.PhysicalHost{
+				ObjectMeta: metav1.ObjectMeta{Name: "available-host-redfish-fail", Namespace: testNs.Name},
+				Spec: infrastructurev1beta1.PhysicalHostSpec{
+					RedfishConnection: infrastructurev1beta1.RedfishConnection{
+						Address:              "redfish://dummy-redfish-fail",
+						CredentialsSecretRef: "dummy-secret-redfish-fail",
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, host)).To(Succeed())
+			Eventually(func(g Gomega) {
+				createdHost := &infrastructurev1beta1.PhysicalHost{}
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: host.Name, Namespace: host.Namespace}, createdHost)).To(Succeed())
+				createdHost.Status = infrastructurev1beta1.PhysicalHostStatus{State: infrastructurev1beta1.StateAvailable, Ready: true}
+				g.Expect(k8sClient.Status().Update(ctx, createdHost)).To(Succeed())
+			}, "10s", "100ms").Should(Succeed())
+
+			// Create dummy secret
+			dummySecret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{Name: "dummy-secret-redfish-fail", Namespace: testNs.Name},
+				Data:       map[string][]byte{"username": []byte("user"), "password": []byte("pass")},
+			}
+			Expect(k8sClient.Create(ctx, dummySecret)).To(Succeed())
+
+			Expect(k8sClient.Create(ctx, b7machine)).To(Succeed())
+
+			// Create a reconciler that always fails Redfish connections
+			failingRedfishReconciler := &Beskar7MachineReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+				RedfishClientFactory: func(ctx context.Context, address, username, password string, insecure bool) (internalredfish.Client, error) {
+					return nil, fmt.Errorf("connection timeout: unable to connect to %s", address)
+				},
+			}
+
+			By("First reconcile adds finalizer")
+			result, err := failingRedfishReconciler.Reconcile(ctx, ctrl.Request{NamespacedName: key})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.Requeue).To(BeTrue())
+
+			By("Second reconcile should handle Redfish connection failure during boot config")
+			result, err = failingRedfishReconciler.Reconcile(ctx, ctrl.Request{NamespacedName: key})
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("connection timeout"))
+
+			// Check that conditions reflect the error
+			Eventually(func(g Gomega) {
+				Expect(k8sClient.Get(ctx, key, b7machine)).To(Succeed())
+				cond := conditions.Get(b7machine, infrastructurev1beta1.PhysicalHostAssociatedCondition)
+				g.Expect(cond).NotTo(BeNil())
+				g.Expect(cond.Status).To(Equal(corev1.ConditionFalse))
+				g.Expect(cond.Reason).To(Equal(infrastructurev1beta1.PhysicalHostAssociationFailedReason))
+			}, "5s", "100ms").Should(Succeed())
+		})
+
+		It("should handle missing secret for PhysicalHost credentials", func() {
+			b7machine.Spec.OSFamily = "kairos"
+			b7machine.Spec.ImageURL = "http://example.com/test.iso"
+			b7machine.Spec.ProvisioningMode = "PreBakedISO"
+
+			// Create a PhysicalHost with reference to non-existent secret
+			host = &infrastructurev1beta1.PhysicalHost{
+				ObjectMeta: metav1.ObjectMeta{Name: "available-host-missing-secret", Namespace: testNs.Name},
+				Spec: infrastructurev1beta1.PhysicalHostSpec{
+					RedfishConnection: infrastructurev1beta1.RedfishConnection{
+						Address:              "redfish://dummy-missing-secret",
+						CredentialsSecretRef: "non-existent-secret",
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, host)).To(Succeed())
+			Eventually(func(g Gomega) {
+				createdHost := &infrastructurev1beta1.PhysicalHost{}
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: host.Name, Namespace: host.Namespace}, createdHost)).To(Succeed())
+				createdHost.Status = infrastructurev1beta1.PhysicalHostStatus{State: infrastructurev1beta1.StateAvailable, Ready: true}
+				g.Expect(k8sClient.Status().Update(ctx, createdHost)).To(Succeed())
+			}, "10s", "100ms").Should(Succeed())
+
+			Expect(k8sClient.Create(ctx, b7machine)).To(Succeed())
+
+			reconciler := &Beskar7MachineReconciler{
+				Client:               k8sClient,
+				Scheme:               k8sClient.Scheme(),
+				RedfishClientFactory: NewMockRedfishClientFactory(mockRfClient),
+			}
+
+			By("First reconcile adds finalizer")
+			result, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: key})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.Requeue).To(BeTrue())
+
+			By("Second reconcile should handle missing secret error")
+			result, err = reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: key})
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("failed to get credentials secret"))
+
+			// Check that conditions reflect the error
+			Eventually(func(g Gomega) {
+				Expect(k8sClient.Get(ctx, key, b7machine)).To(Succeed())
+				cond := conditions.Get(b7machine, infrastructurev1beta1.PhysicalHostAssociatedCondition)
+				g.Expect(cond).NotTo(BeNil())
+				g.Expect(cond.Status).To(Equal(corev1.ConditionFalse))
+				g.Expect(cond.Reason).To(Equal(infrastructurev1beta1.PhysicalHostAssociationFailedReason))
+			}, "5s", "100ms").Should(Succeed())
+		})
+
+		It("should handle secret with invalid credentials data", func() {
+			b7machine.Spec.OSFamily = "kairos"
+			b7machine.Spec.ImageURL = "http://example.com/test.iso"
+			b7machine.Spec.ProvisioningMode = "PreBakedISO"
+
+			// Create a PhysicalHost that the reconciler will find and claim
+			host = &infrastructurev1beta1.PhysicalHost{
+				ObjectMeta: metav1.ObjectMeta{Name: "available-host-invalid-creds", Namespace: testNs.Name},
+				Spec: infrastructurev1beta1.PhysicalHostSpec{
+					RedfishConnection: infrastructurev1beta1.RedfishConnection{
+						Address:              "redfish://dummy-invalid-creds",
+						CredentialsSecretRef: "invalid-secret-creds",
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, host)).To(Succeed())
+			Eventually(func(g Gomega) {
+				createdHost := &infrastructurev1beta1.PhysicalHost{}
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: host.Name, Namespace: host.Namespace}, createdHost)).To(Succeed())
+				createdHost.Status = infrastructurev1beta1.PhysicalHostStatus{State: infrastructurev1beta1.StateAvailable, Ready: true}
+				g.Expect(k8sClient.Status().Update(ctx, createdHost)).To(Succeed())
+			}, "10s", "100ms").Should(Succeed())
+
+			// Create secret with missing password field
+			invalidSecret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{Name: "invalid-secret-creds", Namespace: testNs.Name},
+				Data: map[string][]byte{
+					"username": []byte("user"),
+					// missing password field
+				},
+			}
+			Expect(k8sClient.Create(ctx, invalidSecret)).To(Succeed())
+
+			Expect(k8sClient.Create(ctx, b7machine)).To(Succeed())
+
+			reconciler := &Beskar7MachineReconciler{
+				Client:               k8sClient,
+				Scheme:               k8sClient.Scheme(),
+				RedfishClientFactory: NewMockRedfishClientFactory(mockRfClient),
+			}
+
+			By("First reconcile adds finalizer")
+			result, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: key})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.Requeue).To(BeTrue())
+
+			By("Second reconcile should handle invalid credentials error")
+			result, err = reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: key})
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("username or password missing"))
+
+			// Check that conditions reflect the error
+			Eventually(func(g Gomega) {
+				Expect(k8sClient.Get(ctx, key, b7machine)).To(Succeed())
+				cond := conditions.Get(b7machine, infrastructurev1beta1.PhysicalHostAssociatedCondition)
+				g.Expect(cond).NotTo(BeNil())
+				g.Expect(cond.Status).To(Equal(corev1.ConditionFalse))
+				g.Expect(cond.Reason).To(Equal(infrastructurev1beta1.PhysicalHostAssociationFailedReason))
+			}, "5s", "100ms").Should(Succeed())
+		})
 
 	})
 
