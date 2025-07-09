@@ -131,7 +131,6 @@ func (r *Beskar7ClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	return r.reconcileNormal(ctx, log, cluster, b7cluster)
 }
 
-// reconcileNormal handles the main reconciliation logic for Beskar7Cluster.
 func (r *Beskar7ClusterReconciler) reconcileNormal(ctx context.Context, logger logr.Logger, cluster *clusterv1.Cluster, b7cluster *infrastructurev1beta1.Beskar7Cluster) (ctrl.Result, error) {
 	logger.Info("Reconciling Beskar7Cluster create/update")
 
@@ -142,64 +141,83 @@ func (r *Beskar7ClusterReconciler) reconcileNormal(ctx context.Context, logger l
 	}
 
 	// --- Reconcile Failure Domains ---
-	// Discover available failure domains from PhysicalHosts in the same namespace.
-	// Assumes hosts are labeled with `topology.kubernetes.io/zone=<zone-name>`.
+	if err := r.reconcileFailureDomains(ctx, logger, b7cluster); err != nil {
+		// Treat failure to list PhysicalHosts as a transient error
+		return ctrl.Result{}, err
+	}
+
+	// --- Reconcile ControlPlaneEndpoint ---
+	if err := r.reconcileControlPlaneEndpoint(ctx, logger, cluster, b7cluster); err != nil {
+		// Treat failure to find endpoint as a transient error
+		return ctrl.Result{}, err
+	}
+
+	// If the endpoint is not ready, it will be set in the reconcileControlPlaneEndpoint function,
+	// and we should requeue.
+	if !b7cluster.Status.Ready {
+		logger.Info("Control plane endpoint not yet available, requeuing")
+		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+	}
+
+	logger.Info("Beskar7Cluster reconciliation complete")
+	return ctrl.Result{}, nil
+}
+
+func (r *Beskar7ClusterReconciler) reconcileFailureDomains(ctx context.Context, logger logr.Logger, b7cluster *infrastructurev1beta1.Beskar7Cluster) error {
+	logger.Info("Reconciling failure domains")
 	phList := &infrastructurev1beta1.PhysicalHostList{}
 	if err := r.List(ctx, phList, client.InNamespace(b7cluster.Namespace)); err != nil {
 		logger.Error(err, "Failed to list PhysicalHosts to determine failure domains")
-		// Continue reconciliation without failure domains if listing fails?
-		// Or return error? For now, log and continue, but consider returning err.
-	} else {
-		failureDomains := make(clusterv1.FailureDomains)
-		zoneLabel := "topology.kubernetes.io/zone" // Standard zone label
+		return errors.Wrapf(err, "failed to list PhysicalHosts in namespace %s", b7cluster.Namespace)
+	}
 
-		for _, ph := range phList.Items {
-			if ph.Labels != nil {
-				if zone, ok := ph.Labels[zoneLabel]; ok && zone != "" {
-					if _, domainExists := failureDomains[zone]; !domainExists {
-						logger.V(1).Info("Discovered failure domain zone", "zone", zone)
-						failureDomains[zone] = clusterv1.FailureDomainSpec{
-							ControlPlane: true, // Assume all discovered zones can host control plane for now
-						}
+	failureDomains := make(clusterv1.FailureDomains)
+	zoneLabel := "topology.kubernetes.io/zone"
+
+	for _, ph := range phList.Items {
+		if ph.Labels != nil {
+			if zone, ok := ph.Labels[zoneLabel]; ok && zone != "" {
+				if _, domainExists := failureDomains[zone]; !domainExists {
+					logger.V(1).Info("Discovered failure domain zone", "zone", zone)
+					failureDomains[zone] = clusterv1.FailureDomainSpec{
+						ControlPlane: true,
 					}
 				}
 			}
 		}
-		// TODO: Check if failureDomains actually changed before updating status?
-		if len(failureDomains) > 0 {
-			b7cluster.Status.FailureDomains = failureDomains
-			logger.Info("Updated cluster status with discovered failure domains", "count", len(failureDomains))
-		} else {
-			// Clear failure domains if none are found (optional, depends on desired behavior)
-			// b7cluster.Status.FailureDomains = nil
-			logger.Info("No PhysicalHosts with zone labels found in namespace")
-		}
 	}
-	// --- End Reconcile Failure Domains ---
 
-	// --- Reconcile ControlPlaneEndpoint ---
-	// Derive endpoint from control plane machines instead of spec.
+	if len(failureDomains) > 0 {
+		b7cluster.Status.FailureDomains = failureDomains
+		logger.Info("Updated cluster status with discovered failure domains", "count", len(failureDomains))
+	} else {
+		b7cluster.Status.FailureDomains = nil
+		logger.Info("No PhysicalHosts with zone labels found in namespace")
+	}
+
+	return nil
+}
+
+func (r *Beskar7ClusterReconciler) reconcileControlPlaneEndpoint(ctx context.Context, logger logr.Logger, cluster *clusterv1.Cluster, b7cluster *infrastructurev1beta1.Beskar7Cluster) error {
+	logger.Info("Reconciling control plane endpoint")
+
 	cpEndpoint, err := r.findControlPlaneEndpoint(ctx, logger, cluster)
 	if err != nil {
-		return ctrl.Result{}, errors.Wrapf(err, "failed to find control plane endpoint for cluster %s/%s", cluster.Namespace, cluster.Name)
+		return errors.Wrapf(err, "failed to find control plane endpoint for cluster %s/%s", cluster.Namespace, cluster.Name)
 	}
 
 	if cpEndpoint == nil {
-		logger.Info("Control plane endpoint not yet available, waiting for control plane machines.")
 		conditions.MarkFalse(b7cluster, infrastructurev1beta1.ControlPlaneEndpointReady, infrastructurev1beta1.ControlPlaneEndpointNotSetReason, clusterv1.ConditionSeverityInfo, "Waiting for control plane Beskar7Machine(s) to have IP addresses")
 		b7cluster.Status.Ready = false
-		// Requeue after a delay to check again
-		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+		return nil
 	}
 
-	// Endpoint found, update status
 	logger.Info("Control plane endpoint found", "host", cpEndpoint.Host, "port", cpEndpoint.Port)
 	b7cluster.Status.ControlPlaneEndpoint = *cpEndpoint
 	conditions.MarkTrue(b7cluster, infrastructurev1beta1.ControlPlaneEndpointReady)
 	b7cluster.Status.Ready = true
 
-	logger.Info("Beskar7Cluster reconciliation complete")
-	return ctrl.Result{}, nil
+	return nil
 }
 
 // findControlPlaneEndpoint searches for a ready control plane machine and extracts its IP.
@@ -240,7 +258,6 @@ func (r *Beskar7ClusterReconciler) findControlPlaneEndpoint(ctx context.Context,
 		}
 
 		// Select the first available address (prefer internal IP, then external)
-		// TODO: Add more sophisticated address selection logic if needed (IPv4 vs IPv6?)
 		var selectedAddress string
 		for _, addr := range machine.Status.Addresses {
 			if addr.Type == clusterv1.MachineInternalIP {
