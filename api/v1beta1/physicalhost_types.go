@@ -31,12 +31,17 @@ const (
 // RedfishConnection contains the information needed to connect to a Redfish service
 type RedfishConnection struct {
 	// Address is the URL of the Redfish service
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Pattern="^(https?://)[a-zA-Z0-9.-]+(:[0-9]+)?(/.*)?$"
 	Address string `json:"address"`
 
 	// CredentialsSecretRef is the name of the secret containing the Redfish credentials
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
 	CredentialsSecretRef string `json:"credentialsSecretRef"`
 
 	// InsecureSkipVerify determines whether to skip TLS certificate verification
+	// +kubebuilder:default=false
 	// +optional
 	InsecureSkipVerify *bool `json:"insecureSkipVerify,omitempty"`
 }

@@ -20,6 +20,7 @@ const (
 // Beskar7ClusterSpec defines the desired state of Beskar7Cluster.
 type Beskar7ClusterSpec struct {
 	// ControlPlaneEndpoint represents the endpoint used to communicate with the control plane.
+	// +kubebuilder:validation:Optional
 	// +optional
 	ControlPlaneEndpoint clusterv1.APIEndpoint `json:"controlPlaneEndpoint"`
 }
