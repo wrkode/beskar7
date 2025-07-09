@@ -39,6 +39,7 @@ import (
 	infrastructurev1beta1 "github.com/wrkode/beskar7/api/v1beta1"
 	"github.com/wrkode/beskar7/api/v1beta1/webhooks"
 	"github.com/wrkode/beskar7/controllers"
+	internalmetrics "github.com/wrkode/beskar7/internal/metrics"
 	internalredfish "github.com/wrkode/beskar7/internal/redfish"
 	//+kubebuilder:scaffold:imports
 )
@@ -74,6 +75,10 @@ func main() {
 	flag.Parse()
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
+
+	// Initialize metrics
+	internalmetrics.Init()
+	setupLog.Info("Metrics initialized successfully")
 
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme:  scheme,
