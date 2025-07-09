@@ -379,3 +379,101 @@ func (c *gofishClient) SetBootParameters(ctx context.Context, params []string) e
 	log.Error(uerr, "All attempts to set boot parameters failed.")
 	return fmt.Errorf("failed to set boot parameters using UefiTargetBootSourceOverride and no alternative method succeeded: %w", uerr)
 }
+
+// GetNetworkAddresses retrieves network interface addresses from the system.
+func (c *gofishClient) GetNetworkAddresses(ctx context.Context) ([]NetworkAddress, error) {
+	log := logf.FromContext(ctx)
+	log.Info("Attempting to retrieve network addresses from Redfish")
+
+	system, err := c.getSystemService(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get system for network address discovery: %w", err)
+	}
+
+	var addresses []NetworkAddress
+
+	// Try to get EthernetInterfaces first (more common and reliable)
+	ethernetInterfaces, err := system.EthernetInterfaces()
+	if err != nil {
+		log.Error(err, "Failed to retrieve ethernet interfaces")
+		// Don't return error yet, try NetworkInterfaces as fallback
+	} else {
+		log.Info("Found ethernet interfaces", "count", len(ethernetInterfaces))
+		for _, ethIntf := range ethernetInterfaces {
+			interfaceAddresses := c.extractAddressesFromEthernetInterface(ctx, ethIntf)
+			addresses = append(addresses, interfaceAddresses...)
+		}
+	}
+
+	// If we didn't get addresses from EthernetInterfaces, try NetworkInterfaces
+	if len(addresses) == 0 {
+		log.Info("No addresses found via EthernetInterfaces, trying NetworkInterfaces fallback")
+		networkInterfaces, err := system.NetworkInterfaces()
+		if err != nil {
+			log.Error(err, "Failed to retrieve network interfaces")
+			return nil, fmt.Errorf("failed to retrieve both ethernet and network interfaces: %w", err)
+		}
+		log.Info("Found network interfaces", "count", len(networkInterfaces))
+		for _, netIntf := range networkInterfaces {
+			interfaceAddresses := c.extractAddressesFromNetworkInterface(ctx, netIntf)
+			addresses = append(addresses, interfaceAddresses...)
+		}
+	}
+
+	log.Info("Successfully retrieved network addresses", "totalAddresses", len(addresses))
+	return addresses, nil
+}
+
+// extractAddressesFromEthernetInterface extracts network addresses from an EthernetInterface.
+func (c *gofishClient) extractAddressesFromEthernetInterface(ctx context.Context, ethIntf *redfish.EthernetInterface) []NetworkAddress {
+	log := logf.FromContext(ctx)
+	var addresses []NetworkAddress
+
+	// Extract IPv4 addresses
+	for _, ipv4 := range ethIntf.IPv4Addresses {
+		if ipv4.Address != "" {
+			address := NetworkAddress{
+				Type:          IPv4AddressType,
+				Address:       ipv4.Address,
+				Gateway:       ipv4.Gateway,
+				InterfaceName: ethIntf.Name,
+				MACAddress:    ethIntf.MACAddress,
+			}
+			addresses = append(addresses, address)
+			log.V(1).Info("Found IPv4 address", "interface", ethIntf.Name, "address", ipv4.Address, "gateway", ipv4.Gateway)
+		}
+	}
+
+	// Extract IPv6 addresses
+	for _, ipv6 := range ethIntf.IPv6Addresses {
+		if ipv6.Address != "" {
+			address := NetworkAddress{
+				Type:          IPv6AddressType,
+				Address:       ipv6.Address,
+				Gateway:       ethIntf.IPv6DefaultGateway,
+				InterfaceName: ethIntf.Name,
+				MACAddress:    ethIntf.MACAddress,
+			}
+			addresses = append(addresses, address)
+			log.V(1).Info("Found IPv6 address", "interface", ethIntf.Name, "address", ipv6.Address, "gateway", ethIntf.IPv6DefaultGateway)
+		}
+	}
+
+	return addresses
+}
+
+// extractAddressesFromNetworkInterface extracts network addresses from a NetworkInterface.
+func (c *gofishClient) extractAddressesFromNetworkInterface(ctx context.Context, netIntf *redfish.NetworkInterface) []NetworkAddress {
+	log := logf.FromContext(ctx)
+	var addresses []NetworkAddress
+
+	// NetworkInterface doesn't directly contain IP addresses like EthernetInterface
+	// We need to check if it has associated ports or device functions that might contain address info
+	// For now, just log that we found the interface but can't extract addresses
+	log.V(1).Info("Found NetworkInterface but cannot extract addresses directly", "interface", netIntf.Name)
+
+	// TODO: If needed, implement logic to traverse NetworkPorts or NetworkDeviceFunctions
+	// associated with this NetworkInterface to find IP address information
+
+	return addresses
+}

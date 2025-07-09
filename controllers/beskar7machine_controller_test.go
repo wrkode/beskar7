@@ -41,13 +41,14 @@ import (
 // MockRedfishClient is a mock implementation of the internalredfish.Client interface for testing.
 // +kubebuilder:object:generate=false // We don't want Kubebuilder to generate CRDs for this mock.
 type MockRedfishClient struct {
-	GetSystemInfoFunc     func(ctx context.Context) (*internalredfish.SystemInfo, error)
-	GetPowerStateFunc     func(ctx context.Context) (redfish.PowerState, error)
-	SetPowerStateFunc     func(ctx context.Context, state redfish.PowerState) error
-	SetBootSourceISOFunc  func(ctx context.Context, isoURL string) error
-	EjectVirtualMediaFunc func(ctx context.Context) error
-	SetBootParametersFunc func(ctx context.Context, params []string) error
-	CloseFunc             func(ctx context.Context)
+	GetSystemInfoFunc       func(ctx context.Context) (*internalredfish.SystemInfo, error)
+	GetPowerStateFunc       func(ctx context.Context) (redfish.PowerState, error)
+	SetPowerStateFunc       func(ctx context.Context, state redfish.PowerState) error
+	SetBootSourceISOFunc    func(ctx context.Context, isoURL string) error
+	EjectVirtualMediaFunc   func(ctx context.Context) error
+	SetBootParametersFunc   func(ctx context.Context, params []string) error
+	GetNetworkAddressesFunc func(ctx context.Context) ([]internalredfish.NetworkAddress, error)
+	CloseFunc               func(ctx context.Context)
 
 	// Store calls for assertion
 	SetBootSourceISOCalls  []string
@@ -96,6 +97,22 @@ func (m *MockRedfishClient) SetBootParameters(ctx context.Context, params []stri
 		return m.SetBootParametersFunc(ctx, params)
 	}
 	return nil
+}
+
+func (m *MockRedfishClient) GetNetworkAddresses(ctx context.Context) ([]internalredfish.NetworkAddress, error) {
+	if m.GetNetworkAddressesFunc != nil {
+		return m.GetNetworkAddressesFunc(ctx)
+	}
+	// Return some default mock addresses for testing
+	return []internalredfish.NetworkAddress{
+		{
+			Type:          internalredfish.IPv4AddressType,
+			Address:       "192.168.1.100",
+			Gateway:       "192.168.1.1",
+			InterfaceName: "eth0",
+			MACAddress:    "00:11:22:33:44:55",
+		},
+	}, nil
 }
 
 func (m *MockRedfishClient) Close(ctx context.Context) {

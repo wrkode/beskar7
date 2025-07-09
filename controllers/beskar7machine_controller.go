@@ -193,6 +193,18 @@ func (r *Beskar7MachineReconciler) reconcileNormal(ctx context.Context, logger l
 			logger.Info("Setting ProviderID", "ProviderID", currentProviderID)
 			b7machine.Spec.ProviderID = &currentProviderID
 		}
+
+		// Copy addresses from PhysicalHost to Beskar7Machine
+		if len(physicalHost.Status.Addresses) > 0 {
+			b7machine.Status.Addresses = physicalHost.Status.Addresses
+			logger.Info("Copied network addresses from PhysicalHost", "addressCount", len(physicalHost.Status.Addresses))
+			for _, addr := range physicalHost.Status.Addresses {
+				logger.V(1).Info("Copied address", "type", addr.Type, "address", addr.Address)
+			}
+		} else {
+			logger.V(1).Info("No addresses available on PhysicalHost to copy")
+		}
+
 		conditions.MarkTrue(b7machine, infrastructurev1beta1.InfrastructureReadyCondition)
 		b7machine.Status.Ready = true
 		phase := "Provisioned"
