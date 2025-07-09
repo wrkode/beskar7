@@ -40,14 +40,15 @@ import (
 // MockRedfishClient is a mock implementation of the internalredfish.Client interface for testing.
 // +kubebuilder:object:generate=false // We don't want Kubebuilder to generate CRDs for this mock.
 type MockRedfishClient struct {
-	GetSystemInfoFunc       func(ctx context.Context) (*internalredfish.SystemInfo, error)
-	GetPowerStateFunc       func(ctx context.Context) (redfish.PowerState, error)
-	SetPowerStateFunc       func(ctx context.Context, state redfish.PowerState) error
-	SetBootSourceISOFunc    func(ctx context.Context, isoURL string) error
-	EjectVirtualMediaFunc   func(ctx context.Context) error
-	SetBootParametersFunc   func(ctx context.Context, params []string) error
-	GetNetworkAddressesFunc func(ctx context.Context) ([]internalredfish.NetworkAddress, error)
-	CloseFunc               func(ctx context.Context)
+	GetSystemInfoFunc                    func(ctx context.Context) (*internalredfish.SystemInfo, error)
+	GetPowerStateFunc                    func(ctx context.Context) (redfish.PowerState, error)
+	SetPowerStateFunc                    func(ctx context.Context, state redfish.PowerState) error
+	SetBootSourceISOFunc                 func(ctx context.Context, isoURL string) error
+	EjectVirtualMediaFunc                func(ctx context.Context) error
+	SetBootParametersFunc                func(ctx context.Context, params []string) error
+	SetBootParametersWithAnnotationsFunc func(ctx context.Context, params []string, annotations map[string]string) error
+	GetNetworkAddressesFunc              func(ctx context.Context) ([]internalredfish.NetworkAddress, error)
+	CloseFunc                            func(ctx context.Context)
 
 	// Store calls for assertion
 	SetBootSourceISOCalls  []string
@@ -94,6 +95,14 @@ func (m *MockRedfishClient) SetBootParameters(ctx context.Context, params []stri
 	m.SetBootParametersCalls = append(m.SetBootParametersCalls, params) // Store a copy
 	if m.SetBootParametersFunc != nil {
 		return m.SetBootParametersFunc(ctx, params)
+	}
+	return nil
+}
+
+func (m *MockRedfishClient) SetBootParametersWithAnnotations(ctx context.Context, params []string, annotations map[string]string) error {
+	m.SetBootParametersCalls = append(m.SetBootParametersCalls, params) // Store a copy
+	if m.SetBootParametersWithAnnotationsFunc != nil {
+		return m.SetBootParametersWithAnnotationsFunc(ctx, params, annotations)
 	}
 	return nil
 }

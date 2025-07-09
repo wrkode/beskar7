@@ -332,20 +332,45 @@ func (c *gofishClient) EjectVirtualMedia(ctx context.Context) error {
 }
 
 // SetBootParameters configures kernel command line parameters for the next boot.
-// This implementation attempts to set UEFI boot parameters, which is the most
-// standard method. Fallbacks for vendor-specific BIOS attributes are not
-// implemented due to lack of a standard mechanism.
+// This implementation uses vendor-specific methods when possible, with fallback
+// to the standard UEFI method.
 func (c *gofishClient) SetBootParameters(ctx context.Context, params []string) error {
+	return c.SetBootParametersWithAnnotations(ctx, params, nil)
+}
+
+// SetBootParametersWithAnnotations configures kernel command line parameters for the next boot
+// with vendor-specific support based on annotations.
+func (c *gofishClient) SetBootParametersWithAnnotations(ctx context.Context, params []string, annotations map[string]string) error {
 	log := logf.FromContext(ctx)
-	log.Info("Attempting to set boot parameters", "Params", params)
+	log.Info("Attempting to set boot parameters with vendor-specific support", "Params", params)
+
+	// Create vendor-specific boot manager
+	vendorBootMgr := NewVendorSpecificBootManager(c)
+
+	// Try vendor-specific boot parameter setting first
+	// This will automatically detect the vendor and use the appropriate method
+	err := vendorBootMgr.SetBootParametersWithVendorSupport(ctx, params, annotations)
+	if err != nil {
+		log.Error(err, "Vendor-specific boot parameter setting failed, trying fallback")
+
+		// Fallback to the original UEFI method
+		return c.setBootParametersUEFI(ctx, params)
+	}
+
+	log.Info("Successfully set boot parameters using vendor-specific method")
+	return nil
+}
+
+// setBootParametersUEFI is the original UEFI boot parameter implementation
+func (c *gofishClient) setBootParametersUEFI(ctx context.Context, params []string) error {
+	log := logf.FromContext(ctx)
+	log.V(1).Info("Attempting boot parameter setting via UefiTargetBootSourceOverride")
 
 	system, err := c.getSystemService(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to get system to set boot parameters: %w", err)
 	}
 
-	// --- Attempt 1: Using UefiTargetBootSourceOverride (Most standard approach) ---
-	log.V(1).Info("Attempting boot parameter setting via UefiTargetBootSourceOverride")
 	var uefiBootSettings redfish.Boot
 	if len(params) == 0 {
 		// Clear parameters: Disable override and set target to None.
@@ -374,10 +399,7 @@ func (c *gofishClient) SetBootParameters(ctx context.Context, params []string) e
 
 	// UEFI Target method failed, log details and consider alternatives.
 	log.Error(uerr, "Failed to set boot settings via UefiTargetBootSourceOverride", "Settings", uefiBootSettings)
-
-	// If we reach here, the standard UefiTarget method failed.
-	log.Error(uerr, "All attempts to set boot parameters failed.")
-	return fmt.Errorf("failed to set boot parameters using UefiTargetBootSourceOverride and no alternative method succeeded: %w", uerr)
+	return fmt.Errorf("failed to set boot parameters using UefiTargetBootSourceOverride: %w", uerr)
 }
 
 // GetNetworkAddresses retrieves network interface addresses from the system.

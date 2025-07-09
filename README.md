@@ -2,6 +2,17 @@
 
 Beskar7 is a Kubernetes operator that implements the Cluster API infrastructure provider contract for managing bare-metal machines using the Redfish API. It allows you to provision and manage the lifecycle of Kubernetes clusters on physical hardware directly through Kubernetes-native APIs.
 
+## 🚀 **NEW: Automatic Vendor-Specific Hardware Support**
+
+Beskar7 now automatically detects and handles vendor-specific hardware quirks! **Dell, HPE, Lenovo, and Supermicro systems work out of the box** with zero configuration.
+
+- **✅ Dell PowerEdge:** Automatic BIOS attribute handling (no more manual iDRAC configuration!)
+- **✅ HPE ProLiant:** UEFI Target Boot Override (excellent compatibility)
+- **✅ Lenovo ThinkSystem:** UEFI with intelligent BIOS fallback
+- **✅ Supermicro:** Multiple fallback mechanisms for reliability
+
+**[Quick Start Guide →](docs/quick-start-vendor-support.md)** | **[Detailed Documentation →](docs/vendor-specific-support.md)**
+
 ## Current Status
 
 **Alpha:** This project is currently under active development. Key features are being implemented, and the APIs may change. Not yet suitable for production use.

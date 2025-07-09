@@ -6,6 +6,7 @@ Welcome to the Beskar7 documentation! This directory contains comprehensive docu
 
 - [**Introduction**](introduction.md) - Overview of Beskar7 and its purpose
 - [**Quick Start Guide**](quick-start.md) - Get Beskar7 up and running quickly
+- [**🚀 NEW: Quick Start - Vendor Support**](quick-start-vendor-support.md) - Get started with automatic vendor detection
 - [**Architecture**](architecture.md) - Understand how Beskar7 components work together
 
 ## API Documentation
@@ -25,6 +26,7 @@ Welcome to the Beskar7 documentation! This directory contains comprehensive docu
 ## Hardware and Compatibility
 
 - [**Hardware Compatibility Matrix**](hardware-compatibility.md) - Vendor support and compatibility information
+- [**🚀 NEW: Vendor-Specific Support**](vendor-specific-support.md) - Automatic vendor detection and configuration
 
 ## Monitoring and Observability
 
@@ -34,8 +36,9 @@ Welcome to the Beskar7 documentation! This directory contains comprehensive docu
 
 ### For New Users
 1. Start with [Introduction](introduction.md) to understand Beskar7's purpose
-2. Follow the [Quick Start Guide](quick-start.md) to deploy your first setup
-3. Review [Hardware Compatibility](hardware-compatibility.md) for your specific hardware
+2. **NEW:** Check out [Quick Start - Vendor Support](quick-start-vendor-support.md) for automatic hardware support
+3. Follow the [Quick Start Guide](quick-start.md) to deploy your first setup
+4. Review [Hardware Compatibility](hardware-compatibility.md) for your specific hardware
 
 ### For Operators
 1. Review [Deployment Best Practices](deployment-best-practices.md) for production deployments
@@ -91,6 +94,8 @@ For information about contributing to Beskar7, see the main repository documenta
 |----------|--------|--------------|
 | Introduction | ✅ Complete | Current |
 | Quick Start Guide | ✅ Complete | Current |
+| **🚀 Quick Start - Vendor Support** | **✅ NEW** | **Current** |
+| **🚀 Vendor-Specific Support** | **✅ NEW** | **Current** |
 | Architecture | ✅ Complete | Current |
 | API Reference | ✅ Complete | Current |
 | PhysicalHost | ✅ Complete | Current |

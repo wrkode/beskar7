@@ -8,76 +8,45 @@ import (
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 )
 
-// Client defines the interface for interacting with a Redfish API.
+// Client represents a Redfish client
 type Client interface {
-	// GetSystemInfo retrieves basic system details.
+	// Close closes the client connection
+	Close(ctx context.Context)
+
+	// GetSystemInfo retrieves system information
 	GetSystemInfo(ctx context.Context) (*SystemInfo, error)
 
-	// GetPowerState retrieves the current power state of the system.
+	// GetPowerState retrieves the current power state
 	GetPowerState(ctx context.Context) (redfish.PowerState, error)
 
-	// SetPowerState sets the desired power state of the system.
+	// SetPowerState sets the power state
 	SetPowerState(ctx context.Context, state redfish.PowerState) error
 
-	// SetBootSourceISO configures the system to boot from a given ISO URL via VirtualMedia.
-	// It finds an available virtual media device, inserts the ISO, and sets it as the boot target.
+	// SetBootSourceISO configures the system to boot from an ISO
 	SetBootSourceISO(ctx context.Context, isoURL string) error
 
-	// EjectVirtualMedia ejects any inserted virtual media.
+	// EjectVirtualMedia ejects any inserted virtual media
 	EjectVirtualMedia(ctx context.Context) error
 
-	// SetBootParameters configures kernel command line parameters for the next boot.
-	// These are typically applied when booting from an ISO via VirtualMedia.
-	// The parameters are for one-time boot.
+	// SetBootParameters configures kernel command line parameters
 	SetBootParameters(ctx context.Context, params []string) error
 
-	// GetNetworkAddresses retrieves network interface addresses from the system.
+	// SetBootParametersWithAnnotations configures kernel command line parameters with vendor-specific support
+	SetBootParametersWithAnnotations(ctx context.Context, params []string, annotations map[string]string) error
+
+	// GetNetworkAddresses retrieves network interface addresses
 	GetNetworkAddresses(ctx context.Context) ([]NetworkAddress, error)
-
-	// Close closes the connection to the Redfish service.
-	Close(ctx context.Context)
 }
 
-// RedfishClientFactory defines the signature for a function that creates a Redfish client.
-// It is defined here to be shared between PhysicalHost and Beskar7Machine controllers.
-type RedfishClientFactory func(ctx context.Context, address, username, password string, insecure bool) (Client, error)
-
-// SystemInfo holds basic hardware details retrieved from Redfish.
+// SystemInfo contains basic system information
 type SystemInfo struct {
-	Manufacturer string
-	Model        string
-	SerialNumber string
-	Status       common.Status
+	Manufacturer string        `json:"manufacturer"`
+	Model        string        `json:"model"`
+	SerialNumber string        `json:"serialNumber"`
+	Status       common.Status `json:"status"`
 }
 
-// RedfishClientFactory type definition should be here ...
-
-// (The gofishClient struct and its methods remain in gofish_client.go, not here)
-// Remove the MockClient and NewMockClient that were just added if they are here.
-
-// EjectVirtualMedia ejects any inserted virtual media.
-// TODO: Implement the actual Redfish calls to eject media
-
-// SetBootParameters configures kernel command line parameters for the next boot.
-// TODO: Implement the actual Redfish calls to set UEFI boot options.
-
-// Close disconnects from the Redfish service.
-
-// NetworkAddress represents a network address discovered from Redfish.
-type NetworkAddress struct {
-	// Type indicates the address type (IPv4 or IPv6)
-	Type NetworkAddressType
-	// Address is the IP address string
-	Address string
-	// Gateway is the gateway address if available
-	Gateway string
-	// InterfaceName is the name of the network interface
-	InterfaceName string
-	// MACAddress is the MAC address of the interface
-	MACAddress string
-}
-
-// NetworkAddressType represents the type of network address.
+// NetworkAddressType represents the type of network address
 type NetworkAddressType string
 
 const (
@@ -86,6 +55,19 @@ const (
 	// IPv6AddressType represents an IPv6 address
 	IPv6AddressType NetworkAddressType = "IPv6"
 )
+
+// NetworkAddress represents a network interface address
+type NetworkAddress struct {
+	Type          NetworkAddressType `json:"type"`
+	Address       string             `json:"address"`
+	Gateway       string             `json:"gateway,omitempty"`
+	InterfaceName string             `json:"interfaceName,omitempty"`
+	MACAddress    string             `json:"macAddress,omitempty"`
+}
+
+// RedfishClientFactory defines the signature for a function that creates a Redfish client.
+// It is defined here to be shared between PhysicalHost and Beskar7Machine controllers.
+type RedfishClientFactory func(ctx context.Context, address, username, password string, insecure bool) (Client, error)
 
 // ConvertToMachineAddresses converts NetworkAddress slices to Cluster API MachineAddress format.
 func ConvertToMachineAddresses(networkAddresses []NetworkAddress) []clusterv1.MachineAddress {
