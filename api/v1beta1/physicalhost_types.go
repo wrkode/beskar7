@@ -154,6 +154,7 @@ type RedfishConnectionInfo struct {
 // +kubebuilder:printcolumn:name="State",type="string",JSONPath=".status.state",description="Current state of the Physical Host"
 // +kubebuilder:printcolumn:name="Ready",type="boolean",JSONPath=".status.ready",description="Indicates if the host is ready"
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp",description="Creation timestamp"
+// +kubebuilder:storageversion
 
 // PhysicalHost is the Schema for the physicalhosts API
 type PhysicalHost struct {

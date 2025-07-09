@@ -21,6 +21,38 @@ webhooks:
   sideEffects: None
   admissionReviewVersions: ["v1"]
   timeoutSeconds: 10
+- name: validation.beskar7machine.infrastructure.cluster.x-k8s.io
+  clientConfig:
+    service:
+      name: beskar7-webhook-service
+      namespace: beskar7-system
+      path: /validate-infrastructure-cluster-x-k8s-io-v1beta1-beskar7machine
+  rules:
+  - apiGroups: ["infrastructure.cluster.x-k8s.io"]
+    apiVersions: ["v1beta1"]
+    operations: ["CREATE", "UPDATE"]
+    resources: ["beskar7machines"]
+    scope: "Namespaced"
+  failurePolicy: Fail
+  sideEffects: None
+  admissionReviewVersions: ["v1"]
+  timeoutSeconds: 10
+- name: validation.physicalhost.infrastructure.cluster.x-k8s.io
+  clientConfig:
+    service:
+      name: beskar7-webhook-service
+      namespace: beskar7-system
+      path: /validate-infrastructure-cluster-x-k8s-io-v1beta1-physicalhost
+  rules:
+  - apiGroups: ["infrastructure.cluster.x-k8s.io"]
+    apiVersions: ["v1beta1"]
+    operations: ["CREATE", "UPDATE"]
+    resources: ["physicalhosts"]
+    scope: "Namespaced"
+  failurePolicy: Fail
+  sideEffects: None
+  admissionReviewVersions: ["v1"]
+  timeoutSeconds: 10
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: MutatingWebhookConfiguration
@@ -40,6 +72,38 @@ webhooks:
     apiVersions: ["v1beta1"]
     operations: ["CREATE", "UPDATE"]
     resources: ["beskar7clusters"]
+    scope: "Namespaced"
+  failurePolicy: Fail
+  sideEffects: None
+  admissionReviewVersions: ["v1"]
+  timeoutSeconds: 10
+- name: defaulting.beskar7machine.infrastructure.cluster.x-k8s.io
+  clientConfig:
+    service:
+      name: beskar7-webhook-service
+      namespace: beskar7-system
+      path: /mutate-infrastructure-cluster-x-k8s-io-v1beta1-beskar7machine
+  rules:
+  - apiGroups: ["infrastructure.cluster.x-k8s.io"]
+    apiVersions: ["v1beta1"]
+    operations: ["CREATE", "UPDATE"]
+    resources: ["beskar7machines"]
+    scope: "Namespaced"
+  failurePolicy: Fail
+  sideEffects: None
+  admissionReviewVersions: ["v1"]
+  timeoutSeconds: 10
+- name: defaulting.physicalhost.infrastructure.cluster.x-k8s.io
+  clientConfig:
+    service:
+      name: beskar7-webhook-service
+      namespace: beskar7-system
+      path: /mutate-infrastructure-cluster-x-k8s-io-v1beta1-physicalhost
+  rules:
+  - apiGroups: ["infrastructure.cluster.x-k8s.io"]
+    apiVersions: ["v1beta1"]
+    operations: ["CREATE", "UPDATE"]
+    resources: ["physicalhosts"]
     scope: "Namespaced"
   failurePolicy: Fail
   sideEffects: None

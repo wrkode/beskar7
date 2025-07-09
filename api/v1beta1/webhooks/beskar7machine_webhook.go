@@ -102,6 +102,22 @@ func (webhook *Beskar7MachineWebhook) validateMachine(machine *infrav1beta1.Besk
 		}
 	}
 
+	// Cross-field validation: ConfigURL is required for RemoteConfig mode
+	if machine.Spec.ProvisioningMode == "RemoteConfig" && machine.Spec.ConfigURL == "" {
+		allErrs = append(allErrs, field.Required(
+			field.NewPath("spec", "configURL"),
+			"configURL is required when provisioningMode is RemoteConfig",
+		))
+	}
+
+	// ConfigURL should not be set for PreBakedISO mode
+	if machine.Spec.ProvisioningMode == "PreBakedISO" && machine.Spec.ConfigURL != "" {
+		allErrs = append(allErrs, field.Forbidden(
+			field.NewPath("spec", "configURL"),
+			"configURL should not be set when provisioningMode is PreBakedISO",
+		))
+	}
+
 	if len(allErrs) > 0 {
 		return apierrors.NewInvalid(
 			machine.GroupVersionKind().GroupKind(),

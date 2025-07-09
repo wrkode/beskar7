@@ -24,7 +24,22 @@ Beskar7 consists of several custom controllers that work together:
 *   Kubernetes 1.19+
 *   Helm 3.2.0+
 *   Cluster API v1.4.0+
-*   cert-manager (optional, for webhook support)
+*   **cert-manager (required, for webhook support and TLS certificates)**
+
+### Install cert-manager (Required)
+
+Beskar7 requires cert-manager to be installed in your cluster to manage webhook TLS certificates. Install cert-manager and its CRDs before deploying Beskar7:
+
+```bash
+kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.12.0/cert-manager.crds.yaml
+kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.12.0/cert-manager.yaml
+```
+
+Wait for all cert-manager pods to be running:
+
+```bash
+kubectl get pods -n cert-manager
+```
 
 ## Getting Started
 
@@ -111,10 +126,12 @@ This provides more control if you need to customize the deployment.
 
 Each GitHub release will include a `beskar7-manifests-$(VERSION).yaml` file. This bundle contains all necessary CRDs, RBAC, and the Deployment for the controller manager, pre-configured with the correct image for that release.
 
+**Important:** You must install cert-manager and its CRDs before applying the Beskar7 manifest bundle. See the "Install cert-manager (Required)" section above.
+
 1.  **Download the release manifest** (e.g., `beskar7-manifests-v0.2.0.yaml`) from the [GitHub Releases page](https://github.com/wrkode/beskar7/releases).
 2.  **Apply the manifest to your cluster:**
     ```bash
-    kubectl apply -f beskar7-manifests-v0.1.0-dev.yaml
+    kubectl apply -f beskar7-manifests-v0.2.0.yaml
     ```
     This will create the `beskar7-system` namespace and all required Beskar7 components.
 
