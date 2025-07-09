@@ -236,6 +236,24 @@ func (r *PhysicalHostReconciler) reconcileNormal(ctx context.Context, logger log
 		return ctrl.Result{}, psErr // Requeue with backoff
 	}
 
+	// --- Address Detection ---
+	// Attempt to detect network addresses from the Redfish endpoint
+	// This is best effort - address detection failures should not prevent normal reconciliation
+	addresses, addrErr := r.detectNetworkAddresses(ctx, logger, rfClient)
+	if addrErr != nil {
+		logger.V(1).Info("Failed to detect network addresses (non-fatal)", "error", addrErr)
+		// Don't treat address detection failure as critical
+	} else if len(addresses) > 0 {
+		physicalHost.Status.Addresses = addresses
+		logger.Info("Updated network addresses", "addressCount", len(addresses))
+		for _, addr := range addresses {
+			logger.V(1).Info("Detected address", "type", addr.Type, "address", addr.Address)
+		}
+	} else {
+		logger.V(1).Info("No network addresses detected from Redfish")
+	}
+	// --- End Address Detection ---
+
 	// Determine desired state and update conditions
 	if physicalHost.Spec.ConsumerRef == nil {
 		// Host is being released or is available
@@ -481,4 +499,25 @@ func (r *PhysicalHostReconciler) SecretToPhysicalHosts(ctx context.Context, obj 
 		log.Info("Triggering reconciliation for PhysicalHosts due to secret change", "secret", secret.Name, "count", len(requests))
 	}
 	return requests
+}
+
+// detectNetworkAddresses attempts to retrieve network addresses from the Redfish endpoint.
+func (r *PhysicalHostReconciler) detectNetworkAddresses(ctx context.Context, logger logr.Logger, rfClient internalredfish.Client) ([]clusterv1.MachineAddress, error) {
+	logger.V(1).Info("Attempting to detect network addresses from Redfish")
+
+	// Get network addresses from the Redfish client
+	networkAddresses, err := rfClient.GetNetworkAddresses(ctx)
+	if err != nil {
+		logger.V(1).Info("Failed to retrieve network addresses from Redfish", "error", err)
+		return nil, err
+	}
+
+	// Convert to Cluster API MachineAddress format
+	machineAddresses := internalredfish.ConvertToMachineAddresses(networkAddresses)
+
+	logger.V(1).Info("Successfully converted network addresses",
+		"networkAddressCount", len(networkAddresses),
+		"machineAddressCount", len(machineAddresses))
+
+	return machineAddresses, nil
 }
