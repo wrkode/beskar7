@@ -33,8 +33,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	infrastructurev1beta1 "github.com/wrkode/beskar7/api/v1beta1"
+	internalmetrics "github.com/wrkode/beskar7/internal/metrics"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -62,50 +64,72 @@ type Beskar7ClusterReconciler struct {
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
 func (r *Beskar7ClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ ctrl.Result, reterr error) {
-	log := r.Log.WithValues("beskar7cluster", req.NamespacedName)
-	log.Info("Starting reconciliation")
+	startTime := time.Now()
+	logger := log.FromContext(ctx).WithValues("beskar7cluster", req.NamespacedName)
+	logger.Info("Starting reconciliation")
+
+	// Initialize outcome tracking for metrics
+	outcome := internalmetrics.ReconciliationOutcomeSuccess
+	var errorType internalmetrics.ErrorType
+
+	// Record reconciliation attempt and duration at the end
+	defer func() {
+		duration := time.Since(startTime)
+		internalmetrics.RecordReconciliation("beskar7cluster", req.Namespace, outcome, duration)
+
+		// Record errors if any occurred
+		if reterr != nil {
+			internalmetrics.RecordError("beskar7cluster", req.Namespace, errorType)
+		}
+	}()
 
 	// Fetch the Beskar7Cluster instance
 	b7cluster := &infrastructurev1beta1.Beskar7Cluster{}
-	err := r.Get(ctx, req.NamespacedName, b7cluster)
-	if err != nil {
+	if err := r.Get(ctx, req.NamespacedName, b7cluster); err != nil {
 		if apierrors.IsNotFound(err) {
-			log.Info("Beskar7Cluster resource not found. Ignoring since object must be deleted")
+			logger.Info("Beskar7Cluster resource not found. Ignoring since object must be deleted")
+			outcome = internalmetrics.ReconciliationOutcomeNotFound
 			return ctrl.Result{}, nil
 		}
-		log.Error(err, "Unable to fetch Beskar7Cluster")
+		logger.Error(err, "Unable to fetch Beskar7Cluster")
+		outcome = internalmetrics.ReconciliationOutcomeError
+		errorType = internalmetrics.ErrorTypeUnknown
 		return ctrl.Result{}, err
 	}
 
 	// Check if the Beskar7Cluster is paused
 	if isPaused(b7cluster) {
-		log.Info("Beskar7Cluster reconciliation is paused")
+		logger.Info("Beskar7Cluster reconciliation is paused")
 		return ctrl.Result{}, nil
 	}
 
 	// Set the ownerRefs on the Beskar7Cluster
 	cluster, err := util.GetOwnerCluster(ctx, r.Client, b7cluster.ObjectMeta)
 	if err != nil {
-		log.Error(err, "Failed to get owner Cluster")
+		logger.Error(err, "Failed to get owner Cluster")
+		outcome = internalmetrics.ReconciliationOutcomeError
+		errorType = internalmetrics.ErrorTypeUnknown
 		return ctrl.Result{}, err
 	}
 	if cluster == nil {
-		log.Info("Waiting for Cluster Controller to set OwnerRef on Beskar7Cluster")
+		logger.Info("Waiting for Cluster Controller to set OwnerRef on Beskar7Cluster")
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 	}
 
-	log = log.WithValues("cluster", cluster.Name)
+	logger = logger.WithValues("cluster", cluster.Name)
 
 	// Check if the owner cluster is paused
 	if isClusterPaused(cluster) {
-		log.Info("Beskar7Cluster reconciliation is paused because owner cluster is paused")
+		logger.Info("Beskar7Cluster reconciliation is paused because owner cluster is paused")
 		return ctrl.Result{}, nil
 	}
 
 	// Initialize patch helper.
 	patchHelper, err := patch.NewHelper(b7cluster, r.Client)
 	if err != nil {
-		log.Error(err, "Failed to init patch helper")
+		logger.Error(err, "Failed to init patch helper")
+		outcome = internalmetrics.ReconciliationOutcomeError
+		errorType = internalmetrics.ErrorTypeUnknown
 		return ctrl.Result{}, err
 	}
 
@@ -115,21 +139,21 @@ func (r *Beskar7ClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		conditions.SetSummary(b7cluster, conditions.WithConditions(infrastructurev1beta1.ControlPlaneEndpointReady))
 
 		if err := patchHelper.Patch(ctx, b7cluster); err != nil {
-			log.Error(err, "Failed to patch Beskar7Cluster")
+			logger.Error(err, "Failed to patch Beskar7Cluster")
 			if reterr == nil {
 				reterr = err
 			}
 		}
-		log.Info("Finished reconciliation")
+		logger.Info("Finished reconciliation")
 	}()
 
 	// Handle deletion reconciliation
 	if !b7cluster.ObjectMeta.DeletionTimestamp.IsZero() {
-		return r.reconcileDelete(ctx, log, b7cluster)
+		return r.reconcileDelete(ctx, logger, b7cluster)
 	}
 
 	// Handle non-deleted clusters
-	return r.reconcileNormal(ctx, log, cluster, b7cluster)
+	return r.reconcileNormal(ctx, logger, cluster, b7cluster)
 }
 
 func (r *Beskar7ClusterReconciler) reconcileNormal(ctx context.Context, logger logr.Logger, cluster *clusterv1.Cluster, b7cluster *infrastructurev1beta1.Beskar7Cluster) (ctrl.Result, error) {
@@ -173,68 +197,67 @@ func (r *Beskar7ClusterReconciler) reconcileFailureDomains(ctx context.Context, 
 	phList := &infrastructurev1beta1.PhysicalHostList{}
 	if err := r.List(ctx, phList, client.InNamespace(b7cluster.Namespace)); err != nil {
 		logger.Error(err, "Failed to list PhysicalHosts to determine failure domains")
-		return errors.Wrapf(err, "failed to list PhysicalHosts in namespace %s", b7cluster.Namespace)
+		internalmetrics.RecordFailureDomainDiscovery(b7cluster.Namespace, internalmetrics.ProvisioningOutcomeFailed)
+		return errors.Wrapf(err, "failed to list PhysicalHosts for failure domain discovery")
 	}
 
-	discoveredFailureDomains := make(clusterv1.FailureDomains)
-	zoneLabel := "topology.kubernetes.io/zone"
-
-	// Early return optimization: if no PhysicalHosts exist and no current domains, skip processing
-	if len(phList.Items) == 0 {
-		if len(currentFailureDomains) == 0 {
-			logger.V(1).Info("No PhysicalHosts found and no existing failure domains, skipping update")
-			return nil
-		}
-		// Clear failure domains since no PhysicalHosts exist
-		b7cluster.Status.FailureDomains = nil
-		logger.Info("Cleared failure domains - no PhysicalHosts found in namespace")
+	// Early return if no PhysicalHosts and no current domains
+	if len(phList.Items) == 0 && len(currentFailureDomains) == 0 {
+		logger.V(1).Info("No PhysicalHosts found and no existing failure domains, skipping update")
+		internalmetrics.RecordFailureDomainDiscovery(b7cluster.Namespace, internalmetrics.ProvisioningOutcomeSuccess)
 		return nil
 	}
 
-	// Discover failure domains from PhysicalHosts with zone labels
+	// More efficient failure domain discovery
+	newFailureDomains := make(clusterv1.FailureDomains)
+
+	// Look for zone labels on PhysicalHosts
+	zoneLabel := "topology.kubernetes.io/zone"
 	for _, ph := range phList.Items {
-		if ph.Labels != nil {
-			if zone, ok := ph.Labels[zoneLabel]; ok && zone != "" {
-				if _, domainExists := discoveredFailureDomains[zone]; !domainExists {
-					logger.V(1).Info("Discovered failure domain zone", "zone", zone)
-					discoveredFailureDomains[zone] = clusterv1.FailureDomainSpec{
-						ControlPlane: true,
-					}
-				}
+		if zone, exists := ph.Labels[zoneLabel]; exists && zone != "" {
+			newFailureDomains[zone] = clusterv1.FailureDomainSpec{
+				ControlPlane: true, // Assume control plane can be placed in any discovered zone
 			}
 		}
 	}
 
-	// Compare discovered domains with current domains to check if update is needed
-	if failureDomainsEqual(currentFailureDomains, discoveredFailureDomains) {
+	// Check if failure domains actually changed before updating
+	if failureDomainsEqual(currentFailureDomains, newFailureDomains) {
 		logger.V(1).Info("Failure domains unchanged, skipping status update",
-			"count", len(discoveredFailureDomains))
+			"domainCount", len(currentFailureDomains))
+		internalmetrics.RecordFailureDomainDiscovery(b7cluster.Namespace, internalmetrics.ProvisioningOutcomeSuccess)
 		return nil
 	}
 
-	// Update status with discovered failure domains
-	if len(discoveredFailureDomains) > 0 {
-		b7cluster.Status.FailureDomains = discoveredFailureDomains
-		logger.Info("Updated cluster status with discovered failure domains",
-			"count", len(discoveredFailureDomains))
-	} else {
-		b7cluster.Status.FailureDomains = nil
-		logger.Info("No PhysicalHosts with zone labels found in namespace")
-	}
+	// Update the cluster status with new failure domains
+	b7cluster.Status.FailureDomains = newFailureDomains
+
+	logger.Info("Updated failure domains",
+		"previousCount", len(currentFailureDomains),
+		"newCount", len(newFailureDomains),
+		"domains", getFailureDomainKeys(newFailureDomains))
+
+	// Record metrics
+	internalmetrics.RecordFailureDomains(b7cluster.Name, b7cluster.Namespace, float64(len(newFailureDomains)))
+	internalmetrics.RecordFailureDomainDiscovery(b7cluster.Namespace, internalmetrics.ProvisioningOutcomeSuccess)
 
 	return nil
 }
 
+// getFailureDomainKeys extracts the keys from FailureDomains for logging
+func getFailureDomainKeys(domains clusterv1.FailureDomains) []string {
+	if domains == nil {
+		return nil
+	}
+	keys := make([]string, 0, len(domains))
+	for key := range domains {
+		keys = append(keys, key)
+	}
+	return keys
+}
+
 // failureDomainsEqual compares two FailureDomains maps for equality
 func failureDomainsEqual(a, b clusterv1.FailureDomains) bool {
-	// Handle nil cases
-	if a == nil && b == nil {
-		return true
-	}
-	if a == nil || b == nil {
-		return len(a) == 0 && len(b) == 0
-	}
-
 	// Use reflect.DeepEqual for comprehensive comparison
 	return reflect.DeepEqual(a, b)
 }

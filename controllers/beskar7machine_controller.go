@@ -37,7 +37,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 
 	infrastructurev1beta1 "github.com/wrkode/beskar7/api/v1beta1"
-	"github.com/wrkode/beskar7/internal/redfish"
+	internalmetrics "github.com/wrkode/beskar7/internal/metrics"
+	internalredfish "github.com/wrkode/beskar7/internal/redfish"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -57,7 +58,7 @@ type Beskar7MachineReconciler struct {
 	Scheme *runtime.Scheme
 	// RedfishClientFactory allows overriding the Redfish client creation for testing.
 	// If nil, internalredfish.NewClient will be used by default in getRedfishClientForHost.
-	RedfishClientFactory redfish.RedfishClientFactory
+	RedfishClientFactory internalredfish.RedfishClientFactory
 	Log                  logr.Logger
 }
 
@@ -71,8 +72,24 @@ type Beskar7MachineReconciler struct {
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
 func (r *Beskar7MachineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ ctrl.Result, reterr error) {
+	startTime := time.Now()
 	log := r.Log.WithValues("beskar7machine", req.NamespacedName)
 	log.Info("Starting reconciliation")
+
+	// Initialize outcome tracking for metrics
+	outcome := internalmetrics.ReconciliationOutcomeSuccess
+	var errorType internalmetrics.ErrorType
+
+	// Record reconciliation attempt and duration at the end
+	defer func() {
+		duration := time.Since(startTime)
+		internalmetrics.RecordReconciliation("beskar7machine", req.Namespace, outcome, duration)
+
+		// Record errors if any occurred
+		if reterr != nil {
+			internalmetrics.RecordError("beskar7machine", req.Namespace, errorType)
+		}
+	}()
 
 	// Fetch the Beskar7Machine instance.
 	b7machine := &infrastructurev1beta1.Beskar7Machine{}
@@ -80,9 +97,12 @@ func (r *Beskar7MachineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			log.Info("Beskar7Machine resource not found. Ignoring since object must be deleted")
+			outcome = internalmetrics.ReconciliationOutcomeNotFound
 			return ctrl.Result{}, nil
 		}
 		log.Error(err, "Unable to fetch Beskar7Machine")
+		outcome = internalmetrics.ReconciliationOutcomeError
+		errorType = internalmetrics.ErrorTypeUnknown
 		return ctrl.Result{}, err
 	}
 
@@ -662,7 +682,7 @@ func (r *Beskar7MachineReconciler) MachineToBeskar7Machine(ctx context.Context, 
 
 // getRedfishClientForHost retrieves credentials and establishes a connection
 // to the Redfish endpoint specified in the PhysicalHost spec.
-func (r *Beskar7MachineReconciler) getRedfishClientForHost(ctx context.Context, logger logr.Logger, physicalHost *infrastructurev1beta1.PhysicalHost) (redfish.Client, error) {
+func (r *Beskar7MachineReconciler) getRedfishClientForHost(ctx context.Context, logger logr.Logger, physicalHost *infrastructurev1beta1.PhysicalHost) (internalredfish.Client, error) {
 	log := logger.WithValues("physicalhost", physicalHost.Name)
 
 	// --- Fetch Redfish Credentials ---
@@ -698,7 +718,7 @@ func (r *Beskar7MachineReconciler) getRedfishClientForHost(ctx context.Context, 
 	clientFactory := r.RedfishClientFactory
 	if clientFactory == nil {
 		log.Info("RedfishClientFactory not provided, using default internalredfish.NewClient")
-		clientFactory = redfish.NewClient
+		clientFactory = internalredfish.NewClient
 	}
 
 	insecure := physicalHost.Spec.RedfishConnection.InsecureSkipVerify != nil && *physicalHost.Spec.RedfishConnection.InsecureSkipVerify
