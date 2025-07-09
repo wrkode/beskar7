@@ -18,6 +18,7 @@ package controllers
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -29,6 +30,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -38,9 +40,9 @@ import (
 
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	conditions "sigs.k8s.io/cluster-api/util/conditions"
-	patch "sigs.k8s.io/cluster-api/util/patch"
 
 	internalmetrics "github.com/wrkode/beskar7/internal/metrics"
+	"github.com/wrkode/beskar7/internal/statemachine"
 )
 
 const (
@@ -51,9 +53,16 @@ const (
 // PhysicalHostReconciler reconciles a PhysicalHost object
 type PhysicalHostReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
-	// RedfishClientFactory allows overriding the Redfish client creation for testing.
+	Log                  logr.Logger
+	Scheme               *runtime.Scheme
+	Recorder             record.EventRecorder
 	RedfishClientFactory internalredfish.RedfishClientFactory
+	stateMachine         *statemachine.PhysicalHostStateMachine
+	stateTransitionGuard *statemachine.StateTransitionGuard
+	stateRecoveryManager *statemachine.StateRecoveryManager
+	reconcileTimeout     time.Duration
+	stuckStateTimeout    time.Duration
+	maxRetries           int
 }
 
 //+kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=physicalhosts,verbs=get;list;watch;create;update;patch;delete
@@ -70,132 +79,115 @@ type PhysicalHostReconciler struct {
 //
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.18.4/pkg/reconcile
-func (r *PhysicalHostReconciler) Reconcile(ctx context.Context, req ctrl.Request) (result ctrl.Result, reterr error) {
-	startTime := time.Now()
-	logger := log.FromContext(ctx).WithValues("physicalhost", req.NamespacedName)
-	logger.Info("Starting reconciliation")
+func (r *PhysicalHostReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	log := r.Log.WithValues("physicalhost", req.NamespacedName)
 
-	// Initialize outcome tracking for metrics
-	outcome := internalmetrics.ReconciliationOutcomeSuccess
-	var errorType internalmetrics.ErrorType
-
-	// Record reconciliation attempt and duration at the end
-	defer func() {
-		duration := time.Since(startTime)
-		internalmetrics.RecordReconciliation("physicalhost", req.Namespace, outcome, duration)
-
-		// Record errors if any occurred
-		if reterr != nil {
-			internalmetrics.RecordError("physicalhost", req.Namespace, errorType)
-		}
-
-		// Record requeue if needed
-		if result.Requeue || result.RequeueAfter > 0 {
-			reason := "general"
-			if result.RequeueAfter > 0 {
-				reason = "timed_requeue"
-			}
-			internalmetrics.RecordRequeue("physicalhost", req.Namespace, reason)
-		}
-	}()
+	// Set timeout for reconciliation
+	ctx, cancel := context.WithTimeout(ctx, r.reconcileTimeout)
+	defer cancel()
 
 	// Fetch the PhysicalHost instance
-	physicalHost := &infrastructurev1beta1.PhysicalHost{}
-	if err := r.Get(ctx, req.NamespacedName, physicalHost); err != nil {
-		if client.IgnoreNotFound(err) != nil {
-			logger.Error(err, "Unable to fetch PhysicalHost")
-			outcome = internalmetrics.ReconciliationOutcomeError
-			errorType = internalmetrics.ErrorTypeUnknown
-			reterr = err
-			return ctrl.Result{}, err
+	host := &infrastructurev1beta1.PhysicalHost{}
+	if err := r.Get(ctx, req.NamespacedName, host); err != nil {
+		if apierrors.IsNotFound(err) {
+			log.Info("PhysicalHost resource not found. Ignoring since object must be deleted")
+			return ctrl.Result{}, nil
 		}
-		// Object not found, likely deleted after reconcile request.
-		// Return and don't requeue
-		logger.Info("PhysicalHost resource not found. Ignoring since object must be deleted")
-		outcome = internalmetrics.ReconciliationOutcomeNotFound
-		return ctrl.Result{}, nil
-	}
-
-	// Check if the PhysicalHost is paused
-	if isPaused(physicalHost) {
-		logger.Info("PhysicalHost reconciliation is paused")
-		return ctrl.Result{}, nil
-	}
-
-	// Initialize patch helper
-	patchHelper, err := patch.NewHelper(physicalHost, r.Client)
-	if err != nil {
-		logger.Error(err, "Failed to initialize patch helper")
-		outcome = internalmetrics.ReconciliationOutcomeError
-		errorType = internalmetrics.ErrorTypeUnknown
-		reterr = err
+		log.Error(err, "Failed to get PhysicalHost")
 		return ctrl.Result{}, err
 	}
 
-	// Track previous state for metrics
-	previousState := physicalHost.Status.State
+	// Validate state consistency before proceeding
+	if err := r.stateMachine.ValidateStateConsistency(host); err != nil {
+		log.Error(err, "State consistency validation failed", "currentState", host.Status.State)
+		r.Recorder.Event(host, corev1.EventTypeWarning, "StateInconsistent",
+			fmt.Sprintf("State consistency validation failed: %v", err))
 
-	// Always attempt to patch the status on reconcile exit.
-	defer func() {
-		// Set the summary condition before patching.
-		conditions.SetSummary(physicalHost, conditions.WithConditions(
-			infrastructurev1beta1.RedfishConnectionReadyCondition,
-			// Add other conditions that should contribute to the overall Ready state, e.g.:
-			// infrastructurev1beta1.HostAvailableCondition, (if not consumed)
-			// infrastructurev1beta1.HostProvisionedCondition, (if consumed)
-		))
-
-		// Update state metrics if state changed
-		currentState := physicalHost.Status.State
-		if previousState != currentState {
-			// Decrement previous state count
-			if previousState != "" {
-				internalmetrics.RecordPhysicalHostState(string(previousState), physicalHost.Namespace, -1)
-			}
-			// Increment new state count
-			if currentState != "" {
-				internalmetrics.RecordPhysicalHostState(string(currentState), physicalHost.Namespace, 1)
-			}
+		// Try to recover from inconsistent state
+		if err := r.recoverFromInconsistentState(ctx, host); err != nil {
+			return ctrl.Result{RequeueAfter: 30 * time.Second}, err
 		}
-
-		if err := patchHelper.Patch(ctx, physicalHost); err != nil {
-			logger.Error(err, "Failed to patch PhysicalHost status")
-			outcome = internalmetrics.ReconciliationOutcomeError
-			errorType = internalmetrics.ErrorTypeUnknown
-			if reterr == nil {
-				reterr = err // Return the patching error if no other error occurred
-			}
-		}
-		logger.Info("Finished reconciliation")
-	}()
-
-	// Handle deletion reconciliation
-	if !physicalHost.ObjectMeta.DeletionTimestamp.IsZero() {
-		result, reterr = r.reconcileDelete(ctx, physicalHost)
-		if reterr != nil {
-			outcome = internalmetrics.ReconciliationOutcomeError
-			errorType = internalmetrics.ErrorTypeUnknown
-		}
-		return result, reterr
 	}
 
-	// Handle non-deletion reconciliation
-	result, reterr = r.reconcileNormal(ctx, logger, physicalHost)
-	if reterr != nil {
-		outcome = internalmetrics.ReconciliationOutcomeError
-		// Try to determine error type
-		if apierrors.IsTimeout(reterr) {
-			errorType = internalmetrics.ErrorTypeTimeout
-		} else if apierrors.IsNotFound(reterr) || apierrors.IsConflict(reterr) {
-			errorType = internalmetrics.ErrorTypeTransient
-		} else {
-			errorType = internalmetrics.ErrorTypeUnknown
+	// Check for stuck states and attempt recovery
+	if r.stateRecoveryManager.DetectStuckState(host, r.stuckStateTimeout) {
+		log.Info("Detected stuck state, attempting recovery",
+			"state", host.Status.State,
+			"timeout", r.stuckStateTimeout)
+
+		if err := r.stateRecoveryManager.RecoverStuckState(ctx, host, r.stateMachine); err != nil {
+			log.Error(err, "Failed to recover from stuck state")
+			r.Recorder.Event(host, corev1.EventTypeWarning, "StuckStateRecoveryFailed",
+				fmt.Sprintf("Failed to recover from stuck state: %v", err))
+			return ctrl.Result{RequeueAfter: 1 * time.Minute}, err
 		}
-	} else if result.Requeue || result.RequeueAfter > 0 {
-		outcome = internalmetrics.ReconciliationOutcomeRequeue
+
+		r.Recorder.Event(host, corev1.EventTypeNormal, "StuckStateRecovered",
+			"Successfully recovered from stuck state")
+		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 	}
 
-	return result, reterr
+	// Handle deletion
+	if !host.DeletionTimestamp.IsZero() {
+		return r.reconcileDelete(ctx, host)
+	}
+
+	// Ensure finalizer is present
+	if !controllerutil.ContainsFinalizer(host, PhysicalHostFinalizer) {
+		controllerutil.AddFinalizer(host, PhysicalHostFinalizer)
+		if err := r.Update(ctx, host); err != nil {
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{Requeue: true}, nil
+	}
+
+	// Main reconciliation logic with state machine validation
+	return r.reconcileNormal(ctx, log, host)
+}
+
+// safeStateTransition performs a validated state transition with retries
+func (r *PhysicalHostReconciler) safeStateTransition(
+	ctx context.Context,
+	host *infrastructurev1beta1.PhysicalHost,
+	newState string,
+	reason string,
+) error {
+	return r.stateTransitionGuard.SafeStateTransition(
+		ctx,
+		host,
+		r.stateMachine,
+		newState,
+		reason,
+		r.maxRetries,
+	)
+}
+
+// recoverFromInconsistentState attempts to recover from an inconsistent state
+func (r *PhysicalHostReconciler) recoverFromInconsistentState(
+	ctx context.Context,
+	host *infrastructurev1beta1.PhysicalHost,
+) error {
+	log := r.Log.WithValues("physicalhost", client.ObjectKeyFromObject(host))
+
+	// Determine the correct state based on current spec
+	var targetState string
+
+	if host.Spec.ConsumerRef != nil && host.Spec.BootISOSource != nil {
+		// Host has both consumer and boot source - should be provisioning or provisioned
+		targetState = infrastructurev1beta1.StateProvisioning
+	} else if host.Spec.ConsumerRef != nil {
+		// Host has consumer but no boot source - should be claimed
+		targetState = infrastructurev1beta1.StateClaimed
+	} else {
+		// Host has no consumer - should be available
+		targetState = infrastructurev1beta1.StateAvailable
+	}
+
+	log.Info("Attempting to recover from inconsistent state",
+		"currentState", host.Status.State,
+		"targetState", targetState)
+
+	return r.safeStateTransition(ctx, host, targetState, "RecoveringFromInconsistentState")
 }
 
 // reconcileNormal handles the logic when the PhysicalHost is not being deleted.

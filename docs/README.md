@@ -21,6 +21,7 @@ Welcome to the Beskar7 documentation! This directory contains comprehensive docu
 
 - [**Deployment Best Practices**](deployment-best-practices.md) - Production deployment guidelines
 - [**Advanced Usage**](advanced-usage.md) - Advanced configuration and usage scenarios
+- [**🚀 NEW: State Management**](state-management.md) - State machine operations and recovery
 - [**Troubleshooting**](troubleshooting.md) - Common issues and solutions
 
 ## Hardware and Compatibility
@@ -42,8 +43,9 @@ Welcome to the Beskar7 documentation! This directory contains comprehensive docu
 
 ### For Operators
 1. Review [Deployment Best Practices](deployment-best-practices.md) for production deployments
-2. Set up monitoring using [Metrics](metrics.md) documentation
-3. Familiarize yourself with [Troubleshooting](troubleshooting.md) procedures
+2. **NEW:** Understand [State Management](state-management.md) for operational procedures
+3. Set up monitoring using [Metrics](metrics.md) documentation
+4. Familiarize yourself with [Troubleshooting](troubleshooting.md) procedures
 
 ### For Developers
 1. Understand the [Architecture](architecture.md) and component interactions
@@ -106,6 +108,7 @@ For information about contributing to Beskar7, see the main repository documenta
 | Advanced Usage | ✅ Complete | Current |
 | Hardware Compatibility | ✅ Complete | Current |
 | Troubleshooting | ✅ Complete | Current |
+| **🚀 State Management** | **✅ NEW** | **Current** |
 | Metrics | ✅ Complete | Current |
 
 All documentation is current and comprehensive as of the latest release. 
