@@ -4,42 +4,12 @@ kind: Kustomization
 namespace: beskar7-system
 
 resources:
-- ../../crd
-- ../../rbac
-- ../../manager
-- ../../webhook
-- ../../certmanager
+- ../../default
 
-patches:
-- target:
-    group: apps
-    version: v1
-    kind: Deployment
-    name: controller-manager
-  patch: |-
-    - op: replace
-      path: /spec/template/spec/containers/0/resources
-      value:
-        limits:
-          cpu: 500m
-          memory: 512Mi
-          ephemeral-storage: 1Gi
-        requests:
-          cpu: 100m
-          memory: 128Mi
-          ephemeral-storage: 100Mi
-    - op: replace
-      path: /spec/replicas
-      value: 1
+patchesStrategicMerge:
+- manager_patch.yaml
 
-labels:
-- includeSelectors: true
-  pairs:
-    app.kubernetes.io/name: beskar7
-    app.kubernetes.io/version: v0.2.6
-    deployment-size: small
+namePrefix: small-
 
-images:
-- name: controller
-  newName: ghcr.io/wrkode/beskar7/beskar7
-  newTag: v0.2.6 
+commonLabels:
+  deployment-size: small 

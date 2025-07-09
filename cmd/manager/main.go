@@ -20,6 +20,7 @@ import (
 	"context"
 	"flag"
 	"os"
+	"time"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
@@ -60,18 +61,33 @@ func init() {
 
 //+kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterroles;clusterrolebindings,verbs=get;list;watch
 //+kubebuilder:rbac:groups="",resources=events,verbs=create;patch
+//+kubebuilder:rbac:groups=coordination.k8s.io,resources=leases,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:namespace=beskar7-system,groups=rbac.authorization.k8s.io,resources=roles;rolebindings,verbs=create;delete;get;list;patch;update;watch
+//+kubebuilder:rbac:namespace=beskar7-system,groups=coordination.k8s.io,resources=leases,verbs=get;list;watch;create;update;patch;delete
 
 func main() {
 	var metricsAddr string
 	var enableLeaderElection bool
 	var probeAddr string
 	var enableSecurityMonitoring bool
+	var leaderElectionLeaseDuration time.Duration
+	var leaderElectionRenewDeadline time.Duration
+	var leaderElectionRetryPeriod time.Duration
+	var leaderElectionReleaseOnCancel bool
+
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
-	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
+	flag.BoolVar(&enableLeaderElection, "leader-elect", true,
 		"Enable leader election for controller manager. "+
 			"Enabling this will ensure there is only one active controller manager.")
+	flag.DurationVar(&leaderElectionLeaseDuration, "leader-elect-lease-duration", 15*time.Second,
+		"The duration that non-leader candidates will wait to force acquire leadership.")
+	flag.DurationVar(&leaderElectionRenewDeadline, "leader-elect-renew-deadline", 10*time.Second,
+		"The interval between attempts by the acting master to renew a leadership slot before it stops leading.")
+	flag.DurationVar(&leaderElectionRetryPeriod, "leader-elect-retry-period", 2*time.Second,
+		"The duration the clients should wait between attempting acquisition and renewal of a leadership.")
+	flag.BoolVar(&leaderElectionReleaseOnCancel, "leader-elect-release-on-cancel", true,
+		"If the leader should step down voluntarily when the Manager ends.")
 	flag.BoolVar(&enableSecurityMonitoring, "enable-security-monitoring", true,
 		"Enable security monitoring for TLS, RBAC, and credential validation.")
 	opts := zap.Options{
@@ -92,18 +108,14 @@ func main() {
 		WebhookServer: webhook.NewServer(webhook.Options{
 			Port: 9443,
 		}),
-		HealthProbeBindAddress: probeAddr,
-		LeaderElection:         enableLeaderElection,
-		LeaderElectionID:       "7be7e04e.cluster.x-k8s.io",
-		// LeaderElectionReleaseOnCancel defines if the leader should step down voluntarily
-		// when the Manager ends. This requires the binary to immediately end when the
-		// Manager is stopped, otherwise, this setting is unsafe. Setting this significantly
-		// speeds up voluntary leader transitions as the new leader don't have to wait
-		// LeaseDuration time first.
-		//
-		// In the future, controller-runtime will detect on its own if it is safe to enable
-		// this option, meaning this flag has a chance to be removed without notice.
-		// LeaderElectionReleaseOnCancel: true,
+		HealthProbeBindAddress:        probeAddr,
+		LeaderElection:                enableLeaderElection,
+		LeaderElectionID:              "7be7e04e.cluster.x-k8s.io",
+		LeaderElectionNamespace:       "beskar7-system",
+		LeaseDuration:                 &leaderElectionLeaseDuration,
+		RenewDeadline:                 &leaderElectionRenewDeadline,
+		RetryPeriod:                   &leaderElectionRetryPeriod,
+		LeaderElectionReleaseOnCancel: leaderElectionReleaseOnCancel,
 	})
 	if err != nil {
 		setupLog.Error(err, "unable to start manager")
