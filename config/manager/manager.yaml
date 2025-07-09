@@ -101,12 +101,12 @@ spec:
           failureThreshold: 3
         resources:
           limits:
-            cpu: 500m
-            memory: 512Mi
-            ephemeral-storage: 1Gi
+            cpu: 1000m
+            memory: 1Gi
+            ephemeral-storage: 2Gi
           requests:
-            cpu: 100m
-            memory: 128Mi
+            cpu: 200m
+            memory: 256Mi
             ephemeral-storage: 100Mi
       serviceAccountName: controller-manager
       terminationGracePeriodSeconds: 10

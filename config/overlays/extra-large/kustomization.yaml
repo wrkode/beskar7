@@ -1,0 +1,52 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: beskar7-system
+
+resources:
+- ../../crd
+- ../../rbac
+- ../../manager
+- ../../webhook
+- ../../certmanager
+- pdb.yaml
+
+patches:
+- target:
+    group: apps
+    version: v1
+    kind: Deployment
+    name: controller-manager
+  patch: |-
+    - op: replace
+      path: /spec/template/spec/containers/0/resources
+      value:
+        limits:
+          cpu: 4000m
+          memory: 4Gi
+          ephemeral-storage: 8Gi
+        requests:
+          cpu: 1000m
+          memory: 1Gi
+          ephemeral-storage: 500Mi
+    - op: replace
+      path: /spec/replicas
+      value: 3
+    - op: add
+      path: /spec/template/spec/containers/0/args/-
+      value: "--max-concurrent-reconciles=15"
+    - op: add
+      path: /spec/template/spec/containers/0/args/-
+      value: "--reconciliation-interval=15s"
+
+labels:
+- includeSelectors: true
+  pairs:
+    app.kubernetes.io/name: beskar7
+    app.kubernetes.io/version: v0.2.6
+    deployment-size: extra-large
+
+images:
+- name: controller
+  newName: ghcr.io/wrkode/beskar7/beskar7
+  newTag: v0.2.6 
