@@ -18,6 +18,7 @@ package controllers
 
 import (
 	"context"
+	"reflect"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -165,21 +166,38 @@ func (r *Beskar7ClusterReconciler) reconcileNormal(ctx context.Context, logger l
 
 func (r *Beskar7ClusterReconciler) reconcileFailureDomains(ctx context.Context, logger logr.Logger, b7cluster *infrastructurev1beta1.Beskar7Cluster) error {
 	logger.Info("Reconciling failure domains")
+
+	// Get current failure domains for comparison
+	currentFailureDomains := b7cluster.Status.FailureDomains
+
 	phList := &infrastructurev1beta1.PhysicalHostList{}
 	if err := r.List(ctx, phList, client.InNamespace(b7cluster.Namespace)); err != nil {
 		logger.Error(err, "Failed to list PhysicalHosts to determine failure domains")
 		return errors.Wrapf(err, "failed to list PhysicalHosts in namespace %s", b7cluster.Namespace)
 	}
 
-	failureDomains := make(clusterv1.FailureDomains)
+	discoveredFailureDomains := make(clusterv1.FailureDomains)
 	zoneLabel := "topology.kubernetes.io/zone"
 
+	// Early return optimization: if no PhysicalHosts exist and no current domains, skip processing
+	if len(phList.Items) == 0 {
+		if len(currentFailureDomains) == 0 {
+			logger.V(1).Info("No PhysicalHosts found and no existing failure domains, skipping update")
+			return nil
+		}
+		// Clear failure domains since no PhysicalHosts exist
+		b7cluster.Status.FailureDomains = nil
+		logger.Info("Cleared failure domains - no PhysicalHosts found in namespace")
+		return nil
+	}
+
+	// Discover failure domains from PhysicalHosts with zone labels
 	for _, ph := range phList.Items {
 		if ph.Labels != nil {
 			if zone, ok := ph.Labels[zoneLabel]; ok && zone != "" {
-				if _, domainExists := failureDomains[zone]; !domainExists {
+				if _, domainExists := discoveredFailureDomains[zone]; !domainExists {
 					logger.V(1).Info("Discovered failure domain zone", "zone", zone)
-					failureDomains[zone] = clusterv1.FailureDomainSpec{
+					discoveredFailureDomains[zone] = clusterv1.FailureDomainSpec{
 						ControlPlane: true,
 					}
 				}
@@ -187,15 +205,38 @@ func (r *Beskar7ClusterReconciler) reconcileFailureDomains(ctx context.Context, 
 		}
 	}
 
-	if len(failureDomains) > 0 {
-		b7cluster.Status.FailureDomains = failureDomains
-		logger.Info("Updated cluster status with discovered failure domains", "count", len(failureDomains))
+	// Compare discovered domains with current domains to check if update is needed
+	if failureDomainsEqual(currentFailureDomains, discoveredFailureDomains) {
+		logger.V(1).Info("Failure domains unchanged, skipping status update",
+			"count", len(discoveredFailureDomains))
+		return nil
+	}
+
+	// Update status with discovered failure domains
+	if len(discoveredFailureDomains) > 0 {
+		b7cluster.Status.FailureDomains = discoveredFailureDomains
+		logger.Info("Updated cluster status with discovered failure domains",
+			"count", len(discoveredFailureDomains))
 	} else {
 		b7cluster.Status.FailureDomains = nil
 		logger.Info("No PhysicalHosts with zone labels found in namespace")
 	}
 
 	return nil
+}
+
+// failureDomainsEqual compares two FailureDomains maps for equality
+func failureDomainsEqual(a, b clusterv1.FailureDomains) bool {
+	// Handle nil cases
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return len(a) == 0 && len(b) == 0
+	}
+
+	// Use reflect.DeepEqual for comprehensive comparison
+	return reflect.DeepEqual(a, b)
 }
 
 func (r *Beskar7ClusterReconciler) reconcileControlPlaneEndpoint(ctx context.Context, logger logr.Logger, cluster *clusterv1.Cluster, b7cluster *infrastructurev1beta1.Beskar7Cluster) error {
