@@ -7,13 +7,15 @@ namespace: beskar7-system
 # namePrefix: my-deployment-
 
 # Labels to add to all resources and selectors.
-#commonLabels:
-#  someName: someValue
+commonLabels:
+  app.kubernetes.io/name: beskar7
+  app.kubernetes.io/version: v0.2.6
 
 bases:
 - ../crd
 - ../rbac
 - ../manager
+- ../security
 # [WEBHOOK] To enable webhook, uncomment all the sections with [WEBHOOK] prefix including the one in
 # crd/kustomization.yaml
 - ../webhook
@@ -31,8 +33,12 @@ patchesStrategicMerge:
 # through a ComponentConfig type
 #- manager_config_patch.yaml
 
-# TODO(user): Add transformations like Annotations, Labels, ConfigMapReplacements
+resources:
+# Security policies and configurations
+- ../security/security-policy.yaml
+- ../security/network-policy.yaml
 
+# TODO(user): Add transformations like Annotations, Labels, ConfigMapReplacements
 
 # Images for the Beskar7 manager. The image name `controller` must match
 # the name used in config/manager/manager.yaml.

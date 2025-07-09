@@ -1,0 +1,240 @@
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: beskar7-manager-network-policy
+  namespace: beskar7-system
+  labels:
+    app.kubernetes.io/name: beskar7
+    app.kubernetes.io/component: network-policy
+spec:
+  podSelector:
+    matchLabels:
+      control-plane: controller-manager
+  policyTypes:
+  - Ingress
+  - Egress
+  
+  # Ingress rules - what can connect TO the manager
+  ingress:
+  # Allow webhook traffic from Kubernetes API server
+  - from:
+    - namespaceSelector: {}
+      podSelector:
+        matchLabels:
+          component: kube-apiserver
+    ports:
+    - protocol: TCP
+      port: 9443
+  
+  # Allow metrics scraping from monitoring systems
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: monitoring
+    ports:
+    - protocol: TCP
+      port: 8080
+  
+  # Allow health checks from ingress controllers/load balancers
+  - from: []
+    ports:
+    - protocol: TCP
+      port: 8081
+  
+  # Egress rules - what the manager can connect TO
+  egress:
+  # Allow DNS resolution
+  - to: []
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53
+  
+  # Allow HTTPS to Kubernetes API server
+  - to:
+    - namespaceSelector: {}
+      podSelector:
+        matchLabels:
+          component: kube-apiserver
+    ports:
+    - protocol: TCP
+      port: 443
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: kube-system
+    ports:
+    - protocol: TCP
+      port: 443
+  
+  # Allow HTTPS/HTTP to BMC endpoints (Redfish)
+  # Note: This allows egress to any external HTTPS endpoint
+  # In production, consider restricting this to specific BMC networks
+  - to: []
+    ports:
+    - protocol: TCP
+      port: 443
+    - protocol: TCP
+      port: 8443
+  
+  # Allow LDAP/AD authentication if needed
+  - to: []
+    ports:
+    - protocol: TCP
+      port: 389
+    - protocol: TCP
+      port: 636
+    - protocol: TCP
+      port: 3268
+    - protocol: TCP
+      port: 3269
+
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: beskar7-deny-all-default
+  namespace: beskar7-system
+  labels:
+    app.kubernetes.io/name: beskar7
+    app.kubernetes.io/component: network-policy
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  - Egress
+  # This creates a default deny-all policy
+  # Other policies will whitelist specific traffic
+
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: beskar7-allow-namespace-communication
+  namespace: beskar7-system
+  labels:
+    app.kubernetes.io/name: beskar7
+    app.kubernetes.io/component: network-policy
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  - Egress
+  
+  # Allow communication within the namespace
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: beskar7-system
+  
+  egress:
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: beskar7-system
+
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: beskar7-allow-monitoring
+  namespace: beskar7-system
+  labels:
+    app.kubernetes.io/name: beskar7
+    app.kubernetes.io/component: network-policy
+spec:
+  podSelector:
+    matchLabels:
+      control-plane: controller-manager
+  policyTypes:
+  - Ingress
+  
+  # Allow monitoring systems to scrape metrics
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: monitoring
+    - namespaceSelector:
+        matchLabels:
+          name: prometheus
+    - namespaceSelector:
+        matchLabels:
+          name: observability
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: prometheus
+    - podSelector:
+        matchLabels:
+          app: prometheus
+    ports:
+    - protocol: TCP
+      port: 8080
+
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: beskar7-security-monitoring
+  namespace: beskar7-system
+  labels:
+    app.kubernetes.io/name: beskar7
+    app.kubernetes.io/component: network-policy
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: security-monitor
+  policyTypes:
+  - Ingress
+  - Egress
+  
+  # Security monitor ingress
+  ingress:
+  # Allow API server to send events
+  - from:
+    - namespaceSelector: {}
+      podSelector:
+        matchLabels:
+          component: kube-apiserver
+  
+  # Security monitor egress
+  egress:
+  # DNS resolution
+  - to: []
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53
+  
+  # Kubernetes API
+  - to:
+    - namespaceSelector: {}
+      podSelector:
+        matchLabels:
+          component: kube-apiserver
+    ports:
+    - protocol: TCP
+      port: 443
+  
+  # TLS certificate validation (external endpoints)
+  - to: []
+    ports:
+    - protocol: TCP
+      port: 443
+    - protocol: TCP
+      port: 8443
+  
+  # Alert manager/notification systems
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: monitoring
+    ports:
+    - protocol: TCP
+      port: 9093
+    - protocol: TCP
+      port: 9094 

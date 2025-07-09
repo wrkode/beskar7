@@ -5,101 +5,131 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/validation/field"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
 	infrav1beta1 "github.com/wrkode/beskar7/api/v1beta1"
 )
 
-// PhysicalHostWebhook implements a validating and defaulting webhook for PhysicalHost.
-type PhysicalHostWebhook struct{}
+// log is for logging in this package.
+var physicalHostWebhookLog = ctrl.Log.WithName("physicalhost-webhook")
 
-// SetupWebhookWithManager sets up the webhook with the manager.
+// PhysicalHostWebhook implements webhook.Validator and webhook.Defaulter
+type PhysicalHostWebhook struct {
+	Client client.Client
+}
+
 func (webhook *PhysicalHostWebhook) SetupWebhookWithManager(mgr ctrl.Manager) error {
+	webhook.Client = mgr.GetClient()
 	return ctrl.NewWebhookManagedBy(mgr).
 		For(&infrav1beta1.PhysicalHost{}).
-		WithValidator(webhook).
-		WithDefaulter(webhook).
 		Complete()
 }
 
-// +kubebuilder:webhook:verbs=create;update,path=/validate-infrastructure-cluster-x-k8s-io-v1beta1-physicalhost,mutating=false,failurePolicy=fail,matchPolicy=Equivalent,groups=infrastructure.cluster.x-k8s.io,resources=physicalhosts,versions=v1beta1,name=validation.physicalhost.infrastructure.cluster.x-k8s.io,sideEffects=None,admissionReviewVersions=v1
-// +kubebuilder:webhook:verbs=create;update,path=/mutate-infrastructure-cluster-x-k8s-io-v1beta1-physicalhost,mutating=true,failurePolicy=fail,matchPolicy=Equivalent,groups=infrastructure.cluster.x-k8s.io,resources=physicalhosts,versions=v1beta1,name=defaulting.physicalhost.infrastructure.cluster.x-k8s.io,sideEffects=None,admissionReviewVersions=v1
+//+kubebuilder:webhook:path=/mutate-infrastructure-cluster-x-k8s-io-v1beta1-physicalhost,mutating=true,failurePolicy=fail,sideEffects=None,groups=infrastructure.cluster.x-k8s.io,resources=physicalhosts,verbs=create;update,versions=v1beta1,name=default.physicalhost.infrastructure.cluster.x-k8s.io,admissionReviewVersions=v1
 
-var _ webhook.CustomValidator = &PhysicalHostWebhook{}
 var _ webhook.CustomDefaulter = &PhysicalHostWebhook{}
 
-// ValidateCreate implements webhook.CustomValidator so a webhook will be registered for the type.
+// Default implements webhook.CustomDefaulter
+func (webhook *PhysicalHostWebhook) Default(ctx context.Context, obj runtime.Object) error {
+	host, ok := obj.(*infrav1beta1.PhysicalHost)
+	if !ok {
+		return fmt.Errorf("expected PhysicalHost, got %T", obj)
+	}
+
+	physicalHostWebhookLog.Info("Applying defaults to PhysicalHost", "name", host.Name, "namespace", host.Namespace)
+
+	return webhook.defaultPhysicalHost(host)
+}
+
+//+kubebuilder:webhook:path=/validate-infrastructure-cluster-x-k8s-io-v1beta1-physicalhost,mutating=false,failurePolicy=fail,sideEffects=None,groups=infrastructure.cluster.x-k8s.io,resources=physicalhosts,verbs=create;update,versions=v1beta1,name=validation.physicalhost.infrastructure.cluster.x-k8s.io,admissionReviewVersions=v1
+
+var _ webhook.CustomValidator = &PhysicalHostWebhook{}
+
+// ValidateCreate implements webhook.CustomValidator
 func (webhook *PhysicalHostWebhook) ValidateCreate(ctx context.Context, obj runtime.Object) (admission.Warnings, error) {
-	host := obj.(*infrav1beta1.PhysicalHost)
+	host, ok := obj.(*infrav1beta1.PhysicalHost)
+	if !ok {
+		return nil, fmt.Errorf("expected PhysicalHost, got %T", obj)
+	}
+
+	physicalHostWebhookLog.Info("Validating PhysicalHost creation", "name", host.Name, "namespace", host.Namespace)
+
 	warnings, err := webhook.validatePhysicalHost(host)
 	if err != nil {
 		return warnings, err
 	}
 
-	// Create-specific validations
-	createWarnings, createErr := webhook.validatePhysicalHostCreate(host)
-	warnings = append(warnings, createWarnings...)
-	if createErr != nil {
-		return warnings, createErr
+	// Additional security validation for creation
+	securityWarnings, secErr := webhook.validateSecurityRequirements(ctx, host)
+	warnings = append(warnings, securityWarnings...)
+	if secErr != nil {
+		return warnings, secErr
 	}
 
 	return warnings, nil
 }
 
-// ValidateUpdate implements webhook.CustomValidator so a webhook will be registered for the type.
+// ValidateUpdate implements webhook.CustomValidator
 func (webhook *PhysicalHostWebhook) ValidateUpdate(ctx context.Context, oldObj, newObj runtime.Object) (admission.Warnings, error) {
-	oldHost := oldObj.(*infrav1beta1.PhysicalHost)
-	newHost := newObj.(*infrav1beta1.PhysicalHost)
+	oldHost, ok := oldObj.(*infrav1beta1.PhysicalHost)
+	if !ok {
+		return nil, fmt.Errorf("expected PhysicalHost, got %T", oldObj)
+	}
+	newHost, ok := newObj.(*infrav1beta1.PhysicalHost)
+	if !ok {
+		return nil, fmt.Errorf("expected PhysicalHost, got %T", newObj)
+	}
+
+	physicalHostWebhookLog.Info("Validating PhysicalHost update", "name", newHost.Name, "namespace", newHost.Namespace)
 
 	warnings, err := webhook.validatePhysicalHost(newHost)
 	if err != nil {
 		return warnings, err
 	}
 
-	// Update-specific validations
+	// Additional validation for updates
 	updateWarnings, updateErr := webhook.validatePhysicalHostUpdate(oldHost, newHost)
 	warnings = append(warnings, updateWarnings...)
 	if updateErr != nil {
 		return warnings, updateErr
 	}
 
+	// Security validation for updates
+	securityWarnings, secErr := webhook.validateSecurityRequirements(ctx, newHost)
+	warnings = append(warnings, securityWarnings...)
+	if secErr != nil {
+		return warnings, secErr
+	}
+
 	return warnings, nil
 }
 
-// ValidateDelete implements webhook.CustomValidator so a webhook will be registered for the type.
+// ValidateDelete implements webhook.CustomValidator
 func (webhook *PhysicalHostWebhook) ValidateDelete(ctx context.Context, obj runtime.Object) (admission.Warnings, error) {
-	host := obj.(*infrav1beta1.PhysicalHost)
-	var warnings admission.Warnings
+	host, ok := obj.(*infrav1beta1.PhysicalHost)
+	if !ok {
+		return nil, fmt.Errorf("expected PhysicalHost, got %T", obj)
+	}
 
-	// Check if host is currently claimed/provisioning
+	physicalHostWebhookLog.Info("Validating PhysicalHost deletion", "name", host.Name, "namespace", host.Namespace)
+
+	// Prevent deletion if host is claimed by a machine
 	if host.Spec.ConsumerRef != nil {
-		warnings = append(warnings, fmt.Sprintf(
-			"PhysicalHost %s is currently claimed by %s/%s. Ensure proper cleanup before deletion.",
-			host.Name, host.Spec.ConsumerRef.Namespace, host.Spec.ConsumerRef.Name,
-		))
+		return admission.Warnings{
+			"PhysicalHost is claimed by a consumer. Ensure the consumer is properly cleaned up before deletion.",
+		}, nil
 	}
 
-	if host.Status.State == infrav1beta1.StateProvisioning {
-		warnings = append(warnings, fmt.Sprintf(
-			"PhysicalHost %s is currently provisioning. Deletion may leave the host in an inconsistent state.",
-			host.Name,
-		))
-	}
-
-	return warnings, nil
-}
-
-// Default implements webhook.CustomDefaulter so a webhook will be registered for the type.
-func (webhook *PhysicalHostWebhook) Default(ctx context.Context, obj runtime.Object) error {
-	host := obj.(*infrav1beta1.PhysicalHost)
-	return webhook.defaultPhysicalHost(host)
+	return nil, nil
 }
 
 func (webhook *PhysicalHostWebhook) validatePhysicalHost(host *infrav1beta1.PhysicalHost) (admission.Warnings, error) {
@@ -126,11 +156,19 @@ func (webhook *PhysicalHostWebhook) validatePhysicalHost(host *infrav1beta1.Phys
 		))
 	}
 
-	// Security warning for insecureSkipVerify
+	// Enhanced security validation for insecureSkipVerify
 	if host.Spec.RedfishConnection.InsecureSkipVerify != nil && *host.Spec.RedfishConnection.InsecureSkipVerify {
-		warnings = append(warnings,
-			"insecureSkipVerify is enabled. This is not recommended for production environments as it disables TLS certificate verification.",
-		)
+		// Check if this is a development environment
+		if !webhook.isDevEnvironment(host) {
+			allErrs = append(allErrs, field.Forbidden(
+				field.NewPath("spec", "redfishConnection", "insecureSkipVerify"),
+				"insecureSkipVerify=true is not allowed in production environments. Please configure proper TLS certificates.",
+			))
+		} else {
+			warnings = append(warnings,
+				"insecureSkipVerify is enabled. This is not recommended for production environments as it disables TLS certificate verification.",
+			)
+		}
 	}
 
 	// Validate ConsumerRef if present
@@ -166,22 +204,22 @@ func (webhook *PhysicalHostWebhook) validatePhysicalHost(host *infrav1beta1.Phys
 	return warnings, nil
 }
 
-func (webhook *PhysicalHostWebhook) validatePhysicalHostCreate(host *infrav1beta1.PhysicalHost) (admission.Warnings, error) {
-	var allErrs field.ErrorList
+// validateSecurityRequirements performs enhanced security validation
+func (webhook *PhysicalHostWebhook) validateSecurityRequirements(ctx context.Context, host *infrav1beta1.PhysicalHost) (admission.Warnings, error) {
 	var warnings admission.Warnings
+	var allErrs field.ErrorList
 
-	// On create, ConsumerRef should typically not be set (hosts start unclaimed)
-	if host.Spec.ConsumerRef != nil {
-		warnings = append(warnings,
-			"ConsumerRef is set on creation. Typically hosts should be created unclaimed and later claimed by machines.",
-		)
+	// Validate credential secret if it exists
+	if host.Spec.RedfishConnection.CredentialsSecretRef != "" {
+		secretWarnings, secretErrs := webhook.validateCredentialSecret(ctx, host)
+		warnings = append(warnings, secretWarnings...)
+		allErrs = append(allErrs, secretErrs...)
 	}
 
-	// On create, BootISOSource should typically not be set
-	if host.Spec.BootISOSource != nil {
-		warnings = append(warnings,
-			"BootISOSource is set on creation. This field is typically managed by the consuming machine.",
-		)
+	// Validate TLS security
+	if tlsWarnings, tlsErrs := webhook.validateTLSSecurity(host); len(tlsWarnings) > 0 || len(tlsErrs) > 0 {
+		warnings = append(warnings, tlsWarnings...)
+		allErrs = append(allErrs, tlsErrs...)
 	}
 
 	if len(allErrs) > 0 {
@@ -195,49 +233,202 @@ func (webhook *PhysicalHostWebhook) validatePhysicalHostCreate(host *infrav1beta
 	return warnings, nil
 }
 
-func (webhook *PhysicalHostWebhook) validatePhysicalHostUpdate(oldHost, newHost *infrav1beta1.PhysicalHost) (admission.Warnings, error) {
-	var allErrs field.ErrorList
+// validateCredentialSecret validates the referenced credential secret
+func (webhook *PhysicalHostWebhook) validateCredentialSecret(ctx context.Context, host *infrav1beta1.PhysicalHost) (admission.Warnings, field.ErrorList) {
 	var warnings admission.Warnings
+	var allErrs field.ErrorList
 
-	// Validate immutable fields
-	if oldHost.Spec.RedfishConnection.Address != newHost.Spec.RedfishConnection.Address {
-		allErrs = append(allErrs, field.Forbidden(
-			field.NewPath("spec", "redfishConnection", "address"),
-			"address is immutable after creation",
+	secretName := host.Spec.RedfishConnection.CredentialsSecretRef
+	secret := &corev1.Secret{}
+
+	err := webhook.Client.Get(ctx, client.ObjectKey{
+		Namespace: host.Namespace,
+		Name:      secretName,
+	}, secret)
+
+	if err != nil {
+		// Secret doesn't exist - this will be handled at runtime
+		warnings = append(warnings, fmt.Sprintf("Credential secret '%s' not found. Ensure it exists before the PhysicalHost becomes active.", secretName))
+		return warnings, allErrs
+	}
+
+	// Validate secret data structure
+	username, hasUsername := secret.Data["username"]
+	password, hasPassword := secret.Data["password"]
+
+	if !hasUsername || len(username) == 0 {
+		allErrs = append(allErrs, field.Required(
+			field.NewPath("spec", "redfishConnection", "credentialsSecretRef"),
+			fmt.Sprintf("secret '%s' must contain a non-empty 'username' field", secretName),
 		))
 	}
 
-	// Validate state-dependent changes
-	if newHost.Status.State == infrav1beta1.StateProvisioning {
-		// During provisioning, certain fields should not be changed
-		if oldHost.Spec.ConsumerRef != nil && newHost.Spec.ConsumerRef == nil {
+	if !hasPassword || len(password) == 0 {
+		allErrs = append(allErrs, field.Required(
+			field.NewPath("spec", "redfishConnection", "credentialsSecretRef"),
+			fmt.Sprintf("secret '%s' must contain a non-empty 'password' field", secretName),
+		))
+	}
+
+	// Security validation for credential quality
+	if hasPassword && len(password) > 0 {
+		if secWarnings, secErrs := webhook.validatePasswordSecurity(string(password)); len(secWarnings) > 0 || len(secErrs) > 0 {
+			warnings = append(warnings, secWarnings...)
+			// Don't add password validation errors to avoid exposing password details
+			if len(secErrs) > 0 {
+				warnings = append(warnings, "BMC password does not meet security requirements. Consider using a stronger password.")
+			}
+		}
+	}
+
+	// Check secret age and rotation
+	if secret.CreationTimestamp.Time.Before(time.Now().Add(-90 * 24 * time.Hour)) {
+		warnings = append(warnings, fmt.Sprintf("Credential secret '%s' is older than 90 days. Consider rotating credentials regularly.", secretName))
+	}
+
+	// Validate secret type and ownership
+	if secret.Type != corev1.SecretTypeOpaque {
+		warnings = append(warnings, fmt.Sprintf("Credential secret '%s' should be of type 'Opaque' for better security.", secretName))
+	}
+
+	return warnings, allErrs
+}
+
+// validatePasswordSecurity validates password strength
+func (webhook *PhysicalHostWebhook) validatePasswordSecurity(password string) ([]string, field.ErrorList) {
+	var warnings []string
+	var allErrs field.ErrorList
+
+	// Basic password security checks
+	if len(password) < 8 {
+		warnings = append(warnings, "BMC password is shorter than 8 characters.")
+	}
+
+	if len(password) < 12 {
+		warnings = append(warnings, "BMC password should be at least 12 characters for better security.")
+	}
+
+	// Check for common weak passwords (without exposing the actual password)
+	weakPasswords := []string{"password", "admin", "root", "123456", "default"}
+	for _, weak := range weakPasswords {
+		if strings.ToLower(password) == weak {
+			warnings = append(warnings, "BMC password appears to be a common weak password.")
+			break
+		}
+	}
+
+	return warnings, allErrs
+}
+
+// validateTLSSecurity validates TLS configuration
+func (webhook *PhysicalHostWebhook) validateTLSSecurity(host *infrav1beta1.PhysicalHost) ([]string, field.ErrorList) {
+	var warnings []string
+	var allErrs field.ErrorList
+
+	// Parse the URL to check scheme
+	parsedURL, err := url.Parse(host.Spec.RedfishConnection.Address)
+	if err != nil {
+		// URL validation is handled elsewhere
+		return warnings, allErrs
+	}
+
+	// Warn about HTTP usage
+	if parsedURL.Scheme == "http" {
+		if !webhook.isDevEnvironment(host) {
 			allErrs = append(allErrs, field.Forbidden(
-				field.NewPath("spec", "consumerRef"),
-				"cannot remove consumerRef while host is provisioning",
+				field.NewPath("spec", "redfishConnection", "address"),
+				"HTTP connections are not allowed in production environments. Please use HTTPS.",
+			))
+		} else {
+			warnings = append(warnings, "Using HTTP connection. This is not recommended for production as credentials will be transmitted in plain text.")
+		}
+	}
+
+	// Validate certificate configuration
+	if parsedURL.Scheme == "https" {
+		if host.Spec.RedfishConnection.InsecureSkipVerify == nil || !*host.Spec.RedfishConnection.InsecureSkipVerify {
+			warnings = append(warnings, "TLS certificate verification is enabled. Ensure your BMC has a valid certificate or configure a custom CA bundle.")
+		}
+	}
+
+	return warnings, allErrs
+}
+
+// isDevEnvironment checks if this is a development environment
+func (webhook *PhysicalHostWebhook) isDevEnvironment(host *infrav1beta1.PhysicalHost) bool {
+	// Check for development indicators
+	devIndicators := []string{
+		"dev", "development", "test", "testing", "staging",
+		"local", "localhost", "example.com", "demo",
+	}
+
+	// Check namespace
+	for _, indicator := range devIndicators {
+		if strings.Contains(strings.ToLower(host.Namespace), indicator) {
+			return true
+		}
+	}
+
+	// Check address
+	for _, indicator := range devIndicators {
+		if strings.Contains(strings.ToLower(host.Spec.RedfishConnection.Address), indicator) {
+			return true
+		}
+	}
+
+	// Check for development annotations
+	if host.Annotations != nil {
+		if env, exists := host.Annotations["beskar7.io/environment"]; exists {
+			for _, indicator := range devIndicators {
+				if strings.ToLower(env) == indicator {
+					return true
+				}
+			}
+		}
+	}
+
+	// Check for private IP ranges (common in dev environments)
+	if parsedURL, err := url.Parse(host.Spec.RedfishConnection.Address); err == nil {
+		hostname := parsedURL.Hostname()
+		if strings.HasPrefix(hostname, "192.168.") ||
+			strings.HasPrefix(hostname, "10.") ||
+			strings.HasPrefix(hostname, "172.16.") ||
+			hostname == "localhost" ||
+			hostname == "127.0.0.1" {
+			return true
+		}
+	}
+
+	return false
+}
+
+func (webhook *PhysicalHostWebhook) validatePhysicalHostUpdate(oldHost, newHost *infrav1beta1.PhysicalHost) (admission.Warnings, error) {
+	var warnings admission.Warnings
+	var allErrs field.ErrorList
+
+	// Prevent changes to critical fields when host is claimed
+	if oldHost.Spec.ConsumerRef != nil {
+		if oldHost.Spec.RedfishConnection.Address != newHost.Spec.RedfishConnection.Address {
+			allErrs = append(allErrs, field.Forbidden(
+				field.NewPath("spec", "redfishConnection", "address"),
+				"cannot change Redfish address while host is claimed",
 			))
 		}
 
-		if oldHost.Spec.ConsumerRef != nil && newHost.Spec.ConsumerRef != nil &&
-			(oldHost.Spec.ConsumerRef.Name != newHost.Spec.ConsumerRef.Name ||
-				oldHost.Spec.ConsumerRef.Namespace != newHost.Spec.ConsumerRef.Namespace) {
+		if oldHost.Spec.RedfishConnection.CredentialsSecretRef != newHost.Spec.RedfishConnection.CredentialsSecretRef {
 			allErrs = append(allErrs, field.Forbidden(
-				field.NewPath("spec", "consumerRef"),
-				"cannot change consumerRef while host is provisioning",
+				field.NewPath("spec", "redfishConnection", "credentialsSecretRef"),
+				"cannot change credentials while host is claimed",
 			))
 		}
 	}
 
-	// Validate ConsumerRef transitions
-	if oldHost.Spec.ConsumerRef == nil && newHost.Spec.ConsumerRef != nil {
-		// Host is being claimed
-		if newHost.Status.State != "" &&
-			newHost.Status.State != infrav1beta1.StateAvailable &&
-			newHost.Status.State != infrav1beta1.StateEnrolling {
-			warnings = append(warnings, fmt.Sprintf(
-				"Host is being claimed while in state %s. Ensure this is intentional.",
-				newHost.Status.State,
-			))
-		}
+	// Warn about security changes
+	oldInsecure := oldHost.Spec.RedfishConnection.InsecureSkipVerify != nil && *oldHost.Spec.RedfishConnection.InsecureSkipVerify
+	newInsecure := newHost.Spec.RedfishConnection.InsecureSkipVerify != nil && *newHost.Spec.RedfishConnection.InsecureSkipVerify
+
+	if !oldInsecure && newInsecure {
+		warnings = append(warnings, "Enabling insecureSkipVerify reduces security. Ensure this is intended.")
 	}
 
 	if len(allErrs) > 0 {
@@ -359,6 +550,16 @@ func (webhook *PhysicalHostWebhook) defaultPhysicalHost(host *infrav1beta1.Physi
 			!strings.HasPrefix(host.Spec.RedfishConnection.Address, "https://") {
 			host.Spec.RedfishConnection.Address = "https://" + host.Spec.RedfishConnection.Address
 		}
+	}
+
+	// Add security-related annotations if not present
+	if host.Annotations == nil {
+		host.Annotations = make(map[string]string)
+	}
+
+	// Add creation timestamp for security auditing
+	if _, exists := host.Annotations["beskar7.io/security-validated"]; !exists {
+		host.Annotations["beskar7.io/security-validated"] = time.Now().Format(time.RFC3339)
 	}
 
 	return nil
