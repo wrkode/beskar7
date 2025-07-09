@@ -36,6 +36,10 @@ type MockClient struct {
 	SetBootParametersCalled   bool
 	StoredBootParams          []string // To store the parameters for assertion
 	GetNetworkAddressesCalled bool
+
+	// New fields for SetBootParametersWithAnnotations
+	SetBootParametersWithAnnotationsFunc   func(ctx context.Context, params []string, annotations map[string]string) error
+	SetBootParametersWithAnnotationsCalled bool
 }
 
 // NewMockClient creates a new mock client with default values.
@@ -155,6 +159,20 @@ func (m *MockClient) SetBootParameters(ctx context.Context, params []string) err
 	}
 	if m.SetBootParametersFunc != nil {
 		return m.SetBootParametersFunc(ctx, params)
+	}
+	return nil
+}
+
+// SetBootParametersWithAnnotations mock implementation.
+func (m *MockClient) SetBootParametersWithAnnotations(ctx context.Context, params []string, annotations map[string]string) error {
+	m.mu.Lock()
+	m.SetBootParametersWithAnnotationsCalled = true
+	m.mu.Unlock()
+	if err := m.failIfNeeded("SetBootParametersWithAnnotations"); err != nil {
+		return err
+	}
+	if m.SetBootParametersWithAnnotationsFunc != nil {
+		return m.SetBootParametersWithAnnotationsFunc(ctx, params, annotations)
 	}
 	return nil
 }

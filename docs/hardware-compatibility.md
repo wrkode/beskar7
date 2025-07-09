@@ -21,8 +21,8 @@ Beskar7 works with any server that implements the Redfish API standard. However,
 
 | Model/Series | BMC Version | Redfish Version | RemoteConfig | PreBakedISO | Virtual Media | Power Management | Notes |
 |--------------|-------------|-----------------|--------------|-------------|---------------|------------------|-------|
-| PowerEdge R750 | iDRAC9 6.x | 1.11+ | ⚠️ | ✅ | ✅ | ✅ | Use `KernelArgs` BIOS attribute for RemoteConfig |
-| PowerEdge R650 | iDRAC9 5.x+ | 1.9+ | ⚠️ | ✅ | ✅ | ✅ | Limited UefiTargetBootSourceOverride support |
+| PowerEdge R750 | iDRAC9 6.x | 1.11+ | ✅ | ✅ | ✅ | ✅ | **Auto-detects** and uses `KernelArgs` BIOS attribute |
+| PowerEdge R650 | iDRAC9 5.x+ | 1.9+ | ✅ | ✅ | ✅ | ✅ | **Auto-detects** Dell systems and uses BIOS attributes |
 | PowerEdge R350 | iDRAC9 4.x+ | 1.8+ | ❓ | ✅ | ✅ | ✅ | Not extensively tested |
 
 **Dell-Specific Notes:**
@@ -87,14 +87,21 @@ Beskar7 works with any server that implements the Redfish API standard. However,
 - Ability to pass kernel parameters to the bootloader
 
 **Known Working Implementations:**
-- HPE iLO 5 with `UefiTargetBootSourceOverride`
-- Lenovo XCC with boot parameter injection
-- Dell iDRAC with BIOS attribute workarounds
+- ✅ **HPE iLO 5** - Automatic detection and `UefiTargetBootSourceOverride` usage
+- ✅ **Dell iDRAC** - Automatic detection and BIOS attribute (`KernelArgs`) usage  
+- ✅ **Lenovo XCC** - Automatic detection with boot parameter injection
+- ✅ **Supermicro BMC** - Automatic detection with fallback mechanisms
 
-**Known Issues:**
-- Some Supermicro BMCs don't support kernel parameter injection
-- Older firmware versions may have incomplete implementations
-- BIOS vs UEFI boot mode affects parameter passing mechanisms
+**Vendor-Specific Features:**
+- **Automatic vendor detection** based on system manufacturer
+- **Intelligent fallback mechanisms** when primary methods fail
+- **Annotation-based overrides** for custom configurations
+- **BIOS attribute management** for Dell and other vendors requiring it
+
+**Resolved Issues:**
+- ✅ Dell kernel parameter injection now works automatically via BIOS attributes
+- ✅ Vendor-specific quirks handled transparently 
+- ✅ Manual configuration reduced through automatic detection
 
 ### Virtual Media Support
 
@@ -155,8 +162,8 @@ All tested vendors support basic power operations:
 
 **Common Issues:**
 1. **RemoteConfig fails with kernel parameter errors**
-   - **Solution:** Use BIOS attribute setting instead of `UefiTargetBootSourceOverride`
-   - **Workaround:** Implement vendor-specific annotation support (future feature)
+   - **Solution:** ✅ **AUTOMATICALLY HANDLED** - Beskar7 now automatically detects Dell systems and uses BIOS attribute setting
+   - **Manual Override:** Use annotation `beskar7.infrastructure.cluster.x-k8s.io/bios-kernel-arg-attribute: "KernelArgs"` if needed
 
 2. **Virtual media mounting timeouts**
    - **Solution:** Ensure ISO URLs are accessible from BMC network
@@ -266,14 +273,85 @@ When reporting hardware compatibility issues, please include:
 
 Submit issues to: https://github.com/wrkode/beskar7/issues
 
-## Future Vendor Support
+## Advanced Configuration: Vendor-Specific Annotations
 
-Planned vendor-specific enhancements:
+Beskar7 now supports annotation-based overrides for vendor-specific behavior. These annotations allow you to customize how boot parameters are set for specific hardware.
 
-- **Dell:** BIOS attribute configuration automation
-- **HPE:** Advanced iLO integration features
-- **Supermicro:** Custom Redfish endpoint handling
-- **Lenovo:** XCC-specific optimizations
+### Available Annotations
+
+| Annotation | Description | Example Value |
+|------------|-------------|---------------|
+| `beskar7.infrastructure.cluster.x-k8s.io/boot-parameter-mechanism` | Override the boot parameter method | `bios-attribute`, `uefi-target`, `unsupported` |
+| `beskar7.infrastructure.cluster.x-k8s.io/bios-kernel-arg-attribute` | Specify BIOS attribute name for kernel args | `KernelArgs`, `CustomBootArgs` |
+
+### Example Usage
+
+**Force BIOS attribute method for Dell systems:**
+```yaml
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+kind: PhysicalHost
+metadata:
+  name: dell-server
+  annotations:
+    beskar7.infrastructure.cluster.x-k8s.io/boot-parameter-mechanism: "bios-attribute"
+    beskar7.infrastructure.cluster.x-k8s.io/bios-kernel-arg-attribute: "KernelArgs"
+spec:
+  # ... rest of spec
+```
+
+**Force UEFI method for systems that auto-detect as requiring BIOS attributes:**
+```yaml
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+kind: PhysicalHost
+metadata:
+  name: custom-server
+  annotations:
+    beskar7.infrastructure.cluster.x-k8s.io/boot-parameter-mechanism: "uefi-target"
+spec:
+  # ... rest of spec
+```
+
+**Disable boot parameter setting entirely:**
+```yaml
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+kind: PhysicalHost
+metadata:
+  name: problematic-server
+  annotations:
+    beskar7.infrastructure.cluster.x-k8s.io/boot-parameter-mechanism: "unsupported"
+spec:
+  # ... rest of spec (will use PreBakedISO mode only)
+```
+
+### Automatic Vendor Detection
+
+Beskar7 automatically detects hardware vendors based on the system manufacturer field in Redfish and applies appropriate configurations:
+
+- **Dell Inc.** → Uses BIOS attribute method with `KernelArgs` attribute
+- **HPE** → Uses UEFI target boot source override method
+- **Lenovo** → Uses UEFI method with fallback to BIOS attributes
+- **Supermicro** → Uses UEFI method with multiple fallback mechanisms
+- **Others** → Uses generic UEFI method with fallback support
+
+Annotations override this automatic detection when specified.
+
+## Vendor-Specific Support Status
+
+### ✅ Completed Features
+
+- **Dell:** ✅ BIOS attribute configuration automation (`KernelArgs` support)
+- **HPE:** ✅ `UefiTargetBootSourceOverride` optimization
+- **Lenovo:** ✅ XCC-specific boot parameter detection
+- **Supermicro:** ✅ Multi-mechanism fallback support
+- **All Vendors:** ✅ Automatic vendor detection and method selection
+
+### 🔄 Planned Enhancements
+
+- **Dell:** Advanced iDRAC job management for BIOS settings
+- **HPE:** Extended iLO 6 feature integration  
+- **Supermicro:** Enhanced BMC version detection and workarounds
+- **Lenovo:** XCC licensing detection and advanced features
+- **All Vendors:** Expanded annotation-based configuration options
 
 ## Contributing Hardware Test Results
 
