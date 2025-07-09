@@ -1,0 +1,50 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: controller-manager
+  namespace: beskar7-system
+spec:
+  replicas: 5  # Extra-large HA deployment with 5 replicas
+  template:
+    spec:
+      containers:
+      - name: manager
+        args:
+        - --leader-elect=true
+        - --leader-elect-lease-duration=20s   # Slightly longer for large scale
+        - --leader-elect-renew-deadline=15s   # More conservative for stability
+        - --leader-elect-retry-period=3s      # Less aggressive retries
+        - --leader-elect-release-on-cancel=true
+        - --enable-security-monitoring=true
+        - --metrics-bind-address=:8080
+        - --health-probe-bind-address=:8081
+        # Add resources optimized for extra-large deployments
+        resources:
+          limits:
+            cpu: 2000m
+            memory: 2Gi
+            ephemeral-storage: 4Gi
+          requests:
+            cpu: 500m
+            memory: 512Mi
+            ephemeral-storage: 200Mi
+      # Strong anti-affinity for extra-large deployments
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchLabels:
+                control-plane: controller-manager
+            topologyKey: kubernetes.io/hostname
+          # Prefer spreading across zones too
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 50
+            podAffinityTerm:
+              labelSelector:
+                matchLabels:
+                  control-plane: controller-manager
+              topologyKey: topology.kubernetes.io/zone
+      tolerations:
+      - key: node-role.kubernetes.io/control-plane
+        operator: Exists
+        effect: NoSchedule 

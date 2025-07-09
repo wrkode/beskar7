@@ -4,40 +4,16 @@ kind: Kustomization
 namespace: beskar7-system
 
 resources:
-- ../../crd
-- ../../rbac
-- ../../manager
-- ../../webhook
-- ../../certmanager
-- pdb.yaml
+- ../../default
+- pdb.yaml  # Keep the existing PDB
 
-patches:
-- target:
-    group: apps
-    version: v1
-    kind: Deployment
-    name: controller-manager
-  patch: |-
-    - op: replace
-      path: /spec/template/spec/containers/0/resources
-      value:
-        limits:
-          cpu: 4000m
-          memory: 4Gi
-          ephemeral-storage: 8Gi
-        requests:
-          cpu: 1000m
-          memory: 1Gi
-          ephemeral-storage: 500Mi
-    - op: replace
-      path: /spec/replicas
-      value: 3
-    - op: add
-      path: /spec/template/spec/containers/0/args/-
-      value: "--max-concurrent-reconciles=15"
-    - op: add
-      path: /spec/template/spec/containers/0/args/-
-      value: "--reconciliation-interval=15s"
+patchesStrategicMerge:
+- manager_patch.yaml
+
+namePrefix: extra-large-
+
+commonLabels:
+  deployment-size: extra-large
 
 labels:
 - includeSelectors: true

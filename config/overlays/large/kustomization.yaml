@@ -4,36 +4,15 @@ kind: Kustomization
 namespace: beskar7-system
 
 resources:
-- ../../crd
-- ../../rbac
-- ../../manager
-- ../../webhook
-- ../../certmanager
+- ../../default
 
-patches:
-- target:
-    group: apps
-    version: v1
-    kind: Deployment
-    name: controller-manager
-  patch: |-
-    - op: replace
-      path: /spec/template/spec/containers/0/resources
-      value:
-        limits:
-          cpu: 2000m
-          memory: 2Gi
-          ephemeral-storage: 4Gi
-        requests:
-          cpu: 500m
-          memory: 512Mi
-          ephemeral-storage: 200Mi
-    - op: replace
-      path: /spec/replicas
-      value: 3
-    - op: add
-      path: /spec/template/spec/containers/0/args/-
-      value: "--max-concurrent-reconciles=10"
+patchesStrategicMerge:
+- manager_patch.yaml
+
+namePrefix: large-
+
+commonLabels:
+  deployment-size: large
 
 labels:
 - includeSelectors: true
