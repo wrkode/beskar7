@@ -2,10 +2,13 @@ package webhooks
 
 import (
 	"context"
+	"net"
+	"strings"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/validation/field"
+	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
@@ -25,8 +28,8 @@ func (webhook *Beskar7ClusterWebhook) SetupWebhookWithManager(mgr ctrl.Manager) 
 		Complete()
 }
 
-// +kubebuilder:webhook:verbs=create;update,path=/validate-infrastructure-cluster-x-k8s-io-v1beta1-beskar7cluster,mutating=false,failurePolicy=fail,matchPolicy=Equivalent,groups=infrastructure.cluster.x-k8s.io,resources=beskar7clusters,versions=v1beta1,name=validation.beskar7.infrastructure.cluster.x-k8s.io,sideEffects=None,admissionReviewVersions=v1
-// +kubebuilder:webhook:verbs=create;update,path=/mutate-infrastructure-cluster-x-k8s-io-v1beta1-beskar7cluster,mutating=true,failurePolicy=fail,matchPolicy=Equivalent,groups=infrastructure.cluster.x-k8s.io,resources=beskar7clusters,versions=v1beta1,name=defaulting.beskar7.infrastructure.cluster.x-k8s.io,sideEffects=None,admissionReviewVersions=v1
+// +kubebuilder:webhook:verbs=create;update,path=/validate-infrastructure-cluster-x-k8s-io-v1beta1-beskar7cluster,mutating=false,failurePolicy=fail,matchPolicy=Equivalent,groups=infrastructure.cluster.x-k8s.io,resources=beskar7clusters,versions=v1beta1,name=validation.beskar7cluster.infrastructure.cluster.x-k8s.io,sideEffects=None,admissionReviewVersions=v1
+// +kubebuilder:webhook:verbs=create;update,path=/mutate-infrastructure-cluster-x-k8s-io-v1beta1-beskar7cluster,mutating=true,failurePolicy=fail,matchPolicy=Equivalent,groups=infrastructure.cluster.x-k8s.io,resources=beskar7clusters,versions=v1beta1,name=defaulting.beskar7cluster.infrastructure.cluster.x-k8s.io,sideEffects=None,admissionReviewVersions=v1
 
 var _ webhook.CustomValidator = &Beskar7ClusterWebhook{}
 var _ webhook.CustomDefaulter = &Beskar7ClusterWebhook{}
@@ -34,59 +37,164 @@ var _ webhook.CustomDefaulter = &Beskar7ClusterWebhook{}
 // ValidateCreate implements webhook.CustomValidator so a webhook will be registered for the type.
 func (webhook *Beskar7ClusterWebhook) ValidateCreate(ctx context.Context, obj runtime.Object) (admission.Warnings, error) {
 	cluster := obj.(*infrav1beta1.Beskar7Cluster)
-	return nil, webhook.validateCluster(cluster)
+	warnings, err := webhook.validateBeskar7Cluster(cluster)
+	if err != nil {
+		return warnings, err
+	}
+
+	return warnings, nil
 }
 
 // ValidateUpdate implements webhook.CustomValidator so a webhook will be registered for the type.
 func (webhook *Beskar7ClusterWebhook) ValidateUpdate(ctx context.Context, oldObj, newObj runtime.Object) (admission.Warnings, error) {
 	newCluster := newObj.(*infrav1beta1.Beskar7Cluster)
-	return nil, webhook.validateCluster(newCluster)
+
+	warnings, err := webhook.validateBeskar7Cluster(newCluster)
+	if err != nil {
+		return warnings, err
+	}
+
+	return warnings, nil
 }
 
 // ValidateDelete implements webhook.CustomValidator so a webhook will be registered for the type.
 func (webhook *Beskar7ClusterWebhook) ValidateDelete(ctx context.Context, obj runtime.Object) (admission.Warnings, error) {
+	// No specific validations needed for deletion
 	return nil, nil
 }
 
 // Default implements webhook.CustomDefaulter so a webhook will be registered for the type.
 func (webhook *Beskar7ClusterWebhook) Default(ctx context.Context, obj runtime.Object) error {
 	cluster := obj.(*infrav1beta1.Beskar7Cluster)
-	return webhook.defaultCluster(cluster)
+	return webhook.defaultBeskar7Cluster(cluster)
 }
 
-func (webhook *Beskar7ClusterWebhook) validateCluster(cluster *infrav1beta1.Beskar7Cluster) error {
+func (webhook *Beskar7ClusterWebhook) validateBeskar7Cluster(cluster *infrav1beta1.Beskar7Cluster) (admission.Warnings, error) {
 	var allErrs field.ErrorList
+	var warnings admission.Warnings
 
-	// Validate control plane endpoint
-	if cluster.Spec.ControlPlaneEndpoint.Host == "" {
-		allErrs = append(allErrs, field.Required(
-			field.NewPath("spec", "controlPlaneEndpoint", "host"),
-			"host is required",
-		))
-	}
-
-	if cluster.Spec.ControlPlaneEndpoint.Port <= 0 {
-		allErrs = append(allErrs, field.Invalid(
-			field.NewPath("spec", "controlPlaneEndpoint", "port"),
-			cluster.Spec.ControlPlaneEndpoint.Port,
-			"port must be greater than 0",
-		))
+	// Validate ControlPlaneEndpoint if set
+	if cluster.Spec.ControlPlaneEndpoint.Host != "" || cluster.Spec.ControlPlaneEndpoint.Port != 0 {
+		if errs := webhook.validateControlPlaneEndpoint(cluster.Spec.ControlPlaneEndpoint); len(errs) > 0 {
+			allErrs = append(allErrs, errs...)
+		}
 	}
 
 	if len(allErrs) > 0 {
-		return apierrors.NewInvalid(
+		return warnings, apierrors.NewInvalid(
 			cluster.GroupVersionKind().GroupKind(),
 			cluster.Name,
 			allErrs,
 		)
 	}
 
-	return nil
+	return warnings, nil
 }
 
-func (webhook *Beskar7ClusterWebhook) defaultCluster(cluster *infrav1beta1.Beskar7Cluster) error {
-	// Set default port if not specified
-	if cluster.Spec.ControlPlaneEndpoint.Port == 0 {
+func (webhook *Beskar7ClusterWebhook) validateControlPlaneEndpoint(endpoint clusterv1.APIEndpoint) field.ErrorList {
+	var allErrs field.ErrorList
+	fieldPath := field.NewPath("spec", "controlPlaneEndpoint")
+
+	// Validate host
+	if endpoint.Host == "" {
+		allErrs = append(allErrs, field.Required(
+			fieldPath.Child("host"),
+			"host is required when controlPlaneEndpoint is specified",
+		))
+	} else {
+		if errs := webhook.validateHost(endpoint.Host, fieldPath.Child("host")); len(errs) > 0 {
+			allErrs = append(allErrs, errs...)
+		}
+	}
+
+	// Validate port - check range first, then required
+	if endpoint.Port != 0 {
+		if errs := webhook.validatePort(endpoint.Port, fieldPath.Child("port")); len(errs) > 0 {
+			allErrs = append(allErrs, errs...)
+		}
+	} else {
+		allErrs = append(allErrs, field.Required(
+			fieldPath.Child("port"),
+			"port is required when controlPlaneEndpoint is specified",
+		))
+	}
+
+	return allErrs
+}
+
+func (webhook *Beskar7ClusterWebhook) validateHost(host string, fieldPath *field.Path) field.ErrorList {
+	var allErrs field.ErrorList
+
+	// Check if it's a valid IP address
+	if ip := net.ParseIP(host); ip != nil {
+		// Valid IP address
+		return allErrs
+	}
+
+	// Check if it's a valid hostname/FQDN
+	if !webhook.isValidHostname(host) {
+		allErrs = append(allErrs, field.Invalid(
+			fieldPath,
+			host,
+			"must be a valid IP address or hostname",
+		))
+	}
+
+	return allErrs
+}
+
+func (webhook *Beskar7ClusterWebhook) validatePort(port int32, fieldPath *field.Path) field.ErrorList {
+	var allErrs field.ErrorList
+
+	// Validate port range
+	if port < 1 || port > 65535 {
+		allErrs = append(allErrs, field.Invalid(
+			fieldPath,
+			port,
+			"port must be between 1 and 65535",
+		))
+	}
+
+	// Warn about well-known ports if it's a non-standard Kubernetes API port
+	if port < 1024 && port != 443 && port != 6443 {
+		// This would be a warning but we don't have a warning mechanism in this context
+		// The warning should be handled at a higher level
+	}
+
+	return allErrs
+}
+
+func (webhook *Beskar7ClusterWebhook) isValidHostname(hostname string) bool {
+	// Basic hostname validation
+	if len(hostname) == 0 || len(hostname) > 253 {
+		return false
+	}
+
+	// Check for invalid characters like consecutive dots
+	if strings.Contains(hostname, "..") {
+		return false
+	}
+
+	// Check each label in the hostname
+	labels := strings.Split(hostname, ".")
+	for _, label := range labels {
+		if len(label) == 0 || len(label) > 63 {
+			return false
+		}
+		// Check for valid characters (alphanumeric and hyphens, but not starting/ending with hyphen)
+		for i, r := range label {
+			if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || (r == '-' && i > 0 && i < len(label)-1)) {
+				return false
+			}
+		}
+	}
+
+	return true
+}
+
+func (webhook *Beskar7ClusterWebhook) defaultBeskar7Cluster(cluster *infrav1beta1.Beskar7Cluster) error {
+	// Set default port for control plane endpoint if host is specified but port is not
+	if cluster.Spec.ControlPlaneEndpoint.Host != "" && cluster.Spec.ControlPlaneEndpoint.Port == 0 {
 		cluster.Spec.ControlPlaneEndpoint.Port = 6443
 	}
 

@@ -81,6 +81,12 @@ func (r *PhysicalHostReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, nil
 	}
 
+	// Check if the PhysicalHost is paused
+	if isPaused(physicalHost) {
+		logger.Info("PhysicalHost reconciliation is paused")
+		return ctrl.Result{}, nil
+	}
+
 	// Initialize patch helper
 	patchHelper, err := patch.NewHelper(physicalHost, r.Client)
 	if err != nil {

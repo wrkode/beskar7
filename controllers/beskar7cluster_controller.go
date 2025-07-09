@@ -73,6 +73,12 @@ func (r *Beskar7ClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrl.Result{}, err
 	}
 
+	// Check if the Beskar7Cluster is paused
+	if isPaused(b7cluster) {
+		log.Info("Beskar7Cluster reconciliation is paused")
+		return ctrl.Result{}, nil
+	}
+
 	// Set the ownerRefs on the Beskar7Cluster
 	cluster, err := util.GetOwnerCluster(ctx, r.Client, b7cluster.ObjectMeta)
 	if err != nil {
@@ -85,6 +91,12 @@ func (r *Beskar7ClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	}
 
 	log = log.WithValues("cluster", cluster.Name)
+
+	// Check if the owner cluster is paused
+	if isClusterPaused(cluster) {
+		log.Info("Beskar7Cluster reconciliation is paused because owner cluster is paused")
+		return ctrl.Result{}, nil
+	}
 
 	// Initialize patch helper.
 	patchHelper, err := patch.NewHelper(b7cluster, r.Client)
@@ -125,8 +137,6 @@ func (r *Beskar7ClusterReconciler) reconcileNormal(ctx context.Context, logger l
 		logger.Info("Adding finalizer")
 		return ctrl.Result{Requeue: true}, nil
 	}
-
-	// TODO: Check if paused
 
 	// --- Reconcile Failure Domains ---
 	// Discover available failure domains from PhysicalHosts in the same namespace.

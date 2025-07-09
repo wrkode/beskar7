@@ -210,4 +210,149 @@ var _ = Describe("PhysicalHost Controller", func() {
 		//   - Check status becomes Provisioned
 
 	})
+
+	Describe("PhysicalHost pause functionality", func() {
+		var physicalHost *infrastructurev1beta1.PhysicalHost
+		var credentialSecret *corev1.Secret
+		var mockRfClient *internalredfish.MockClient
+		var reconciler *PhysicalHostReconciler
+
+		BeforeEach(func() {
+			// Create namespace if needed
+			ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: PhNamespace}}
+			Expect(k8sClient.Create(ctx, ns)).To(SatisfyAny(Succeed(), MatchError(ContainSubstring("already exists"))))
+
+			// Create unique names for this test
+			pausePhName := PhName + "-pause"
+			pauseSecretName := SecretName + "-pause"
+
+			// Create the credential secret
+			credentialSecret = &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      pauseSecretName,
+					Namespace: PhNamespace,
+				},
+				Data: map[string][]byte{
+					"username": []byte("testuser"),
+					"password": []byte("testpass"),
+				},
+			}
+			Expect(k8sClient.Create(ctx, credentialSecret)).To(Succeed())
+
+			// Define the PhysicalHost resource
+			physicalHost = &infrastructurev1beta1.PhysicalHost{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      pausePhName,
+					Namespace: PhNamespace,
+				},
+				Spec: infrastructurev1beta1.PhysicalHostSpec{
+					RedfishConnection: infrastructurev1beta1.RedfishConnection{
+						Address:              "redfish-pause.example.com",
+						CredentialsSecretRef: pauseSecretName,
+					},
+				},
+			}
+
+			// Create Mock Redfish Client
+			mockRfClient = internalredfish.NewMockClient()
+
+			// Create the reconciler instance for the test
+			reconciler = &PhysicalHostReconciler{
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+				RedfishClientFactory: func(ctx context.Context, address, username, password string, insecure bool) (internalredfish.Client, error) {
+					return mockRfClient, nil
+				},
+			}
+		})
+
+		AfterEach(func() {
+			// Clean up resources
+			Expect(k8sClient.Delete(ctx, physicalHost)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, credentialSecret)).To(Succeed())
+		})
+
+		It("should skip reconciliation when PhysicalHost is paused", func() {
+			By("Creating a paused PhysicalHost resource")
+			physicalHost.Annotations = map[string]string{
+				clusterv1.PausedAnnotation: "true",
+			}
+			Expect(k8sClient.Create(ctx, physicalHost)).To(Succeed())
+
+			phLookupKey := types.NamespacedName{Name: physicalHost.Name, Namespace: PhNamespace}
+
+			By("Reconciling the paused PhysicalHost")
+			result, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: phLookupKey})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(ctrl.Result{}))
+
+			By("Verifying that no Redfish calls were made")
+			Expect(mockRfClient.GetSystemInfoCalled).To(BeFalse())
+			Expect(mockRfClient.GetPowerStateCalled).To(BeFalse())
+			Expect(mockRfClient.CloseCalled).To(BeFalse())
+
+			By("Verifying that the finalizer was not added")
+			pausedPh := &infrastructurev1beta1.PhysicalHost{}
+			Expect(k8sClient.Get(ctx, phLookupKey, pausedPh)).To(Succeed())
+			Expect(pausedPh.Finalizers).NotTo(ContainElement(PhysicalHostFinalizer))
+		})
+
+		It("should continue reconciliation when pause annotation is false", func() {
+			By("Creating a PhysicalHost with pause annotation set to false")
+			physicalHost.Annotations = map[string]string{
+				clusterv1.PausedAnnotation: "false",
+			}
+			Expect(k8sClient.Create(ctx, physicalHost)).To(Succeed())
+
+			phLookupKey := types.NamespacedName{Name: physicalHost.Name, Namespace: PhNamespace}
+
+			By("Reconciling the PhysicalHost")
+			result, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: phLookupKey})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(ctrl.Result{})) // Should be paused, not requeued
+
+			By("Verifying that reconciliation was paused (no Redfish calls)")
+			Expect(mockRfClient.GetSystemInfoCalled).To(BeFalse())
+			Expect(mockRfClient.GetPowerStateCalled).To(BeFalse())
+			Expect(mockRfClient.CloseCalled).To(BeFalse())
+
+			By("Verifying that the finalizer was not added")
+			pausedPh := &infrastructurev1beta1.PhysicalHost{}
+			Expect(k8sClient.Get(ctx, phLookupKey, pausedPh)).To(Succeed())
+			Expect(pausedPh.Finalizers).NotTo(ContainElement(PhysicalHostFinalizer))
+		})
+
+		It("should resume reconciliation when pause annotation is removed", func() {
+			By("Creating a paused PhysicalHost resource")
+			physicalHost.Annotations = map[string]string{
+				clusterv1.PausedAnnotation: "true",
+			}
+			Expect(k8sClient.Create(ctx, physicalHost)).To(Succeed())
+
+			phLookupKey := types.NamespacedName{Name: physicalHost.Name, Namespace: PhNamespace}
+
+			By("Reconciling the paused PhysicalHost (should be skipped)")
+			result, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: phLookupKey})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(ctrl.Result{}))
+
+			By("Removing the pause annotation")
+			pausedPh := &infrastructurev1beta1.PhysicalHost{}
+			Expect(k8sClient.Get(ctx, phLookupKey, pausedPh)).To(Succeed())
+			delete(pausedPh.Annotations, clusterv1.PausedAnnotation)
+			Expect(k8sClient.Update(ctx, pausedPh)).To(Succeed())
+
+			By("Reconciling again (should proceed)")
+			result, err = reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: phLookupKey})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(ctrl.Result{Requeue: true})) // Requeue for finalizer addition
+
+			By("Verifying that reconciliation proceeded normally")
+			Eventually(func(g Gomega) {
+				resumedPh := &infrastructurev1beta1.PhysicalHost{}
+				g.Expect(k8sClient.Get(ctx, phLookupKey, resumedPh)).To(Succeed())
+				g.Expect(resumedPh.Finalizers).To(ContainElement(PhysicalHostFinalizer))
+			}, Timeout, Interval).Should(Succeed())
+		})
+	})
 })

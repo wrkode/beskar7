@@ -83,6 +83,12 @@ func (r *Beskar7MachineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrl.Result{}, err
 	}
 
+	// Check if the Beskar7Machine is paused
+	if isPaused(b7machine) {
+		log.Info("Beskar7Machine reconciliation is paused")
+		return ctrl.Result{}, nil
+	}
+
 	// Fetch the Machine instance.
 	machine, err := util.GetOwnerMachine(ctx, r.Client, b7machine.ObjectMeta)
 	if err != nil {
@@ -95,6 +101,19 @@ func (r *Beskar7MachineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	}
 
 	log = log.WithValues("machine", machine.Name)
+
+	// Get the owner cluster to check if it's paused
+	cluster, err := util.GetClusterFromMetadata(ctx, r.Client, machine.ObjectMeta)
+	if err != nil {
+		log.Error(err, "Failed to get cluster from machine metadata")
+		return ctrl.Result{}, err
+	}
+
+	// Check if the owner cluster is paused
+	if isClusterPaused(cluster) {
+		log.Info("Beskar7Machine reconciliation is paused because owner cluster is paused")
+		return ctrl.Result{}, nil
+	}
 
 	// Initialize patch helper
 	patchHelper, err := patch.NewHelper(b7machine, r.Client)
@@ -135,8 +154,6 @@ func (r *Beskar7MachineReconciler) reconcileNormal(ctx context.Context, logger l
 		logger.Info("Adding finalizer")
 		return ctrl.Result{Requeue: true}, nil
 	}
-
-	// TODO: Check if paused
 
 	// Find or retrieve the associated PhysicalHost.
 	physicalHost, result, err := r.findAndClaimOrGetAssociatedHost(ctx, logger, b7machine)
