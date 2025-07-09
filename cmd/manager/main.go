@@ -153,6 +153,11 @@ func main() {
 		os.Exit(1)
 	}
 
+	if err = (&webhooks.Beskar7MachineTemplateWebhook{}).SetupWebhookWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create webhook", "webhook", "Beskar7MachineTemplate")
+		os.Exit(1)
+	}
+
 	// Setup security monitoring
 	if enableSecurityMonitoring {
 		kubernetesClient, err := kubernetes.NewForConfig(mgr.GetConfig())

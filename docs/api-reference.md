@@ -588,20 +588,50 @@ spec:
 
 ## Validation and Constraints
 
+### Admission Webhooks
+
+All Beskar7 resources are protected by comprehensive admission webhooks that provide:
+
+#### Validating Webhooks
+- **Field validation**: URL formats, enum values, cross-field constraints
+- **Security validation**: TLS certificate validation, credential strength requirements
+- **Business logic validation**: Redfish connectivity, resource dependencies
+- **Immutability enforcement**: Critical fields that cannot be changed after creation
+
+#### Mutating Webhooks (Defaulting)
+- **Automatic field defaulting**: Sets sensible defaults for optional fields
+- **Consistent behavior**: Ensures all resources have complete specifications
+- **Version compatibility**: Maintains compatibility across API versions
+
 ### Field Validation
 
 All resources include comprehensive field validation via OpenAPI schemas and admission webhooks:
 
-- **URL validation** for `imageURL` and `configURL`
-- **Enum validation** for `osFamily` and `provisioningMode`
-- **Pattern validation** for Redfish addresses
-- **Cross-field validation** for provisioning mode constraints
+- **URL validation** for `imageURL` and `configURL` (with format and accessibility checks)
+- **Enum validation** for `osFamily` and `provisioningMode` 
+- **Pattern validation** for Redfish addresses and BMC endpoints
+- **Cross-field validation** for provisioning mode constraints and dependencies
+- **Security validation** for TLS settings and credential requirements
 
 ### Resource Constraints
 
-- PhysicalHost resources must have unique Redfish addresses within a namespace
-- Beskar7Machine resources can only claim available PhysicalHost resources
+#### PhysicalHost Constraints
+- Must have unique Redfish addresses within a namespace
+- Redfish connection parameters are validated on creation/update
+- Credentials secret must exist and contain valid username/password
+- TLS configuration is validated for production environments
+
+#### Beskar7Machine Constraints  
+- Can only claim available PhysicalHost resources
 - ConfigURL is mandatory for RemoteConfig mode but forbidden for PreBakedISO mode
+- ImageURL must point to supported image formats (.iso, .img, .qcow2, etc.)
+- ProviderID is managed by controllers and cannot be set manually
+
+#### Beskar7MachineTemplate Constraints
+- **Immutable after creation**: imageURL, osFamily, provisioningMode, configURL cannot be changed
+- ProviderID cannot be set in templates (managed by controllers)
+- Inherits all validation rules from Beskar7Machine specifications
+- Template changes require creating new template versions
 
 ### Status Transitions
 
