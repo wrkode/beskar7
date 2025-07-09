@@ -7,18 +7,18 @@ rules:
 - apiGroups:
   - ""
   resources:
+  - events
+  verbs:
+  - create
+  - patch
+- apiGroups:
+  - ""
+  resources:
   - secrets
   verbs:
   - get
   - list
-  - watch // Needed for Redfish credentials
-  - watch // Needed for UserData
-- apiGroups:
-  - '*'
-  resources:
-  - '*'
-  verbs:
-  - '*'
+  - watch
 - apiGroups:
   - cluster.x-k8s.io
   resources:
@@ -36,13 +36,13 @@ rules:
   verbs:
   - get
   - list
-  - watch // Needed to find control plane machine addresses
-  - watch // Needed to interact with Machine object
+  - watch
 - apiGroups:
   - infrastructure.cluster.x-k8s.io
   resources:
   - beskar7clusters
   - beskar7machines
+  - beskar7machinetemplates
   verbs:
   - create
   - delete
@@ -56,6 +56,7 @@ rules:
   resources:
   - beskar7clusters/finalizers
   - beskar7machines/finalizers
+  - beskar7machinetemplates/finalizers
   - physicalhosts/finalizers
   verbs:
   - update
@@ -64,6 +65,7 @@ rules:
   resources:
   - beskar7clusters/status
   - beskar7machines/status
+  - beskar7machinetemplates/status
   - physicalhosts/status
   verbs:
   - get
@@ -79,10 +81,17 @@ rules:
   - get
   - list
   - patch
-  - patch // Needed to find and claim/patch PhysicalHost
   - update
   - watch
-  - watch // Needed to discover failure domains
+- apiGroups:
+  - rbac.authorization.k8s.io
+  resources:
+  - clusterrolebindings
+  - clusterroles
+  verbs:
+  - get
+  - list
+  - watch
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
