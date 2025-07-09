@@ -2,6 +2,8 @@ package webhooks
 
 import (
 	"context"
+	"net/url"
+	"strings"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -63,6 +65,11 @@ func (webhook *Beskar7MachineWebhook) validateMachine(machine *infrav1beta1.Besk
 			field.NewPath("spec", "imageURL"),
 			"imageURL is required",
 		))
+	} else {
+		// Validate ImageURL format
+		if errs := webhook.validateImageURL(machine.Spec.ImageURL); len(errs) > 0 {
+			allErrs = append(allErrs, errs...)
+		}
 	}
 
 	if machine.Spec.OSFamily == "" {
@@ -70,36 +77,41 @@ func (webhook *Beskar7MachineWebhook) validateMachine(machine *infrav1beta1.Besk
 			field.NewPath("spec", "osFamily"),
 			"osFamily is required",
 		))
-	}
-
-	// Validate OS family
-	validOSFamilies := map[string]bool{
-		"kairos":    true,
-		"talos":     true,
-		"flatcar":   true,
-		"LeapMicro": true,
-	}
-	if !validOSFamilies[machine.Spec.OSFamily] {
-		allErrs = append(allErrs, field.NotSupported(
-			field.NewPath("spec", "osFamily"),
-			machine.Spec.OSFamily,
-			[]string{"kairos", "talos", "flatcar", "LeapMicro"},
-		))
+	} else {
+		// Validate OS family
+		if errs := webhook.validateOSFamily(machine.Spec.OSFamily); len(errs) > 0 {
+			allErrs = append(allErrs, errs...)
+		}
 	}
 
 	// Validate provisioning mode if specified
 	if machine.Spec.ProvisioningMode != "" {
-		validModes := map[string]bool{
-			"RemoteConfig": true,
-			"PreBakedISO":  true,
+		if errs := webhook.validateProvisioningMode(machine.Spec.ProvisioningMode); len(errs) > 0 {
+			allErrs = append(allErrs, errs...)
 		}
-		if !validModes[machine.Spec.ProvisioningMode] {
-			allErrs = append(allErrs, field.NotSupported(
-				field.NewPath("spec", "provisioningMode"),
-				machine.Spec.ProvisioningMode,
-				[]string{"RemoteConfig", "PreBakedISO"},
-			))
+	}
+
+	// Validate ConfigURL format if specified
+	if machine.Spec.ConfigURL != "" {
+		if errs := webhook.validateConfigURL(machine.Spec.ConfigURL); len(errs) > 0 {
+			allErrs = append(allErrs, errs...)
 		}
+	}
+
+	// Cross-field validation: ConfigURL is required for RemoteConfig mode
+	if machine.Spec.ProvisioningMode == "RemoteConfig" && machine.Spec.ConfigURL == "" {
+		allErrs = append(allErrs, field.Required(
+			field.NewPath("spec", "configURL"),
+			"configURL is required when provisioningMode is RemoteConfig",
+		))
+	}
+
+	// ConfigURL should not be set for PreBakedISO mode
+	if machine.Spec.ProvisioningMode == "PreBakedISO" && machine.Spec.ConfigURL != "" {
+		allErrs = append(allErrs, field.Forbidden(
+			field.NewPath("spec", "configURL"),
+			"configURL should not be set when provisioningMode is PreBakedISO",
+		))
 	}
 
 	if len(allErrs) > 0 {
@@ -120,4 +132,201 @@ func (webhook *Beskar7MachineWebhook) defaultMachine(machine *infrav1beta1.Beska
 	}
 
 	return nil
+}
+
+func (webhook *Beskar7MachineWebhook) validateImageURL(imageURL string) field.ErrorList {
+	var allErrs field.ErrorList
+	fieldPath := field.NewPath("spec", "imageURL")
+
+	// Parse URL
+	parsedURL, err := url.Parse(imageURL)
+	if err != nil {
+		allErrs = append(allErrs, field.Invalid(
+			fieldPath,
+			imageURL,
+			"invalid URL format",
+		))
+		return allErrs
+	}
+
+	// Validate scheme
+	validSchemes := map[string]bool{
+		"http":  true,
+		"https": true,
+		"ftp":   true,
+		"file":  true,
+	}
+	if !validSchemes[parsedURL.Scheme] {
+		allErrs = append(allErrs, field.NotSupported(
+			fieldPath,
+			parsedURL.Scheme,
+			[]string{"http", "https", "ftp", "file"},
+		))
+	}
+
+	// Validate host for network schemes
+	if (parsedURL.Scheme == "http" || parsedURL.Scheme == "https" || parsedURL.Scheme == "ftp") && parsedURL.Host == "" {
+		allErrs = append(allErrs, field.Invalid(
+			fieldPath,
+			imageURL,
+			"URL must include a host for network schemes",
+		))
+	}
+
+	// Validate file extension for image files
+	if !webhook.isValidImageExtension(parsedURL.Path) {
+		allErrs = append(allErrs, field.Invalid(
+			fieldPath,
+			imageURL,
+			"imageURL should point to a valid image file (.iso, .img, .qcow2, .vmdk, .raw)",
+		))
+	}
+
+	return allErrs
+}
+
+func (webhook *Beskar7MachineWebhook) validateConfigURL(configURL string) field.ErrorList {
+	var allErrs field.ErrorList
+	fieldPath := field.NewPath("spec", "configURL")
+
+	// Parse URL
+	parsedURL, err := url.Parse(configURL)
+	if err != nil {
+		allErrs = append(allErrs, field.Invalid(
+			fieldPath,
+			configURL,
+			"invalid URL format",
+		))
+		return allErrs
+	}
+
+	// Validate scheme
+	validSchemes := map[string]bool{
+		"http":  true,
+		"https": true,
+		"file":  true,
+	}
+	if !validSchemes[parsedURL.Scheme] {
+		allErrs = append(allErrs, field.NotSupported(
+			fieldPath,
+			parsedURL.Scheme,
+			[]string{"http", "https", "file"},
+		))
+	}
+
+	// Validate host for network schemes
+	if (parsedURL.Scheme == "http" || parsedURL.Scheme == "https") && parsedURL.Host == "" {
+		allErrs = append(allErrs, field.Invalid(
+			fieldPath,
+			configURL,
+			"URL must include a host for network schemes",
+		))
+	}
+
+	// Validate file extension for config files
+	if !webhook.isValidConfigExtension(parsedURL.Path) {
+		allErrs = append(allErrs, field.Invalid(
+			fieldPath,
+			configURL,
+			"configURL should point to a valid configuration file (.yaml, .yml, .json, .toml)",
+		))
+	}
+
+	return allErrs
+}
+
+func (webhook *Beskar7MachineWebhook) validateOSFamily(osFamily string) field.ErrorList {
+	var allErrs field.ErrorList
+	fieldPath := field.NewPath("spec", "osFamily")
+
+	validOSFamilies := map[string]bool{
+		"kairos":    true,
+		"talos":     true,
+		"flatcar":   true,
+		"LeapMicro": true,
+		"ubuntu":    true,
+		"rhel":      true,
+		"centos":    true,
+		"fedora":    true,
+		"debian":    true,
+		"opensuse":  true,
+	}
+
+	if !validOSFamilies[osFamily] {
+		allErrs = append(allErrs, field.NotSupported(
+			fieldPath,
+			osFamily,
+			[]string{"kairos", "talos", "flatcar", "LeapMicro", "ubuntu", "rhel", "centos", "fedora", "debian", "opensuse"},
+		))
+	}
+
+	return allErrs
+}
+
+func (webhook *Beskar7MachineWebhook) validateProvisioningMode(provisioningMode string) field.ErrorList {
+	var allErrs field.ErrorList
+	fieldPath := field.NewPath("spec", "provisioningMode")
+
+	validModes := map[string]bool{
+		"RemoteConfig": true,
+		"PreBakedISO":  true,
+		"PXE":          true,
+		"iPXE":         true,
+	}
+
+	if !validModes[provisioningMode] {
+		allErrs = append(allErrs, field.NotSupported(
+			fieldPath,
+			provisioningMode,
+			[]string{"RemoteConfig", "PreBakedISO", "PXE", "iPXE"},
+		))
+	}
+
+	return allErrs
+}
+
+func (webhook *Beskar7MachineWebhook) isValidImageExtension(path string) bool {
+	validExtensions := []string{
+		".iso", ".img", ".qcow2", ".vmdk", ".raw", ".vhd", ".vhdx", ".ova", ".ovf",
+	}
+
+	path = strings.ToLower(path)
+	for _, ext := range validExtensions {
+		if strings.HasSuffix(path, ext) {
+			return true
+		}
+	}
+
+	// Check for compressed files
+	compressedExtensions := []string{
+		".gz", ".bz2", ".xz", ".zip", ".tar", ".tgz", ".tbz2", ".txz",
+	}
+	for _, compExt := range compressedExtensions {
+		if strings.HasSuffix(path, compExt) {
+			// Remove compression extension and check again
+			basePath := strings.TrimSuffix(path, compExt)
+			for _, ext := range validExtensions {
+				if strings.HasSuffix(basePath, ext) {
+					return true
+				}
+			}
+		}
+	}
+
+	return false
+}
+
+func (webhook *Beskar7MachineWebhook) isValidConfigExtension(path string) bool {
+	validExtensions := []string{
+		".yaml", ".yml", ".json", ".toml", ".conf", ".cfg", ".ini", ".properties",
+	}
+
+	path = strings.ToLower(path)
+	for _, ext := range validExtensions {
+		if strings.HasSuffix(path, ext) {
+			return true
+		}
+	}
+
+	return false
 }

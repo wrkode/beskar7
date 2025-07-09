@@ -16,9 +16,9 @@ bases:
 - ../manager
 # [WEBHOOK] To enable webhook, uncomment all the sections with [WEBHOOK] prefix including the one in
 # crd/kustomization.yaml
-#- ../webhook
+- ../webhook
 # [CERTMANAGER] To enable cert-manager, uncomment all sections with 'CERTMANAGER'. 'WEBHOOK' components are required.
-#- ../certmanager
+- ../certmanager
 
 patchesStrategicMerge:
 # Protect the /metrics endpoint by putting it behind auth.
@@ -37,6 +37,6 @@ patchesStrategicMerge:
 # Images for the Beskar7 manager. The image name `controller` must match
 # the name used in config/manager/manager.yaml.
 images:
-- name: beskar-controller
-  newName: ghcr.io/wrkode/beskar7/ # Uses Makefile vars by default
-  newTag: v0.1.0-dev         # Uses Makefile vars by default 
+- name: controller
+  newName: ghcr.io/wrkode/beskar7/beskar7
+  newTag: v0.2.6 

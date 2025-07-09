@@ -4,51 +4,10 @@ kind: Kustomization
 resources:
 - manifests.yaml
 - service.yaml
-- certificate.yaml
-- issuer.yaml
 
 namespace: beskar7-system
-
-# [CERTMANAGER] To enable cert-manager, uncomment all sections with [CERTMANAGER] prefix including the one in crd/kustomization.yaml
-#- ../certmanager
-# [CERTMANAGER] To enable cert-manager, uncomment all sections with [CERTMANAGER] prefix including the one in crd/kustomization.yaml
-#patches:
-#- path: patches/cainjection_in_webhooks.yaml
-#- path: patches/cainjection_in_webhook_configurations.yaml
-
-# [WEBHOOK] To enable webhook, uncomment all the sections with [WEBHOOK] prefix including the one in crd/kustomization.yaml
-#- patches/webhook_in_webhooks.yaml
-#- patches/webhook_in_webhook_configurations.yaml
-
-# [CERTMANAGER] To enable cert-manager, uncomment all sections with [CERTMANAGER] prefix including the one in crd/kustomization.yaml
-#- patches/certmanager_in_webhooks.yaml
 
 patches:
 - path: patches/cainjection_in_webhooks.yaml
 - path: patches/cainjection_in_webhook_configurations.yaml
-- path: patches/certmanager_in_webhooks.yaml
-
-vars:
-# [CERTMANAGER] To enable cert-manager, uncomment all sections with [CERTMANAGER] prefix including the one in crd/kustomization.yaml
-- name: CERTIFICATE_NAMESPACE
-  objRef:
-    kind: Certificate
-    group: cert-manager.io
-    version: v1
-    name: beskar7-serving-cert
-- name: CERTIFICATE_NAME
-  objRef:
-    kind: Certificate
-    group: cert-manager.io
-    version: v1
-    name: beskar7-serving-cert
-- name: SERVICE_NAMESPACE
-  objRef:
-    kind: Service
-    version: v1
-    name: beskar7-webhook-service
-- name: SERVICE_NAME
-  objRef:
-    kind: Service
-    version: v1
-    name: beskar7-webhook-service 
+- path: patches/certmanager_in_webhooks.yaml 

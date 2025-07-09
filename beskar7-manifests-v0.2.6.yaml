@@ -627,6 +627,21 @@ subjects:
   name: controller-manager
   namespace: beskar7-system
 ---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    cluster.x-k8s.io/provider: beskar7
+  name: beskar7-webhook-service
+  namespace: beskar7-system
+spec:
+  ports:
+  - port: 443
+    protocol: TCP
+    targetPort: 9443
+  selector:
+    control-plane: controller-manager
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -703,7 +718,106 @@ spec:
           capabilities:
             drop:
             - ALL
+        volumeMounts:
+        - mountPath: /tmp/k8s-webhook-server/serving-certs
+          name: webhook-server-cert
+          readOnly: true
       securityContext:
         runAsNonRoot: true
       serviceAccountName: controller-manager
       terminationGracePeriodSeconds: 10
+      volumes:
+      - name: webhook-server-cert
+        secret:
+          secretName: beskar7-webhook-server-cert
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: beskar7-serving-cert
+  namespace: beskar7-system
+spec:
+  commonName: beskar7-webhook-service.beskar7-system.svc
+  dnsNames:
+  - beskar7-webhook-service.beskar7-system.svc
+  duration: 8760h
+  issuerRef:
+    kind: ClusterIssuer
+    name: beskar7-selfsigned-issuer
+  renewBefore: 720h
+  secretName: beskar7-webhook-server-cert
+  subject:
+    organizations:
+    - beskar7
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: beskar7-selfsigned-issuer
+  namespace: beskar7-system
+spec:
+  selfSigned: {}
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingWebhookConfiguration
+metadata:
+  annotations:
+    cert-manager.io/inject-ca-from: beskar7-system/beskar7-serving-cert
+  labels:
+    cluster.x-k8s.io/provider: beskar7
+  name: beskar7-mutating-webhook-configuration
+webhooks:
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: beskar7-webhook-service
+      namespace: beskar7-system
+      path: /mutate-infrastructure-cluster-x-k8s-io-v1beta1-beskar7cluster
+  failurePolicy: Fail
+  name: defaulting.beskar7.infrastructure.cluster.x-k8s.io
+  rules:
+  - apiGroups:
+    - infrastructure.cluster.x-k8s.io
+    apiVersions:
+    - v1beta1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - beskar7clusters
+    scope: Namespaced
+  sideEffects: None
+  timeoutSeconds: 10
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  annotations:
+    cert-manager.io/inject-ca-from: beskar7-system/beskar7-serving-cert
+  labels:
+    cluster.x-k8s.io/provider: beskar7
+  name: beskar7-validating-webhook-configuration
+webhooks:
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: beskar7-webhook-service
+      namespace: beskar7-system
+      path: /validate-infrastructure-cluster-x-k8s-io-v1beta1-beskar7cluster
+  failurePolicy: Fail
+  name: validation.beskar7.infrastructure.cluster.x-k8s.io
+  rules:
+  - apiGroups:
+    - infrastructure.cluster.x-k8s.io
+    apiVersions:
+    - v1beta1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - beskar7clusters
+    scope: Namespaced
+  sideEffects: None
+  timeoutSeconds: 10

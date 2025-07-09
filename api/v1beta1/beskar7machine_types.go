@@ -39,18 +39,23 @@ type Beskar7MachineSpec struct {
 	ProviderID *string `json:"providerID,omitempty"`
 
 	// ImageURL is the URL of the OS image to use for the machine.
-	// +optional
-	ImageURL string `json:"imageURL,omitempty"`
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Pattern="^(https?|ftp|file)://.*\\.(iso|img|qcow2|vmdk|raw|vhd|vhdx|ova|ovf)(\\.(gz|bz2|xz|zip|tar|tgz|tbz2|txz))?$"
+	ImageURL string `json:"imageURL"`
 
 	// ConfigURL is the URL of the configuration to use for the machine.
+	// +kubebuilder:validation:Pattern="^(https?|file)://.*\\.(yaml|yml|json|toml|conf|cfg|ini|properties)$"
 	// +optional
 	ConfigURL string `json:"configURL,omitempty"`
 
 	// OSFamily is the operating system family to use for the machine.
-	// +optional
-	OSFamily string `json:"osFamily,omitempty"`
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Enum=kairos;talos;flatcar;LeapMicro;ubuntu;rhel;centos;fedora;debian;opensuse
+	OSFamily string `json:"osFamily"`
 
 	// ProvisioningMode is the mode to use for provisioning the machine.
+	// +kubebuilder:validation:Enum=RemoteConfig;PreBakedISO;PXE;iPXE
+	// +kubebuilder:default="RemoteConfig"
 	// +optional
 	ProvisioningMode string `json:"provisioningMode,omitempty"`
 }
@@ -83,6 +88,7 @@ type Beskar7MachineStatus struct {
 // +kubebuilder:object:root=true
 // +kubebuilder:resource:path=beskar7machines,scope=Namespaced,categories=cluster-api
 // +kubebuilder:subresource:status
+// +kubebuilder:storageversion
 // +kubebuilder:printcolumn:name="Cluster",type="string",JSONPath=".metadata.labels.cluster\\.x-k8s\\.io/cluster-name",description="Cluster to which this Beskar7Machine belongs"
 // +kubebuilder:printcolumn:name="Machine",type="string",JSONPath=".metadata.labels.cluster\\.x-k8s\\.io/machine-name",description="Machine to which this Beskar7Machine belongs"
 // +kubebuilder:printcolumn:name="Phase",type="string",JSONPath=".status.phase",description="Beskar7Machine phase"

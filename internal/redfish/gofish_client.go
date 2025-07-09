@@ -332,8 +332,9 @@ func (c *gofishClient) EjectVirtualMedia(ctx context.Context) error {
 }
 
 // SetBootParameters configures kernel command line parameters for the next boot.
-// It first attempts the standard UefiTargetBootSourceOverride method.
-// If that fails, it includes placeholders for vendor-specific methods like BIOS attribute setting.
+// This implementation attempts to set UEFI boot parameters, which is the most
+// standard method. Fallbacks for vendor-specific BIOS attributes are not
+// implemented due to lack of a standard mechanism.
 func (c *gofishClient) SetBootParameters(ctx context.Context, params []string) error {
 	log := logf.FromContext(ctx)
 	log.Info("Attempting to set boot parameters", "Params", params)
@@ -372,50 +373,107 @@ func (c *gofishClient) SetBootParameters(ctx context.Context, params []string) e
 	}
 
 	// UEFI Target method failed, log details and consider alternatives.
-	log = log.WithValues("InitialUefiError", uerr.Error()) // Reassign log with extra context
 	log.Error(uerr, "Failed to set boot settings via UefiTargetBootSourceOverride", "Settings", uefiBootSettings)
 
-	// --- Potential Alternative: Using BIOS Attributes (Placeholder) ---
-	// This section requires vendor-specific knowledge or configuration (e.g., via annotations).
-	log.Info("UefiTargetBootSourceOverride failed, investigating BIOS attributes as fallback (currently placeholder).")
-
-	// TODO: Implement logic to check PhysicalHost annotations or other config
-	//       for vendor-specific instructions (e.g., BIOS attribute name).
-	biosAttributeName := "" // Example: Get this from annotation
-
-	if biosAttributeName != "" {
-		log.Info("Attempting to set boot parameters via configured BIOS attribute", "AttributeName", biosAttributeName)
-		// bios, biosErr := system.Bios() // Fetching BIOS is commented out as setting is not implemented
-		// if biosErr != nil {
-		// 	log.Error(biosErr, "Failed to get BIOS resource while attempting attribute fallback.")
-		// 	// Return the original UEFI error as it was the primary method failure.
-		// 	return fmt.Errorf("UefiTargetBootSourceOverride failed (%v) and BIOS fallback failed (get BIOS error: %w)", uerr, biosErr)
-		// }
-
-		bootParamsString := strings.Join(params, " ")
-		if len(params) == 0 {
-			bootParamsString = ""
-		}
-
-		attrsToSet := map[string]interface{}{biosAttributeName: bootParamsString}
-		log.Info("Attempting to call bios.SetAttributes", "AttributesToSet", attrsToSet)
-
-		// NOTE: bios.SetAttributes does not exist in gofish. Setting BIOS attributes is vendor-specific.
-		// Actual implementation would require using specific gofish methods if available for the vendor
-		// or potentially using raw Redfish requests.
-		// setAttrErr := bios.SetAttributes(attrsToSet) // This is conceptual pseudo-code
-		setAttrErr := fmt.Errorf("BIOS attribute setting for '%s' not implemented", biosAttributeName)
-
-		if setAttrErr == nil {
-			log.Info("Successfully set boot parameters via BIOS attribute (placeholder success)", "AttributeName", biosAttributeName)
-			// WARNING: This likely sets a *persistent* parameter, not one-time!
-			return nil // Hypothetical success
-		}
-		log.Error(setAttrErr, "Failed to set BIOS attribute", "AttributeName", biosAttributeName)
-		// Fall through if attribute setting failed
-	}
-
-	// If we reach here, both UefiTarget and configured BIOS attribute methods failed.
+	// If we reach here, the standard UefiTarget method failed.
 	log.Error(uerr, "All attempts to set boot parameters failed.")
 	return fmt.Errorf("failed to set boot parameters using UefiTargetBootSourceOverride and no alternative method succeeded: %w", uerr)
+}
+
+// GetNetworkAddresses retrieves network interface addresses from the system.
+func (c *gofishClient) GetNetworkAddresses(ctx context.Context) ([]NetworkAddress, error) {
+	log := logf.FromContext(ctx)
+	log.Info("Attempting to retrieve network addresses from Redfish")
+
+	system, err := c.getSystemService(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get system for network address discovery: %w", err)
+	}
+
+	var addresses []NetworkAddress
+
+	// Try to get EthernetInterfaces first (more common and reliable)
+	ethernetInterfaces, err := system.EthernetInterfaces()
+	if err != nil {
+		log.Error(err, "Failed to retrieve ethernet interfaces")
+		// Don't return error yet, try NetworkInterfaces as fallback
+	} else {
+		log.Info("Found ethernet interfaces", "count", len(ethernetInterfaces))
+		for _, ethIntf := range ethernetInterfaces {
+			interfaceAddresses := c.extractAddressesFromEthernetInterface(ctx, ethIntf)
+			addresses = append(addresses, interfaceAddresses...)
+		}
+	}
+
+	// If we didn't get addresses from EthernetInterfaces, try NetworkInterfaces
+	if len(addresses) == 0 {
+		log.Info("No addresses found via EthernetInterfaces, trying NetworkInterfaces fallback")
+		networkInterfaces, err := system.NetworkInterfaces()
+		if err != nil {
+			log.Error(err, "Failed to retrieve network interfaces")
+			return nil, fmt.Errorf("failed to retrieve both ethernet and network interfaces: %w", err)
+		}
+		log.Info("Found network interfaces", "count", len(networkInterfaces))
+		for _, netIntf := range networkInterfaces {
+			interfaceAddresses := c.extractAddressesFromNetworkInterface(ctx, netIntf)
+			addresses = append(addresses, interfaceAddresses...)
+		}
+	}
+
+	log.Info("Successfully retrieved network addresses", "totalAddresses", len(addresses))
+	return addresses, nil
+}
+
+// extractAddressesFromEthernetInterface extracts network addresses from an EthernetInterface.
+func (c *gofishClient) extractAddressesFromEthernetInterface(ctx context.Context, ethIntf *redfish.EthernetInterface) []NetworkAddress {
+	log := logf.FromContext(ctx)
+	var addresses []NetworkAddress
+
+	// Extract IPv4 addresses
+	for _, ipv4 := range ethIntf.IPv4Addresses {
+		if ipv4.Address != "" {
+			address := NetworkAddress{
+				Type:          IPv4AddressType,
+				Address:       ipv4.Address,
+				Gateway:       ipv4.Gateway,
+				InterfaceName: ethIntf.Name,
+				MACAddress:    ethIntf.MACAddress,
+			}
+			addresses = append(addresses, address)
+			log.V(1).Info("Found IPv4 address", "interface", ethIntf.Name, "address", ipv4.Address, "gateway", ipv4.Gateway)
+		}
+	}
+
+	// Extract IPv6 addresses
+	for _, ipv6 := range ethIntf.IPv6Addresses {
+		if ipv6.Address != "" {
+			address := NetworkAddress{
+				Type:          IPv6AddressType,
+				Address:       ipv6.Address,
+				Gateway:       ethIntf.IPv6DefaultGateway,
+				InterfaceName: ethIntf.Name,
+				MACAddress:    ethIntf.MACAddress,
+			}
+			addresses = append(addresses, address)
+			log.V(1).Info("Found IPv6 address", "interface", ethIntf.Name, "address", ipv6.Address, "gateway", ethIntf.IPv6DefaultGateway)
+		}
+	}
+
+	return addresses
+}
+
+// extractAddressesFromNetworkInterface extracts network addresses from a NetworkInterface.
+func (c *gofishClient) extractAddressesFromNetworkInterface(ctx context.Context, netIntf *redfish.NetworkInterface) []NetworkAddress {
+	log := logf.FromContext(ctx)
+	var addresses []NetworkAddress
+
+	// NetworkInterface doesn't directly contain IP addresses like EthernetInterface
+	// We need to check if it has associated ports or device functions that might contain address info
+	// For now, just log that we found the interface but can't extract addresses
+	log.V(1).Info("Found NetworkInterface but cannot extract addresses directly", "interface", netIntf.Name)
+
+	// TODO: If needed, implement logic to traverse NetworkPorts or NetworkDeviceFunctions
+	// associated with this NetworkInterface to find IP address information
+
+	return addresses
 }
