@@ -34,10 +34,13 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 
 	infrastructurev1beta1 "github.com/wrkode/beskar7/api/v1beta1"
 	"github.com/wrkode/beskar7/internal/redfish"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
 const (
@@ -539,9 +542,123 @@ func (r *Beskar7MachineReconciler) findAndClaimOrGetAssociatedHost(ctx context.C
 func (r *Beskar7MachineReconciler) SetupWithManager(ctx context.Context, mgr ctrl.Manager, options controller.Options) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&infrastructurev1beta1.Beskar7Machine{}).
-		// TODO: Add watches for CAPI Machine, PhysicalHost?
-		// Watches(&source.Kind{Type: &infrastructurev1beta1.PhysicalHost{}}, handler.EnqueueRequestsFromMapFunc(r.PhysicalHostToBeskar7Machine))?
+		Watches(&infrastructurev1beta1.PhysicalHost{}, handler.EnqueueRequestsFromMapFunc(r.PhysicalHostToBeskar7Machine)).
+		Watches(&clusterv1.Machine{}, handler.EnqueueRequestsFromMapFunc(r.MachineToBeskar7Machine)).
 		Complete(r)
+}
+
+// PhysicalHostToBeskar7Machine maps PhysicalHost events to Beskar7Machine reconcile requests.
+// When a PhysicalHost changes, find any Beskar7Machine that references it and trigger reconciliation.
+func (r *Beskar7MachineReconciler) PhysicalHostToBeskar7Machine(ctx context.Context, obj client.Object) []reconcile.Request {
+	physicalHost, ok := obj.(*infrastructurev1beta1.PhysicalHost)
+	if !ok {
+		return nil
+	}
+
+	// Find Beskar7Machines that reference this PhysicalHost via ConsumerRef
+	var requests []reconcile.Request
+
+	// Check if this PhysicalHost has a ConsumerRef that points to a Beskar7Machine
+	if physicalHost.Spec.ConsumerRef != nil {
+		// The ConsumerRef should point to a Beskar7Machine
+		if physicalHost.Spec.ConsumerRef.Kind == "Beskar7Machine" &&
+			physicalHost.Spec.ConsumerRef.APIVersion == "infrastructure.cluster.x-k8s.io/v1beta1" {
+			requests = append(requests, reconcile.Request{
+				NamespacedName: types.NamespacedName{
+					Namespace: physicalHost.Spec.ConsumerRef.Namespace,
+					Name:      physicalHost.Spec.ConsumerRef.Name,
+				},
+			})
+		}
+	}
+
+	// Also find Beskar7Machines that might have already claimed this host
+	// by listing all Beskar7Machines and checking their status or spec for references
+	b7machineList := &infrastructurev1beta1.Beskar7MachineList{}
+	if err := r.List(ctx, b7machineList, client.InNamespace(physicalHost.Namespace)); err != nil {
+		// Log error but don't fail the mapping
+		ctrl.LoggerFrom(ctx).Error(err, "Failed to list Beskar7Machines for PhysicalHost mapping", "PhysicalHost", physicalHost.Name)
+		return requests
+	}
+
+	// Check if any Beskar7Machine has this PhysicalHost in its ProviderID or status
+	for _, b7machine := range b7machineList.Items {
+		shouldReconcile := false
+
+		// Check if the ProviderID matches this PhysicalHost
+		if b7machine.Spec.ProviderID != nil {
+			namespace, name, err := parseProviderID(*b7machine.Spec.ProviderID)
+			if err == nil && namespace == physicalHost.Namespace && name == physicalHost.Name {
+				shouldReconcile = true
+			}
+		}
+
+		if shouldReconcile {
+			// Avoid duplicates
+			req := reconcile.Request{
+				NamespacedName: types.NamespacedName{
+					Namespace: b7machine.Namespace,
+					Name:      b7machine.Name,
+				},
+			}
+
+			// Check if we already have this request
+			found := false
+			for _, existingReq := range requests {
+				if existingReq == req {
+					found = true
+					break
+				}
+			}
+			if !found {
+				requests = append(requests, req)
+			}
+		}
+	}
+
+	ctrl.LoggerFrom(ctx).V(1).Info("PhysicalHost change mapped to Beskar7Machine reconcile requests",
+		"PhysicalHost", physicalHost.Name, "requests", len(requests))
+	return requests
+}
+
+// MachineToBeskar7Machine maps Machine events to Beskar7Machine reconcile requests.
+// When a CAPI Machine changes, find the corresponding Beskar7Machine and trigger reconciliation.
+func (r *Beskar7MachineReconciler) MachineToBeskar7Machine(ctx context.Context, obj client.Object) []reconcile.Request {
+	machine, ok := obj.(*clusterv1.Machine)
+	if !ok {
+		return nil
+	}
+
+	// Find the Beskar7Machine that is owned by this Machine
+	// The Beskar7Machine should have the Machine as its owner reference
+	b7machineList := &infrastructurev1beta1.Beskar7MachineList{}
+	if err := r.List(ctx, b7machineList, client.InNamespace(machine.Namespace)); err != nil {
+		ctrl.LoggerFrom(ctx).Error(err, "Failed to list Beskar7Machines for Machine mapping", "Machine", machine.Name)
+		return nil
+	}
+
+	var requests []reconcile.Request
+	for _, b7machine := range b7machineList.Items {
+		// Check if this Beskar7Machine is owned by the Machine
+		for _, ownerRef := range b7machine.OwnerReferences {
+			if ownerRef.Kind == "Machine" &&
+				ownerRef.APIVersion == "cluster.x-k8s.io/v1beta1" &&
+				ownerRef.Name == machine.Name &&
+				ownerRef.UID == machine.UID {
+				requests = append(requests, reconcile.Request{
+					NamespacedName: types.NamespacedName{
+						Namespace: b7machine.Namespace,
+						Name:      b7machine.Name,
+					},
+				})
+				break // Found the match, no need to check other owner refs
+			}
+		}
+	}
+
+	ctrl.LoggerFrom(ctx).V(1).Info("Machine change mapped to Beskar7Machine reconcile requests",
+		"Machine", machine.Name, "requests", len(requests))
+	return requests
 }
 
 // getRedfishClientForHost retrieves credentials and establishes a connection

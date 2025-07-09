@@ -32,9 +32,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
+	"k8s.io/apimachinery/pkg/types"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	conditions "sigs.k8s.io/cluster-api/util/conditions"
 	patch "sigs.k8s.io/cluster-api/util/patch"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
 const (
@@ -418,6 +421,42 @@ func (r *PhysicalHostReconciler) reconcileDelete(ctx context.Context, physicalHo
 func (r *PhysicalHostReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&infrastructurev1beta1.PhysicalHost{}).
-		// TODO: Add Watches for Secrets or Beskar7Machines if needed
+		Watches(
+			&corev1.Secret{},
+			handler.EnqueueRequestsFromMapFunc(r.SecretToPhysicalHosts),
+		).
 		Complete(r)
+}
+
+// SecretToPhysicalHosts maps a Secret event to reconcile requests for any PhysicalHost
+// that references the Secret.
+func (r *PhysicalHostReconciler) SecretToPhysicalHosts(ctx context.Context, obj client.Object) []reconcile.Request {
+	log := log.FromContext(ctx).WithValues("mapping", "SecretToPhysicalHosts")
+	secret, ok := obj.(*corev1.Secret)
+	if !ok {
+		log.Error(errors.New("unexpected type"), "Expected a Secret but got a %T", obj)
+		return nil
+	}
+
+	phList := &infrastructurev1beta1.PhysicalHostList{}
+	if err := r.List(ctx, phList, client.InNamespace(secret.Namespace)); err != nil {
+		log.Error(err, "failed to list PhysicalHosts in namespace", "namespace", secret.Namespace)
+		return nil
+	}
+
+	var requests []reconcile.Request
+	for _, ph := range phList.Items {
+		if ph.Spec.RedfishConnection.CredentialsSecretRef == secret.Name {
+			requests = append(requests, reconcile.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      ph.Name,
+					Namespace: ph.Namespace,
+				},
+			})
+		}
+	}
+	if len(requests) > 0 {
+		log.Info("Triggering reconciliation for PhysicalHosts due to secret change", "secret", secret.Name, "count", len(requests))
+	}
+	return requests
 }

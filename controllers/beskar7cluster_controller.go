@@ -34,6 +34,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	infrastructurev1beta1 "github.com/wrkode/beskar7/api/v1beta1"
+	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
 const (
@@ -285,6 +288,37 @@ func (r *Beskar7ClusterReconciler) reconcileDelete(ctx context.Context, logger l
 func (r *Beskar7ClusterReconciler) SetupWithManager(ctx context.Context, mgr ctrl.Manager, options controller.Options) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&infrastructurev1beta1.Beskar7Cluster{}).
-		// TODO: Add watches for CAPI Cluster if needed?
+		Watches(
+			&infrastructurev1beta1.PhysicalHost{},
+			handler.EnqueueRequestsFromMapFunc(r.PhysicalHostToBeskar7Clusters),
+		).
 		Complete(r)
+}
+
+// PhysicalHostToBeskar7Clusters maps a PhysicalHost event to reconcile requests for all Beskar7Clusters in the same namespace.
+func (r *Beskar7ClusterReconciler) PhysicalHostToBeskar7Clusters(ctx context.Context, obj client.Object) []reconcile.Request {
+	log := r.Log.WithValues("mapping", "PhysicalHostToBeskar7Clusters")
+	physicalHost, ok := obj.(*infrastructurev1beta1.PhysicalHost)
+	if !ok {
+		log.Error(errors.New("unexpected type"), "Expected a PhysicalHost but got a %T", obj)
+		return nil
+	}
+
+	clusterList := &infrastructurev1beta1.Beskar7ClusterList{}
+	if err := r.List(ctx, clusterList, client.InNamespace(physicalHost.Namespace)); err != nil {
+		log.Error(err, "failed to list Beskar7Clusters in namespace", "namespace", physicalHost.Namespace)
+		return nil
+	}
+
+	requests := make([]reconcile.Request, len(clusterList.Items))
+	for i, cluster := range clusterList.Items {
+		requests[i] = reconcile.Request{
+			NamespacedName: types.NamespacedName{
+				Name:      cluster.Name,
+				Namespace: cluster.Namespace,
+			},
+		}
+	}
+	log.V(1).Info("Triggering reconciliation for Beskar7Clusters in namespace", "namespace", physicalHost.Namespace, "count", len(requests))
+	return requests
 }
