@@ -196,6 +196,99 @@ var (
 		},
 		[]string{"consumer_type", "namespace"},
 	)
+
+	// Concurrent provisioning metrics
+	hostClaimAttempts = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "beskar7_host_claim_attempts_total",
+			Help: "Total number of host claim attempts",
+		},
+		[]string{"namespace", "outcome", "conflict_reason"},
+	)
+
+	hostClaimDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "beskar7_host_claim_duration_seconds",
+			Help:    "Duration of host claim operations",
+			Buckets: prometheus.DefBuckets,
+		},
+		[]string{"namespace", "outcome"},
+	)
+
+	provisioningQueueLength = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "beskar7_provisioning_queue_length",
+			Help: "Current length of the provisioning queue",
+		},
+		[]string{"namespace"},
+	)
+
+	provisioningQueueProcessingCount = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "beskar7_provisioning_queue_processing_count",
+			Help: "Current number of operations being processed in the provisioning queue",
+		},
+		[]string{"namespace"},
+	)
+
+	concurrentProvisioningOperations = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "beskar7_concurrent_provisioning_operations_total",
+			Help: "Total number of concurrent provisioning operations",
+		},
+		[]string{"namespace", "operation_type", "outcome"},
+	)
+
+	bmcCooldownWaits = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "beskar7_bmc_cooldown_waits_total",
+			Help: "Total number of times operations waited for BMC cooldown",
+		},
+		[]string{"namespace", "bmc_address"},
+	)
+
+	hostSelectionDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "beskar7_host_selection_duration_seconds",
+			Help:    "Duration of host selection algorithm",
+			Buckets: []float64{0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0},
+		},
+		[]string{"namespace", "selection_method"},
+	)
+
+	// Leader election claim coordination metrics
+	claimCoordinatorLeaderElection = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "beskar7_claim_coordinator_leader_election_total",
+			Help: "Total number of leader election events for claim coordinator",
+		},
+		[]string{"namespace", "event_type"},
+	)
+
+	claimCoordinatorResults = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "beskar7_claim_coordinator_results_total",
+			Help: "Total number of claim coordination results",
+		},
+		[]string{"namespace", "result_type"},
+	)
+
+	claimCoordinatorProcessing = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "beskar7_claim_coordinator_processing_duration_seconds",
+			Help:    "Duration of claim coordinator processing operations",
+			Buckets: prometheus.DefBuckets,
+		},
+		[]string{"namespace", "result_type"},
+	)
+
+	claimCoordinatorLeadershipDuration = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "beskar7_claim_coordinator_leadership_duration_seconds",
+			Help: "Duration of current leadership session for claim coordinator",
+		},
+		[]string{"namespace", "identity"},
+	)
 )
 
 // ReconciliationOutcome represents the result of a reconciliation
@@ -271,6 +364,19 @@ func Init() {
 		// Resource availability metrics
 		PhysicalHostAvailabilityGauge,
 		PhysicalHostConsumerMappingsGauge,
+		// Register new concurrent provisioning metrics
+		hostClaimAttempts,
+		hostClaimDuration,
+		provisioningQueueLength,
+		provisioningQueueProcessingCount,
+		concurrentProvisioningOperations,
+		bmcCooldownWaits,
+		hostSelectionDuration,
+		// Register leader election claim coordination metrics
+		claimCoordinatorLeaderElection,
+		claimCoordinatorResults,
+		claimCoordinatorProcessing,
+		claimCoordinatorLeadershipDuration,
 	)
 }
 
@@ -414,4 +520,75 @@ func RecordDeprovisioningOperation(namespace string, outcome ProvisioningOutcome
 		errorTypeStr = string(errorType)
 	}
 	PhysicalHostProvisioningTotal.WithLabelValues(string(outcome), namespace, errorTypeStr).Inc()
+}
+
+// ClaimOutcome represents the outcome of a host claim attempt
+type ClaimOutcome string
+
+const (
+	ClaimOutcomeSuccess  ClaimOutcome = "success"
+	ClaimOutcomeConflict ClaimOutcome = "conflict"
+	ClaimOutcomeNoHosts  ClaimOutcome = "no_hosts"
+	ClaimOutcomeError    ClaimOutcome = "error"
+)
+
+// ConflictReason represents the reason for a claim conflict
+type ConflictReason string
+
+const (
+	ConflictReasonOptimisticLock ConflictReason = "optimistic_lock"
+	ConflictReasonAlreadyClaimed ConflictReason = "already_claimed"
+	ConflictReasonInvalidState   ConflictReason = "invalid_state"
+	ConflictReasonNone           ConflictReason = "none"
+)
+
+// RecordHostClaimAttempt records a host claim attempt
+func RecordHostClaimAttempt(namespace string, outcome ClaimOutcome, conflictReason ConflictReason) {
+	hostClaimAttempts.WithLabelValues(namespace, string(outcome), string(conflictReason)).Inc()
+}
+
+// RecordHostClaimDuration records the duration of a host claim operation
+func RecordHostClaimDuration(namespace string, outcome ClaimOutcome, duration time.Duration) {
+	hostClaimDuration.WithLabelValues(namespace, string(outcome)).Observe(duration.Seconds())
+}
+
+// RecordProvisioningQueueStatus records the current provisioning queue status
+func RecordProvisioningQueueStatus(namespace string, queueLength, processingCount int) {
+	provisioningQueueLength.WithLabelValues(namespace).Set(float64(queueLength))
+	provisioningQueueProcessingCount.WithLabelValues(namespace).Set(float64(processingCount))
+}
+
+// RecordConcurrentProvisioningOperation records a concurrent provisioning operation
+func RecordConcurrentProvisioningOperation(namespace, operationType string, outcome ProvisioningOutcome) {
+	concurrentProvisioningOperations.WithLabelValues(namespace, operationType, string(outcome)).Inc()
+}
+
+// RecordBMCCooldownWait records when an operation waits for BMC cooldown
+func RecordBMCCooldownWait(namespace, bmcAddress string) {
+	bmcCooldownWaits.WithLabelValues(namespace, bmcAddress).Inc()
+}
+
+// RecordHostSelectionDuration records the duration of host selection
+func RecordHostSelectionDuration(namespace, selectionMethod string, duration time.Duration) {
+	hostSelectionDuration.WithLabelValues(namespace, selectionMethod).Observe(duration.Seconds())
+}
+
+// RecordClaimCoordinatorLeaderElection records a leader election event for claim coordinator
+func RecordClaimCoordinatorLeaderElection(namespace, eventType string) {
+	claimCoordinatorLeaderElection.WithLabelValues(namespace, eventType).Inc()
+}
+
+// RecordClaimCoordinatorResult records a claim coordination result
+func RecordClaimCoordinatorResult(namespace, resultType string) {
+	claimCoordinatorResults.WithLabelValues(namespace, resultType).Inc()
+}
+
+// RecordClaimCoordinatorProcessing records the duration of a claim coordinator processing operation
+func RecordClaimCoordinatorProcessing(namespace, resultType string, duration time.Duration) {
+	claimCoordinatorProcessing.WithLabelValues(namespace, resultType).Observe(duration.Seconds())
+}
+
+// RecordClaimCoordinatorLeadershipDuration records the duration of a leadership session
+func RecordClaimCoordinatorLeadershipDuration(namespace, identity string, duration time.Duration) {
+	claimCoordinatorLeadershipDuration.WithLabelValues(namespace, identity).Set(duration.Seconds())
 }

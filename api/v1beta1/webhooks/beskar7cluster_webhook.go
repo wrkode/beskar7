@@ -155,11 +155,8 @@ func (webhook *Beskar7ClusterWebhook) validatePort(port int32, fieldPath *field.
 		))
 	}
 
-	// Warn about well-known ports if it's a non-standard Kubernetes API port
-	if port < 1024 && port != 443 && port != 6443 {
-		// This would be a warning but we don't have a warning mechanism in this context
-		// The warning should be handled at a higher level
-	}
+	// Note: Well-known ports (< 1024) other than 443 and 6443 might require special privileges
+	// but are not considered validation errors
 
 	return allErrs
 }
@@ -183,7 +180,7 @@ func (webhook *Beskar7ClusterWebhook) isValidHostname(hostname string) bool {
 		}
 		// Check for valid characters (alphanumeric and hyphens, but not starting/ending with hyphen)
 		for i, r := range label {
-			if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || (r == '-' && i > 0 && i < len(label)-1)) {
+			if (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') && (r < '0' || r > '9') && (r != '-' || i == 0 || i == len(label)-1) {
 				return false
 			}
 		}

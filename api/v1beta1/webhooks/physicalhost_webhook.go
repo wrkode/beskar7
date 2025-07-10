@@ -485,9 +485,7 @@ func (webhook *PhysicalHostWebhook) validateRedfishAddress(address string) field
 	}
 
 	// Security recommendations
-	if parsedURL.Scheme == "http" {
-		// This will be reported as a warning in the main validation
-	}
+	// Note: HTTP scheme warnings are handled at the validation level
 
 	return allErrs
 }

@@ -37,6 +37,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 
 	infrastructurev1beta1 "github.com/wrkode/beskar7/api/v1beta1"
+	"github.com/wrkode/beskar7/internal/coordination"
 	internalmetrics "github.com/wrkode/beskar7/internal/metrics"
 	internalredfish "github.com/wrkode/beskar7/internal/redfish"
 	corev1 "k8s.io/api/core/v1"
@@ -55,11 +56,11 @@ const (
 // Beskar7MachineReconciler reconciles a Beskar7Machine object
 type Beskar7MachineReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
-	// RedfishClientFactory allows overriding the Redfish client creation for testing.
-	// If nil, internalredfish.NewClient will be used by default in getRedfishClientForHost.
+	Scheme               *runtime.Scheme
 	RedfishClientFactory internalredfish.RedfishClientFactory
 	Log                  logr.Logger
+	// HostClaimCoordinator manages concurrent host claiming
+	HostClaimCoordinator coordination.ClaimCoordinator
 }
 
 //+kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=beskar7machines,verbs=get;list;watch;create;update;patch;delete
@@ -268,12 +269,34 @@ func (r *Beskar7MachineReconciler) reconcileNormal(ctx context.Context, logger l
 func (r *Beskar7MachineReconciler) reconcileDelete(ctx context.Context, logger logr.Logger, b7machine *infrastructurev1beta1.Beskar7Machine) (ctrl.Result, error) {
 	logger.Info("Reconciling Beskar7Machine deletion")
 
-	// Mark conditions False
-	conditions.MarkFalse(b7machine, infrastructurev1beta1.InfrastructureReadyCondition, clusterv1.DeletingReason, clusterv1.ConditionSeverityInfo, "Beskar7Machine is being deleted")
-	conditions.MarkFalse(b7machine, infrastructurev1beta1.PhysicalHostAssociatedCondition, clusterv1.DeletingReason, clusterv1.ConditionSeverityInfo, "Beskar7Machine is being deleted")
+	// Use the HostClaimCoordinator for releasing if available
+	if r.HostClaimCoordinator != nil {
+		if err := r.HostClaimCoordinator.ReleaseHost(ctx, b7machine); err != nil {
+			logger.Error(err, "Failed to release host via coordination system")
+			return ctrl.Result{}, err
+		}
+		logger.Info("Successfully released host via coordination system")
+	} else {
+		// Fallback to original release logic
+		if err := r.releaseHostOriginal(ctx, logger, b7machine); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
 
-	// Get the associated PhysicalHost to release it
+	// Beskar7Machine is being deleted, remove the finalizer.
+	if controllerutil.RemoveFinalizer(b7machine, Beskar7MachineFinalizer) {
+		logger.Info("Removing finalizer")
+		// Patching is handled by the deferred patch function in Reconcile.
+	}
+
+	return ctrl.Result{}, nil
+}
+
+// releaseHostOriginal is the original host release implementation
+func (r *Beskar7MachineReconciler) releaseHostOriginal(ctx context.Context, logger logr.Logger, b7machine *infrastructurev1beta1.Beskar7Machine) error {
 	var physicalHost *infrastructurev1beta1.PhysicalHost
+
+	// If we have a ProviderID, try to get the associated PhysicalHost by name
 	if b7machine.Spec.ProviderID != nil && *b7machine.Spec.ProviderID != "" {
 		ns, name, err := parseProviderID(*b7machine.Spec.ProviderID)
 		if err != nil {
@@ -289,7 +312,7 @@ func (r *Beskar7MachineReconciler) reconcileDelete(ctx context.Context, logger l
 				if client.IgnoreNotFound(err) != nil {
 					logger.Error(err, "Failed to get PhysicalHost for release", "PhysicalHostName", name)
 					conditions.MarkFalse(b7machine, infrastructurev1beta1.PhysicalHostAssociatedCondition, infrastructurev1beta1.ReleasePhysicalHostFailedReason, clusterv1.ConditionSeverityWarning, "Failed to get PhysicalHost %s for release: %v", name, err.Error())
-					return ctrl.Result{}, err // Requeue
+					return err // Requeue
 				}
 				// Host not found, nothing to release.
 				logger.Info("Associated PhysicalHost not found, nothing to release", "PhysicalHostName", name)
@@ -312,7 +335,7 @@ func (r *Beskar7MachineReconciler) reconcileDelete(ctx context.Context, logger l
 			physicalHost.Spec.ConsumerRef.Name == b7machine.Name &&
 			physicalHost.Spec.ConsumerRef.Namespace == b7machine.Namespace {
 
-			// --- Try using Update instead of Patch for simplicity in test ---
+			// Clear the claim
 			originalHost := physicalHost.DeepCopy() // Keep for potential revert or logging
 			logger.Info("Attempting to release host via client.Update", "PhysicalHost", physicalHost.Name)
 			physicalHost.Spec.ConsumerRef = nil
@@ -321,50 +344,150 @@ func (r *Beskar7MachineReconciler) reconcileDelete(ctx context.Context, logger l
 			if err := r.Update(ctx, physicalHost); err != nil {
 				logger.Error(err, "Failed to Update PhysicalHost for release", "PhysicalHost", physicalHost.Name)
 				conditions.MarkFalse(b7machine, infrastructurev1beta1.PhysicalHostAssociatedCondition, infrastructurev1beta1.ReleasePhysicalHostFailedReason, clusterv1.ConditionSeverityWarning, "Failed to update PhysicalHost %s for release: %v", originalHost.Name, err.Error())
-				// Attempt to revert local change before returning error?
-				// physicalHost.Spec = originalHost.Spec
-				return ctrl.Result{}, err // Requeue to retry update
+				return err // Requeue to retry update
 			}
-			// --- End Update attempt ---
-
-			/* --- Original Patch Logic ---
-			originalHostToPatch := physicalHost.DeepCopy()
-			physicalHost.Spec.ConsumerRef = nil
-			physicalHost.Spec.BootISOSource = nil
-			// No need to manage UserDataSecretRef here, PhysicalHost controller should handle it if needed during its own delete/deprovision.
-
-			hostPatchHelper, err := patch.NewHelper(originalHostToPatch, r.Client)
-			if err != nil {
-				logger.Error(err, "Failed to init patch helper for releasing PhysicalHost", "PhysicalHost", physicalHost.Name)
-				conditions.MarkFalse(b7machine, infrastructurev1beta1.PhysicalHostAssociatedCondition, infrastructurev1beta1.ReleasePhysicalHostFailedReason, clusterv1.ConditionSeverityWarning, "Failed to init patch helper for release: %v", err.Error())
-				return ctrl.Result{}, err
-			}
-			if err := hostPatchHelper.Patch(ctx, physicalHost); err != nil {
-				logger.Error(err, "Failed to patch PhysicalHost for release", "PhysicalHost", physicalHost.Name)
-				conditions.MarkFalse(b7machine, infrastructurev1beta1.PhysicalHostAssociatedCondition, infrastructurev1beta1.ReleasePhysicalHostFailedReason, clusterv1.ConditionSeverityWarning, "Failed to patch PhysicalHost %s for release: %v", physicalHost.Name, err.Error())
-				return ctrl.Result{}, err // Requeue to retry patch
-			}
-			--- End Original Patch Logic --- */
 
 			logger.Info("Successfully released PhysicalHost", "PhysicalHost", physicalHost.Name)
-			// TODO: Maybe wait briefly or requeue to allow PhysicalHost controller to react?
 		} else {
 			logger.Info("PhysicalHost already released or claimed by another resource", "PhysicalHost", physicalHost.Name)
 		}
 	}
 
-	// Beskar7Machine is being deleted, remove the finalizer.
-	if controllerutil.RemoveFinalizer(b7machine, Beskar7MachineFinalizer) {
-		logger.Info("Removing finalizer")
-		// Patching is handled by the deferred patch function in Reconcile.
-	}
-
-	return ctrl.Result{}, nil
+	return nil
 }
 
 // findAndClaimOrGetAssociatedHost tries to find an available PhysicalHost and claim it,
 // or returns the PhysicalHost already associated with the Beskar7Machine.
 func (r *Beskar7MachineReconciler) findAndClaimOrGetAssociatedHost(ctx context.Context, logger logr.Logger, b7machine *infrastructurev1beta1.Beskar7Machine) (*infrastructurev1beta1.PhysicalHost, ctrl.Result, error) {
+	logger.Info("Attempting to find associated or available PhysicalHost using coordination system")
+
+	// Use the HostClaimCoordinator if available, fallback to original logic if not
+	if r.HostClaimCoordinator != nil {
+		return r.findAndClaimHostWithCoordination(ctx, logger, b7machine)
+	}
+
+	// Fallback to original implementation for backward compatibility
+	return r.findAndClaimHostOriginal(ctx, logger, b7machine)
+}
+
+// findAndClaimHostWithCoordination uses the coordination system for atomic claiming
+func (r *Beskar7MachineReconciler) findAndClaimHostWithCoordination(ctx context.Context, logger logr.Logger, b7machine *infrastructurev1beta1.Beskar7Machine) (*infrastructurev1beta1.PhysicalHost, ctrl.Result, error) {
+	// Create claim request
+	request := coordination.ClaimRequest{
+		Machine:       b7machine,
+		ImageURL:      b7machine.Spec.ImageURL,
+		RequiredSpecs: coordination.HostRequirements{
+			// Future: Add hardware requirements based on machine spec
+		},
+	}
+
+	// Attempt to claim a host
+	result, err := r.HostClaimCoordinator.ClaimHost(ctx, request)
+	if err != nil {
+		logger.Error(err, "Failed to claim host via coordination system")
+		return nil, ctrl.Result{}, err
+	}
+
+	if !result.ClaimSuccess {
+		if result.Retry {
+			logger.Info("No hosts available, will retry", "retryAfter", result.RetryAfter)
+			return nil, ctrl.Result{RequeueAfter: result.RetryAfter}, nil
+		}
+		return nil, ctrl.Result{}, result.Error
+	}
+
+	// Successfully claimed host, now configure boot parameters
+	logger.Info("Successfully claimed host via coordination system", "host", result.Host.Name)
+
+	// Configure Redfish boot parameters
+	if err := r.configureHostBootParameters(ctx, logger, result.Host, b7machine); err != nil {
+		logger.Error(err, "Failed to configure boot parameters after claiming host")
+		// Host is claimed but boot config failed - this will be retried on next reconcile
+		return result.Host, ctrl.Result{RequeueAfter: 15 * time.Second}, err
+	}
+
+	return result.Host, ctrl.Result{RequeueAfter: 15 * time.Second}, nil
+}
+
+// configureHostBootParameters configures the boot parameters for a claimed host
+func (r *Beskar7MachineReconciler) configureHostBootParameters(ctx context.Context, logger logr.Logger, host *infrastructurev1beta1.PhysicalHost, b7machine *infrastructurev1beta1.Beskar7Machine) error {
+	// Determine provisioning mode and configure boot on the BMC
+	provisioningMode := b7machine.Spec.ProvisioningMode
+	if provisioningMode == "" {
+		if b7machine.Spec.ConfigURL != "" {
+			provisioningMode = "RemoteConfig"
+		} else {
+			provisioningMode = "PreBakedISO"
+		}
+		logger.Info("ProvisioningMode defaulted", "Mode", provisioningMode)
+	}
+
+	// Get Redfish client for the claimed host
+	rfClient, err := r.getRedfishClientForHost(ctx, logger, host)
+	if err != nil {
+		logger.Error(err, "Failed to get Redfish client for host boot configuration", "host", host.Name)
+		return err
+	}
+	defer rfClient.Close(ctx)
+
+	switch provisioningMode {
+	case "RemoteConfig":
+		logger.Info("Configuring boot for RemoteConfig mode")
+		if b7machine.Spec.ConfigURL == "" {
+			err := errors.New("ConfigURL must be set when ProvisioningMode is RemoteConfig")
+			logger.Error(err, "Invalid spec")
+			return err
+		}
+
+		var kernelParams []string
+		switch b7machine.Spec.OSFamily {
+		case "kairos":
+			kernelParams = []string{fmt.Sprintf("config_url=%s", b7machine.Spec.ConfigURL)}
+		case "talos":
+			kernelParams = []string{fmt.Sprintf("talos.config=%s", b7machine.Spec.ConfigURL)}
+		case "flatcar":
+			kernelParams = []string{fmt.Sprintf("flatcar.ignition.config.url=%s", b7machine.Spec.ConfigURL)}
+		case "LeapMicro":
+			kernelParams = []string{fmt.Sprintf("combustion.path=%s", b7machine.Spec.ConfigURL)}
+		default:
+			err := errors.Errorf("unsupported OSFamily for RemoteConfig: %s", b7machine.Spec.OSFamily)
+			logger.Error(err, "Invalid spec")
+			return err
+		}
+		logger.Info("Calculated kernel parameters", "Params", kernelParams)
+
+		if err := rfClient.SetBootParameters(ctx, kernelParams); err != nil {
+			logger.Error(err, "Failed to set boot parameters for RemoteConfig", "Params", kernelParams)
+			return err
+		}
+		if err := rfClient.SetBootSourceISO(ctx, b7machine.Spec.ImageURL); err != nil {
+			logger.Error(err, "Failed to set boot source ISO for RemoteConfig", "ImageURL", b7machine.Spec.ImageURL)
+			return err
+		}
+
+	case "PreBakedISO":
+		logger.Info("Configuring boot for PreBakedISO mode")
+		if err := rfClient.SetBootParameters(ctx, nil); err != nil { // Clear any existing boot params
+			logger.Error(err, "Failed to clear boot parameters for PreBakedISO")
+			return err
+		}
+		if err := rfClient.SetBootSourceISO(ctx, b7machine.Spec.ImageURL); err != nil {
+			logger.Error(err, "Failed to set boot source ISO for PreBakedISO", "ImageURL", b7machine.Spec.ImageURL)
+			return err
+		}
+
+	default:
+		err := errors.Errorf("invalid ProvisioningMode: %s", provisioningMode)
+		logger.Error(err, "Invalid spec")
+		return err
+	}
+
+	logger.Info("Successfully configured boot parameters for claimed host")
+	return nil
+}
+
+// findAndClaimHostOriginal is the original implementation for backward compatibility
+func (r *Beskar7MachineReconciler) findAndClaimHostOriginal(ctx context.Context, logger logr.Logger, b7machine *infrastructurev1beta1.Beskar7Machine) (*infrastructurev1beta1.PhysicalHost, ctrl.Result, error) {
 	logger.Info("Attempting to find associated or available PhysicalHost")
 
 	// First, check if ProviderID is set and try to get that host
