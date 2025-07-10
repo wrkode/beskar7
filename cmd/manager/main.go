@@ -41,8 +41,8 @@ import (
 	infrastructurev1beta1 "github.com/wrkode/beskar7/api/v1beta1"
 	"github.com/wrkode/beskar7/api/v1beta1/webhooks"
 	"github.com/wrkode/beskar7/controllers"
+	"github.com/wrkode/beskar7/internal/coordination"
 	internalmetrics "github.com/wrkode/beskar7/internal/metrics"
-	internalredfish "github.com/wrkode/beskar7/internal/redfish"
 	"github.com/wrkode/beskar7/internal/security"
 	//+kubebuilder:scaffold:imports
 )
@@ -74,6 +74,10 @@ func main() {
 	var leaderElectionRenewDeadline time.Duration
 	var leaderElectionRetryPeriod time.Duration
 	var leaderElectionReleaseOnCancel bool
+	var enableClaimCoordinatorLeaderElection bool
+	var claimCoordinatorLeaseDuration time.Duration
+	var claimCoordinatorRenewDeadline time.Duration
+	var claimCoordinatorRetryPeriod time.Duration
 
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
@@ -88,6 +92,14 @@ func main() {
 		"The duration the clients should wait between attempting acquisition and renewal of a leadership.")
 	flag.BoolVar(&leaderElectionReleaseOnCancel, "leader-elect-release-on-cancel", true,
 		"If the leader should step down voluntarily when the Manager ends.")
+	flag.BoolVar(&enableClaimCoordinatorLeaderElection, "enable-claim-coordinator-leader-election", false,
+		"Enable leader election for claim coordination to handle high-contention scenarios.")
+	flag.DurationVar(&claimCoordinatorLeaseDuration, "claim-coordinator-lease-duration", 15*time.Second,
+		"The duration that non-leader candidates will wait to force acquire claim coordination leadership.")
+	flag.DurationVar(&claimCoordinatorRenewDeadline, "claim-coordinator-renew-deadline", 10*time.Second,
+		"The interval between attempts by the acting claim coordinator leader to renew leadership.")
+	flag.DurationVar(&claimCoordinatorRetryPeriod, "claim-coordinator-retry-period", 2*time.Second,
+		"The duration claim coordinator clients should wait between attempting acquisition and renewal of leadership.")
 	flag.BoolVar(&enableSecurityMonitoring, "enable-security-monitoring", true,
 		"Enable security monitoring for TLS, RBAC, and credential validation.")
 	opts := zap.Options{
@@ -122,12 +134,55 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Create kubernetes client for leader election (if needed)
+	var kubernetesClient kubernetes.Interface
+	if enableClaimCoordinatorLeaderElection {
+		kubernetesClient, err = kubernetes.NewForConfig(mgr.GetConfig())
+		if err != nil {
+			setupLog.Error(err, "unable to create Kubernetes client for claim coordinator leader election")
+			os.Exit(1)
+		}
+	}
+
+	// Setup host claim coordinator (with optional leader election)
+	var hostClaimCoordinator coordination.ClaimCoordinator
+	if enableClaimCoordinatorLeaderElection {
+		setupLog.Info("Setting up leader election claim coordinator")
+		leaderElectionConfig := coordination.LeaderElectionConfig{
+			Namespace:          "beskar7-system",
+			Identity:           "beskar7-claim-coordinator", // This should be unique per pod in production
+			LeaseDuration:      claimCoordinatorLeaseDuration,
+			RenewDeadline:      claimCoordinatorRenewDeadline,
+			RetryPeriod:        claimCoordinatorRetryPeriod,
+			ProcessingInterval: 1 * time.Second,
+		}
+
+		leaderElectionCoordinator := coordination.NewLeaderElectionClaimCoordinator(
+			mgr.GetClient(),
+			kubernetesClient,
+			leaderElectionConfig,
+		)
+
+		// Start the leader election coordinator
+		if err := mgr.Add(&leaderElectionCoordinatorRunnable{coordinator: leaderElectionCoordinator}); err != nil {
+			setupLog.Error(err, "unable to add leader election claim coordinator to manager")
+			os.Exit(1)
+		}
+
+		hostClaimCoordinator = &leaderElectionClaimCoordinatorWrapper{coordinator: leaderElectionCoordinator}
+		setupLog.Info("Leader election claim coordinator configured")
+	} else {
+		setupLog.Info("Using standard host claim coordinator")
+		hostClaimCoordinator = coordination.NewHostClaimCoordinator(mgr.GetClient())
+	}
+
 	// Setup controllers here
 	if err = (&controllers.Beskar7MachineReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
-		// Use the default NewClient, which will be shared.
-		RedfishClientFactory: internalredfish.NewClient,
+		Client:               mgr.GetClient(),
+		Scheme:               mgr.GetScheme(),
+		RedfishClientFactory: nil, // Use default
+		Log:                  ctrl.Log.WithName("controllers").WithName("Beskar7Machine"),
+		HostClaimCoordinator: hostClaimCoordinator,
 	}).SetupWithManager(context.Background(), mgr, controller.Options{MaxConcurrentReconciles: 10}); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Beskar7Machine")
 		os.Exit(1)
@@ -141,10 +196,18 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Initialize ProvisioningQueue for PhysicalHost controller
+	provisioningQueue := coordination.NewProvisioningQueue(
+		5,  // maxConcurrentOps: Allow up to 5 concurrent BMC operations
+		50, // maxQueueSize: Queue up to 50 operations
+	)
+
 	if err = (&controllers.PhysicalHostReconciler{
 		Client:               mgr.GetClient(),
 		Scheme:               mgr.GetScheme(),
-		RedfishClientFactory: internalredfish.NewClient,
+		RedfishClientFactory: nil, // Use default
+		Log:                  ctrl.Log.WithName("controllers").WithName("PhysicalHost"),
+		ProvisioningQueue:    provisioningQueue,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "PhysicalHost")
 		os.Exit(1)
@@ -214,6 +277,28 @@ func main() {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)
 	}
+}
+
+// leaderElectionCoordinatorRunnable wraps the leader election coordinator to implement manager.Runnable
+type leaderElectionCoordinatorRunnable struct {
+	coordinator *coordination.LeaderElectionClaimCoordinator
+}
+
+func (r *leaderElectionCoordinatorRunnable) Start(ctx context.Context) error {
+	return r.coordinator.Start(ctx)
+}
+
+// leaderElectionClaimCoordinatorWrapper adapts the leader election coordinator to the ClaimCoordinator interface
+type leaderElectionClaimCoordinatorWrapper struct {
+	coordinator *coordination.LeaderElectionClaimCoordinator
+}
+
+func (w *leaderElectionClaimCoordinatorWrapper) ClaimHost(ctx context.Context, request coordination.ClaimRequest) (*coordination.ClaimResult, error) {
+	return w.coordinator.ClaimHostWithLeaderElection(ctx, request)
+}
+
+func (w *leaderElectionClaimCoordinatorWrapper) ReleaseHost(ctx context.Context, machine *infrastructurev1beta1.Beskar7Machine) error {
+	return w.coordinator.ReleaseHost(ctx, machine)
 }
 
 // securityMonitorManager wraps the security monitor to implement manager.Runnable

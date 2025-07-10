@@ -41,6 +41,7 @@ import (
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	conditions "sigs.k8s.io/cluster-api/util/conditions"
 
+	"github.com/wrkode/beskar7/internal/coordination"
 	internalmetrics "github.com/wrkode/beskar7/internal/metrics"
 	"github.com/wrkode/beskar7/internal/statemachine"
 )
@@ -63,6 +64,8 @@ type PhysicalHostReconciler struct {
 	reconcileTimeout     time.Duration
 	stuckStateTimeout    time.Duration
 	maxRetries           int
+	// ProvisioningQueue manages BMC operations to prevent overload
+	ProvisioningQueue *coordination.ProvisioningQueue
 }
 
 //+kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=physicalhosts,verbs=get;list;watch;create;update;patch;delete

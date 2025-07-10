@@ -84,7 +84,9 @@ func (v *TLSValidator) ValidateTLSEndpoint(ctx context.Context, endpoint string)
 		result.Errors = append(result.Errors, fmt.Sprintf("Failed to connect: %v", err))
 		return result, nil
 	}
-	defer conn.Close()
+	defer func() {
+		_ = conn.Close() // Ignore close error as it's not critical for validation
+	}()
 
 	// Get the peer certificate chain
 	state := conn.ConnectionState()
