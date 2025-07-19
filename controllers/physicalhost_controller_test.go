@@ -11,6 +11,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/record"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	conditions "sigs.k8s.io/cluster-api/util/conditions"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -18,34 +19,44 @@ import (
 
 	infrastructurev1beta1 "github.com/wrkode/beskar7/api/v1beta1"
 	internalredfish "github.com/wrkode/beskar7/internal/redfish" // Import internal redfish
+	"github.com/wrkode/beskar7/internal/statemachine"
 )
 
 var _ = Describe("PhysicalHost Controller", func() {
 
 	const ( // Define constants for test resources
-		PhNamespace = "default"
-		PhName      = "test-physicalhost"
-		SecretName  = "test-redfish-credentials"
-		Timeout     = time.Second * 10
-		Interval    = time.Millisecond * 250
+		Timeout  = time.Second * 10
+		Interval = time.Millisecond * 250
 	)
+
+	// Helper function to reconcile with timeout context
+	reconcileWithTimeout := func(reconciler *PhysicalHostReconciler, phLookupKey types.NamespacedName) (ctrl.Result, error) {
+		reconcileCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+		return reconciler.Reconcile(reconcileCtx, ctrl.Request{NamespacedName: phLookupKey})
+	}
 
 	Context("When reconciling a PhysicalHost", func() {
 		var physicalHost *infrastructurev1beta1.PhysicalHost
 		var credentialSecret *corev1.Secret
 		var mockRfClient *internalredfish.MockClient // Added mock client variable
 		var reconciler *PhysicalHostReconciler       // Added reconciler variable
+		var testNs *corev1.Namespace
 
 		BeforeEach(func() {
-			// Create namespace if needed (usually default exists)
-			ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: PhNamespace}}
-			Expect(k8sClient.Create(ctx, ns)).To(SatisfyAny(Succeed(), MatchError(ContainSubstring("already exists"))))
+			// Create a unique namespace for this test
+			testNs = &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					GenerateName: "physicalhost-test-",
+				},
+			}
+			Expect(k8sClient.Create(ctx, testNs)).To(Succeed())
 
-			// Create the credential secret
+			// Create the credential secret with a unique name
 			credentialSecret = &corev1.Secret{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      SecretName,
-					Namespace: PhNamespace,
+					Name:      "test-redfish-credentials",
+					Namespace: testNs.Name,
 				},
 				Data: map[string][]byte{
 					"username": []byte("testuser"),
@@ -57,13 +68,13 @@ var _ = Describe("PhysicalHost Controller", func() {
 			// Define the PhysicalHost resource
 			physicalHost = &infrastructurev1beta1.PhysicalHost{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      PhName,
-					Namespace: PhNamespace,
+					Name:      "test-physicalhost",
+					Namespace: testNs.Name,
 				},
 				Spec: infrastructurev1beta1.PhysicalHostSpec{
 					RedfishConnection: infrastructurev1beta1.RedfishConnection{
-						Address:              "redfish-mock.example.com", // Doesn't matter for mock
-						CredentialsSecretRef: SecretName,
+						Address:              "https://redfish-mock.example.com", // Doesn't matter for mock
+						CredentialsSecretRef: credentialSecret.Name,
 					},
 				},
 			}
@@ -73,31 +84,41 @@ var _ = Describe("PhysicalHost Controller", func() {
 
 			// Create the reconciler instance for the test
 			reconciler = &PhysicalHostReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
+				Client:   k8sClient, // Use the properly configured client from test suite
+				Scheme:   k8sClient.Scheme(),
+				Log:      ctrl.Log.WithName("physicalhost-test"),
+				Recorder: record.NewFakeRecorder(100), // Add event recorder for conditions
 				// Define a factory that returns our mock client instance
 				RedfishClientFactory: func(ctx context.Context, address, username, password string, insecure bool) (internalredfish.Client, error) {
 					// You could add assertions here on address/username/password if needed
 					return mockRfClient, nil
 				},
+				// Set timeouts for test environment to prevent internal timeout issues
+				reconcileTimeout:  60 * time.Second, // Internal reconcile timeout
+				stuckStateTimeout: 5 * time.Minute,  // Stuck state detection timeout
+				maxRetries:        3,                // Max retries for state transitions
+				// Initialize state machine components
+				stateMachine:         statemachine.NewPhysicalHostStateMachine(ctrl.Log.WithName("state-machine")),
+				stateTransitionGuard: statemachine.NewStateTransitionGuard(k8sClient, ctrl.Log.WithName("transition-guard")),
+				stateRecoveryManager: statemachine.NewStateRecoveryManager(k8sClient, ctrl.Log.WithName("recovery-manager")),
 			}
 		})
 
 		AfterEach(func() {
-			// Clean up resources
-			Expect(k8sClient.Delete(ctx, physicalHost)).To(Succeed())
-			Expect(k8sClient.Delete(ctx, credentialSecret)).To(Succeed())
-			// Optionally delete namespace if created for test
+			// Clean up the namespace which will clean up all resources
+			Expect(k8sClient.Delete(ctx, testNs)).To(Succeed())
 		})
 
 		It("Should successfully reconcile and become Available", func() {
 			By("Creating the PhysicalHost resource")
 			Expect(k8sClient.Create(ctx, physicalHost)).To(Succeed())
 
-			phLookupKey := types.NamespacedName{Name: PhName, Namespace: PhNamespace}
+			phLookupKey := types.NamespacedName{Name: physicalHost.Name, Namespace: physicalHost.Namespace}
 
-			// Directly reconcile once
-			_, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: phLookupKey})
+			// Directly reconcile once with timeout context
+			reconcileCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+			defer cancel()
+			_, err := reconciler.Reconcile(reconcileCtx, ctrl.Request{NamespacedName: phLookupKey})
 			Expect(err).NotTo(HaveOccurred(), "First reconcile loop failed")
 
 			// First reconcile adds finalizer and requeues
@@ -108,7 +129,9 @@ var _ = Describe("PhysicalHost Controller", func() {
 			}, Timeout, Interval).Should(Succeed(), "Finalizer should be added")
 
 			By("Reconciling again after finalizer addition")
-			_, err = reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: phLookupKey})
+			reconcileCtx2, cancel2 := context.WithTimeout(ctx, 30*time.Second)
+			defer cancel2()
+			_, err = reconciler.Reconcile(reconcileCtx2, ctrl.Request{NamespacedName: phLookupKey})
 			Expect(err).NotTo(HaveOccurred(), "Second reconcile loop failed")
 
 			// Now expect the state to become Available
@@ -133,8 +156,8 @@ var _ = Describe("PhysicalHost Controller", func() {
 			mockRfClient.InsertedISO = "http://example.com/test.iso" // Simulate media inserted
 
 			// Use unique names for this test
-			deletePhName := PhName + "-delete"
-			deleteSecretName := SecretName + "-delete"
+			deletePhName := physicalHost.Name + "-delete"
+			deleteSecretName := credentialSecret.Name + "-delete"
 
 			phToCreate := physicalHost.DeepCopy()
 			phToCreate.Name = deletePhName
@@ -153,13 +176,13 @@ var _ = Describe("PhysicalHost Controller", func() {
 			Expect(k8sClient.Create(ctx, phToCreate)).To(Succeed())
 			Eventually(func(g Gomega) {
 				getStatusPh := &infrastructurev1beta1.PhysicalHost{}
-				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: deletePhName, Namespace: PhNamespace}, getStatusPh)).To(Succeed())
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: deletePhName, Namespace: physicalHost.Namespace}, getStatusPh)).To(Succeed())
 				getStatusPh.Status.State = infrastructurev1beta1.StateProvisioned
 				getStatusPh.Status.ObservedPowerState = string(redfish.OnPowerState)
 				g.Expect(k8sClient.Status().Update(ctx, getStatusPh)).To(Succeed())
 			}, Timeout, Interval).Should(Succeed(), "Failed to set initial status for deletion test")
 
-			phLookupKey := types.NamespacedName{Name: deletePhName, Namespace: PhNamespace}
+			phLookupKey := types.NamespacedName{Name: deletePhName, Namespace: physicalHost.Namespace}
 
 			By("Deleting the PhysicalHost resource")
 			Expect(k8sClient.Delete(ctx, phToCreate)).To(Succeed())
@@ -167,7 +190,9 @@ var _ = Describe("PhysicalHost Controller", func() {
 			By("Reconciling to trigger deprovisioning, Redfish actions, and finalizer removal setup")
 			// A single reconcile should be enough for reconcileDelete to do its work.
 			// The deferred patch in the main Reconcile loop will handle the actual finalizer removal from the object.
-			_, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: phLookupKey})
+			deleteCtx, deleteCancel := context.WithTimeout(ctx, 30*time.Second)
+			defer deleteCancel()
+			_, err := reconciler.Reconcile(deleteCtx, ctrl.Request{NamespacedName: phLookupKey})
 			Expect(err).NotTo(HaveOccurred(), "Reconcile for deprovisioning failed")
 
 			// Verify mock client methods were called for deprovisioning IMMEDIATELY after the reconcile call
@@ -212,8 +237,8 @@ var _ = Describe("PhysicalHost Controller", func() {
 
 		It("should handle Redfish connection failure", func() {
 			By("Creating PhysicalHost with mock that fails connection")
-			failedConnPhName := PhName + "-connection-fail"
-			failedConnSecretName := SecretName + "-connection-fail"
+			failedConnPhName := physicalHost.Name + "-connection-fail"
+			failedConnSecretName := credentialSecret.Name + "-connection-fail"
 
 			// Create credentials secret
 			failedSecret := credentialSecret.DeepCopy()
@@ -228,16 +253,26 @@ var _ = Describe("PhysicalHost Controller", func() {
 
 			// Create reconciler that simulates connection failure
 			failedReconciler := &PhysicalHostReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
+				Client:   k8sClient,
+				Scheme:   k8sClient.Scheme(),
+				Log:      ctrl.Log.WithName("physicalhost-test-failed"),
+				Recorder: record.NewFakeRecorder(100),
 				RedfishClientFactory: func(ctx context.Context, address, username, password string, insecure bool) (internalredfish.Client, error) {
 					return nil, fmt.Errorf("connection timeout: unable to connect to %s", address)
 				},
+				// Set timeouts for test environment
+				reconcileTimeout:  60 * time.Second,
+				stuckStateTimeout: 5 * time.Minute,
+				maxRetries:        3,
+				// Initialize state machine components
+				stateMachine:         statemachine.NewPhysicalHostStateMachine(ctrl.Log.WithName("state-machine")),
+				stateTransitionGuard: statemachine.NewStateTransitionGuard(k8sClient, ctrl.Log.WithName("transition-guard")),
+				stateRecoveryManager: statemachine.NewStateRecoveryManager(k8sClient, ctrl.Log.WithName("recovery-manager")),
 			}
 
 			Expect(k8sClient.Create(ctx, failedConnPh)).To(Succeed())
 
-			phLookupKey := types.NamespacedName{Name: failedConnPhName, Namespace: PhNamespace}
+			phLookupKey := types.NamespacedName{Name: failedConnPhName, Namespace: physicalHost.Namespace}
 
 			By("First reconcile adds finalizer")
 			result, err := failedReconciler.Reconcile(ctx, ctrl.Request{NamespacedName: phLookupKey})
@@ -267,17 +302,17 @@ var _ = Describe("PhysicalHost Controller", func() {
 
 		It("should handle secret not found", func() {
 			By("Creating PhysicalHost with reference to non-existent secret")
-			noSecretPhName := PhName + "-no-secret"
+			noSecretPhName := physicalHost.Name + "-no-secret"
 			noSecretPh := physicalHost.DeepCopy()
 			noSecretPh.Name = noSecretPhName
 			noSecretPh.Spec.RedfishConnection.CredentialsSecretRef = "non-existent-secret"
 
 			Expect(k8sClient.Create(ctx, noSecretPh)).To(Succeed())
 
-			phLookupKey := types.NamespacedName{Name: noSecretPhName, Namespace: PhNamespace}
+			phLookupKey := types.NamespacedName{Name: noSecretPhName, Namespace: physicalHost.Namespace}
 
 			By("First reconcile adds finalizer")
-			result, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: phLookupKey})
+			result, err := reconcileWithTimeout(reconciler, phLookupKey)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result.Requeue).To(BeTrue())
 
@@ -302,11 +337,11 @@ var _ = Describe("PhysicalHost Controller", func() {
 
 		It("should handle secret with missing data", func() {
 			By("Creating secret with missing username/password")
-			invalidDataSecretName := SecretName + "-invalid-data"
+			invalidDataSecretName := credentialSecret.Name + "-invalid-data"
 			invalidDataSecret := &corev1.Secret{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      invalidDataSecretName,
-					Namespace: PhNamespace,
+					Namespace: physicalHost.Namespace,
 				},
 				Data: map[string][]byte{
 					"username": []byte("testuser"),
@@ -315,14 +350,14 @@ var _ = Describe("PhysicalHost Controller", func() {
 			}
 			Expect(k8sClient.Create(ctx, invalidDataSecret)).To(Succeed())
 
-			invalidDataPhName := PhName + "-invalid-data"
+			invalidDataPhName := physicalHost.Name + "-invalid-data"
 			invalidDataPh := physicalHost.DeepCopy()
 			invalidDataPh.Name = invalidDataPhName
 			invalidDataPh.Spec.RedfishConnection.CredentialsSecretRef = invalidDataSecretName
 
 			Expect(k8sClient.Create(ctx, invalidDataPh)).To(Succeed())
 
-			phLookupKey := types.NamespacedName{Name: invalidDataPhName, Namespace: PhNamespace}
+			phLookupKey := types.NamespacedName{Name: invalidDataPhName, Namespace: physicalHost.Namespace}
 
 			By("First reconcile adds finalizer")
 			result, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: phLookupKey})
@@ -351,8 +386,8 @@ var _ = Describe("PhysicalHost Controller", func() {
 
 		It("should handle Redfish query failures", func() {
 			By("Creating PhysicalHost with mock that fails queries")
-			queryFailPhName := PhName + "-query-fail"
-			queryFailSecretName := SecretName + "-query-fail"
+			queryFailPhName := physicalHost.Name + "-query-fail"
+			queryFailSecretName := credentialSecret.Name + "-query-fail"
 
 			// Create credentials secret
 			queryFailSecret := credentialSecret.DeepCopy()
@@ -367,11 +402,21 @@ var _ = Describe("PhysicalHost Controller", func() {
 
 			// Create reconciler with failing query client
 			queryFailReconciler := &PhysicalHostReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
+				Client:   k8sClient,
+				Scheme:   k8sClient.Scheme(),
+				Log:      ctrl.Log.WithName("physicalhost-test-queryfail"),
+				Recorder: record.NewFakeRecorder(100),
 				RedfishClientFactory: func(ctx context.Context, address, username, password string, insecure bool) (internalredfish.Client, error) {
 					return queryFailMockClient, nil // Connection succeeds, queries fail
 				},
+				// Set timeouts for test environment
+				reconcileTimeout:  60 * time.Second,
+				stuckStateTimeout: 5 * time.Minute,
+				maxRetries:        3,
+				// Initialize state machine components
+				stateMachine:         statemachine.NewPhysicalHostStateMachine(ctrl.Log.WithName("state-machine")),
+				stateTransitionGuard: statemachine.NewStateTransitionGuard(k8sClient, ctrl.Log.WithName("transition-guard")),
+				stateRecoveryManager: statemachine.NewStateRecoveryManager(k8sClient, ctrl.Log.WithName("recovery-manager")),
 			}
 
 			// Create PhysicalHost
@@ -381,7 +426,7 @@ var _ = Describe("PhysicalHost Controller", func() {
 
 			Expect(k8sClient.Create(ctx, queryFailPh)).To(Succeed())
 
-			phLookupKey := types.NamespacedName{Name: queryFailPhName, Namespace: PhNamespace}
+			phLookupKey := types.NamespacedName{Name: queryFailPhName, Namespace: physicalHost.Namespace}
 
 			By("First reconcile adds finalizer")
 			result, err := queryFailReconciler.Reconcile(ctx, ctrl.Request{NamespacedName: phLookupKey})
@@ -416,8 +461,8 @@ var _ = Describe("PhysicalHost Controller", func() {
 
 		It("should handle provisioning flow when claimed by machine", func() {
 			By("Creating PhysicalHost that gets claimed for provisioning")
-			provisionPhName := PhName + "-provision"
-			provisionSecretName := SecretName + "-provision"
+			provisionPhName := physicalHost.Name + "-provision"
+			provisionSecretName := credentialSecret.Name + "-provision"
 			isoURL := "http://example.com/provision-test.iso"
 
 			// Create credentials secret
@@ -431,11 +476,21 @@ var _ = Describe("PhysicalHost Controller", func() {
 
 			// Create reconciler with provision tracking client
 			provisionReconciler := &PhysicalHostReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
+				Client:   k8sClient,
+				Scheme:   k8sClient.Scheme(),
+				Log:      ctrl.Log.WithName("physicalhost-test-provision"),
+				Recorder: record.NewFakeRecorder(100),
 				RedfishClientFactory: func(ctx context.Context, address, username, password string, insecure bool) (internalredfish.Client, error) {
 					return provisionMockClient, nil
 				},
+				// Set timeouts for test environment
+				reconcileTimeout:  60 * time.Second,
+				stuckStateTimeout: 5 * time.Minute,
+				maxRetries:        3,
+				// Initialize state machine components
+				stateMachine:         statemachine.NewPhysicalHostStateMachine(ctrl.Log.WithName("state-machine")),
+				stateTransitionGuard: statemachine.NewStateTransitionGuard(k8sClient, ctrl.Log.WithName("transition-guard")),
+				stateRecoveryManager: statemachine.NewStateRecoveryManager(k8sClient, ctrl.Log.WithName("recovery-manager")),
 			}
 
 			// Create PhysicalHost
@@ -445,7 +500,7 @@ var _ = Describe("PhysicalHost Controller", func() {
 
 			Expect(k8sClient.Create(ctx, provisionPh)).To(Succeed())
 
-			phLookupKey := types.NamespacedName{Name: provisionPhName, Namespace: PhNamespace}
+			phLookupKey := types.NamespacedName{Name: provisionPhName, Namespace: physicalHost.Namespace}
 
 			By("First reconcile adds finalizer and makes host Available")
 			result, err := provisionReconciler.Reconcile(ctx, ctrl.Request{NamespacedName: phLookupKey})
@@ -468,7 +523,7 @@ var _ = Describe("PhysicalHost Controller", func() {
 				Kind:       "Beskar7Machine",
 				APIVersion: "infrastructure.cluster.x-k8s.io/v1beta1",
 				Name:       "test-machine",
-				Namespace:  PhNamespace,
+				Namespace:  physicalHost.Namespace,
 			}
 			provisionPh.Spec.BootISOSource = &isoURL
 			Expect(k8sClient.Update(ctx, provisionPh)).To(Succeed())
@@ -500,8 +555,8 @@ var _ = Describe("PhysicalHost Controller", func() {
 
 		It("should handle address detection failures gracefully", func() {
 			By("Creating PhysicalHost with mock that fails address detection")
-			addrFailPhName := PhName + "-addr-fail"
-			addrFailSecretName := SecretName + "-addr-fail"
+			addrFailPhName := physicalHost.Name + "-addr-fail"
+			addrFailSecretName := credentialSecret.Name + "-addr-fail"
 
 			// Create credentials secret
 			addrFailSecret := credentialSecret.DeepCopy()
@@ -517,11 +572,21 @@ var _ = Describe("PhysicalHost Controller", func() {
 
 			// Create reconciler with address detection failure
 			addrFailReconciler := &PhysicalHostReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
+				Client:   k8sClient,
+				Scheme:   k8sClient.Scheme(),
+				Log:      ctrl.Log.WithName("physicalhost-test-addrfail"),
+				Recorder: record.NewFakeRecorder(100),
 				RedfishClientFactory: func(ctx context.Context, address, username, password string, insecure bool) (internalredfish.Client, error) {
 					return addrFailMockClient, nil
 				},
+				// Set timeouts for test environment
+				reconcileTimeout:  60 * time.Second,
+				stuckStateTimeout: 5 * time.Minute,
+				maxRetries:        3,
+				// Initialize state machine components
+				stateMachine:         statemachine.NewPhysicalHostStateMachine(ctrl.Log.WithName("state-machine")),
+				stateTransitionGuard: statemachine.NewStateTransitionGuard(k8sClient, ctrl.Log.WithName("transition-guard")),
+				stateRecoveryManager: statemachine.NewStateRecoveryManager(k8sClient, ctrl.Log.WithName("recovery-manager")),
 			}
 
 			// Create PhysicalHost
@@ -531,7 +596,7 @@ var _ = Describe("PhysicalHost Controller", func() {
 
 			Expect(k8sClient.Create(ctx, addrFailPh)).To(Succeed())
 
-			phLookupKey := types.NamespacedName{Name: addrFailPhName, Namespace: PhNamespace}
+			phLookupKey := types.NamespacedName{Name: addrFailPhName, Namespace: physicalHost.Namespace}
 
 			By("Reconciling should succeed despite address detection failure")
 			_, err := addrFailReconciler.Reconcile(ctx, ctrl.Request{NamespacedName: phLookupKey})
@@ -556,8 +621,8 @@ var _ = Describe("PhysicalHost Controller", func() {
 
 		It("should handle deletion when Redfish connection fails", func() {
 			By("Creating PhysicalHost and then simulating connection failure during deletion")
-			deleteFailPhName := PhName + "-delete-fail"
-			deleteFailSecretName := SecretName + "-delete-fail"
+			deleteFailPhName := physicalHost.Name + "-delete-fail"
+			deleteFailSecretName := credentialSecret.Name + "-delete-fail"
 
 			// Create credentials secret
 			deleteFailSecret := credentialSecret.DeepCopy()
@@ -572,7 +637,7 @@ var _ = Describe("PhysicalHost Controller", func() {
 
 			Expect(k8sClient.Create(ctx, deleteFailPh)).To(Succeed())
 
-			phLookupKey := types.NamespacedName{Name: deleteFailPhName, Namespace: PhNamespace}
+			phLookupKey := types.NamespacedName{Name: deleteFailPhName, Namespace: physicalHost.Namespace}
 
 			By("First reconcile makes host available")
 			_, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: phLookupKey})
@@ -587,11 +652,21 @@ var _ = Describe("PhysicalHost Controller", func() {
 
 			By("Creating reconciler that fails connections during deletion")
 			deleteFailReconciler := &PhysicalHostReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
+				Client:   k8sClient,
+				Scheme:   k8sClient.Scheme(),
+				Log:      ctrl.Log.WithName("physicalhost-test-deletefail"),
+				Recorder: record.NewFakeRecorder(100),
 				RedfishClientFactory: func(ctx context.Context, address, username, password string, insecure bool) (internalredfish.Client, error) {
 					return nil, fmt.Errorf("connection failed during deletion")
 				},
+				// Set timeouts for test environment
+				reconcileTimeout:  60 * time.Second,
+				stuckStateTimeout: 5 * time.Minute,
+				maxRetries:        3,
+				// Initialize state machine components
+				stateMachine:         statemachine.NewPhysicalHostStateMachine(ctrl.Log.WithName("state-machine")),
+				stateTransitionGuard: statemachine.NewStateTransitionGuard(k8sClient, ctrl.Log.WithName("transition-guard")),
+				stateRecoveryManager: statemachine.NewStateRecoveryManager(k8sClient, ctrl.Log.WithName("recovery-manager")),
 			}
 
 			By("Deleting the PhysicalHost")
@@ -617,21 +692,26 @@ var _ = Describe("PhysicalHost Controller", func() {
 		var credentialSecret *corev1.Secret
 		var mockRfClient *internalredfish.MockClient
 		var reconciler *PhysicalHostReconciler
+		var testNs *corev1.Namespace
 
 		BeforeEach(func() {
-			// Create namespace if needed
-			ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: PhNamespace}}
-			Expect(k8sClient.Create(ctx, ns)).To(SatisfyAny(Succeed(), MatchError(ContainSubstring("already exists"))))
+			// Create a unique namespace for this test
+			testNs = &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					GenerateName: "physicalhost-pause-test-",
+				},
+			}
+			Expect(k8sClient.Create(ctx, testNs)).To(Succeed())
 
 			// Create unique names for this test
-			pausePhName := PhName + "-pause"
-			pauseSecretName := SecretName + "-pause"
+			pausePhName := "test-physicalhost-pause"
+			pauseSecretName := "test-redfish-credentials-pause"
 
 			// Create the credential secret
 			credentialSecret = &corev1.Secret{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      pauseSecretName,
-					Namespace: PhNamespace,
+					Namespace: testNs.Name,
 				},
 				Data: map[string][]byte{
 					"username": []byte("testuser"),
@@ -644,12 +724,12 @@ var _ = Describe("PhysicalHost Controller", func() {
 			physicalHost = &infrastructurev1beta1.PhysicalHost{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      pausePhName,
-					Namespace: PhNamespace,
+					Namespace: testNs.Name,
 				},
 				Spec: infrastructurev1beta1.PhysicalHostSpec{
 					RedfishConnection: infrastructurev1beta1.RedfishConnection{
-						Address:              "redfish-pause.example.com",
-						CredentialsSecretRef: pauseSecretName,
+						Address:              "https://redfish-pause.example.com",
+						CredentialsSecretRef: credentialSecret.Name,
 					},
 				},
 			}
@@ -659,18 +739,27 @@ var _ = Describe("PhysicalHost Controller", func() {
 
 			// Create the reconciler instance for the test
 			reconciler = &PhysicalHostReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
+				Client:   k8sClient,
+				Scheme:   k8sClient.Scheme(),
+				Log:      ctrl.Log.WithName("physicalhost-test-pause"),
+				Recorder: record.NewFakeRecorder(100),
 				RedfishClientFactory: func(ctx context.Context, address, username, password string, insecure bool) (internalredfish.Client, error) {
 					return mockRfClient, nil
 				},
+				// Set timeouts for test environment
+				reconcileTimeout:  60 * time.Second,
+				stuckStateTimeout: 5 * time.Minute,
+				maxRetries:        3,
+				// Initialize state machine components
+				stateMachine:         statemachine.NewPhysicalHostStateMachine(ctrl.Log.WithName("state-machine")),
+				stateTransitionGuard: statemachine.NewStateTransitionGuard(k8sClient, ctrl.Log.WithName("transition-guard")),
+				stateRecoveryManager: statemachine.NewStateRecoveryManager(k8sClient, ctrl.Log.WithName("recovery-manager")),
 			}
 		})
 
 		AfterEach(func() {
-			// Clean up resources
-			Expect(k8sClient.Delete(ctx, physicalHost)).To(Succeed())
-			Expect(k8sClient.Delete(ctx, credentialSecret)).To(Succeed())
+			// Clean up the namespace which will clean up all resources
+			Expect(k8sClient.Delete(ctx, testNs)).To(Succeed())
 		})
 
 		It("should skip reconciliation when PhysicalHost is paused", func() {
@@ -680,7 +769,7 @@ var _ = Describe("PhysicalHost Controller", func() {
 			}
 			Expect(k8sClient.Create(ctx, physicalHost)).To(Succeed())
 
-			phLookupKey := types.NamespacedName{Name: physicalHost.Name, Namespace: PhNamespace}
+			phLookupKey := types.NamespacedName{Name: physicalHost.Name, Namespace: physicalHost.Namespace}
 
 			By("Reconciling the paused PhysicalHost")
 			result, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: phLookupKey})
@@ -705,7 +794,7 @@ var _ = Describe("PhysicalHost Controller", func() {
 			}
 			Expect(k8sClient.Create(ctx, physicalHost)).To(Succeed())
 
-			phLookupKey := types.NamespacedName{Name: physicalHost.Name, Namespace: PhNamespace}
+			phLookupKey := types.NamespacedName{Name: physicalHost.Name, Namespace: physicalHost.Namespace}
 
 			By("Reconciling the PhysicalHost")
 			result, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: phLookupKey})
@@ -730,7 +819,7 @@ var _ = Describe("PhysicalHost Controller", func() {
 			}
 			Expect(k8sClient.Create(ctx, physicalHost)).To(Succeed())
 
-			phLookupKey := types.NamespacedName{Name: physicalHost.Name, Namespace: PhNamespace}
+			phLookupKey := types.NamespacedName{Name: physicalHost.Name, Namespace: physicalHost.Namespace}
 
 			By("Reconciling the paused PhysicalHost (should be skipped)")
 			result, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: phLookupKey})

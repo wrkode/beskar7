@@ -11,8 +11,6 @@ spec:
     kind: PhysicalHost
     listKind: PhysicalHostList
     plural: physicalhosts
-    shortNames:
-    - ph
     singular: physicalhost
   scope: Namespaced
   versions:
@@ -25,28 +23,33 @@ spec:
       jsonPath: .status.ready
       name: Ready
       type: boolean
-    - jsonPath: .metadata.creationTimestamp
+    - description: Creation timestamp
+      jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
     name: v1beta1
     schema:
       openAPIV3Schema:
+        description: PhysicalHost is the Schema for the physicalhosts API
         properties:
           apiVersion:
+            description: 'APIVersion defines the versioned schema of this representation of an object.'
             type: string
           kind:
+            description: 'Kind is a string value representing the REST resource this object represents.'
             type: string
           metadata:
             type: object
           spec:
+            description: PhysicalHostSpec defines the desired state of PhysicalHost
             properties:
               bootIsoSource:
+                description: BootISOSource is the URL of the ISO image to use for provisioning
                 type: string
               consumerRef:
+                description: ConsumerRef is a reference to the Beskar7Machine that is using this host
                 properties:
                   apiVersion:
-                    type: string
-                  fieldPath:
                     type: string
                   kind:
                     type: string
@@ -54,58 +57,65 @@ spec:
                     type: string
                   namespace:
                     type: string
-                  resourceVersion:
-                    type: string
                   uid:
                     type: string
                 type: object
-                x-kubernetes-map-type: atomic
               redfishConnection:
+                description: RedfishConnection contains the connection details for the Redfish endpoint
                 properties:
                   address:
+                    description: Address is the URL of the Redfish service
                     type: string
                   credentialsSecretRef:
+                    description: CredentialsSecretRef is the name of the secret containing the Redfish credentials
                     type: string
-                  insecureSkipVerify:
-                    type: boolean
                 required:
                 - address
                 - credentialsSecretRef
                 type: object
               userDataSecretRef:
+                description: UserDataSecretRef is a reference to a secret containing cloud-init user data
                 properties:
+                  apiVersion:
+                    type: string
+                  kind:
+                    type: string
                   name:
-                    default: ""
+                    type: string
+                  namespace:
+                    type: string
+                  uid:
                     type: string
                 type: object
-                x-kubernetes-map-type: atomic
             required:
             - redfishConnection
             type: object
           status:
+            description: PhysicalHostStatus defines the observed state of PhysicalHost
             properties:
               conditions:
+                description: Conditions contains the different condition statuses for this PhysicalHost
                 items:
+                  description: Condition defines an observation of a Cluster API resource operational state
                   properties:
                     lastTransitionTime:
+                      description: Last time the condition transitioned from one status to another
                       format: date-time
                       type: string
                     message:
-                      maxLength: 10240
-                      minLength: 1
+                      description: A human readable message indicating details about the transition
                       type: string
                     reason:
-                      maxLength: 256
-                      minLength: 1
+                      description: The reason for the condition's last transition in CamelCase
                       type: string
                     severity:
-                      maxLength: 32
+                      description: Severity provides an explicit classification of Reason code
                       type: string
                     status:
+                      description: Status of the condition, one of True, False, Unknown
                       type: string
                     type:
-                      maxLength: 256
-                      minLength: 1
+                      description: Type of condition in CamelCase
                       type: string
                   required:
                   - lastTransitionTime
@@ -114,41 +124,35 @@ spec:
                   type: object
                 type: array
               errorMessage:
+                description: ErrorMessage contains details on the last error encountered
                 type: string
               hardwareDetails:
+                description: HardwareDetails contains information about the physical host hardware
                 properties:
+                  firmware:
+                    properties:
+                      version:
+                        type: string
+                    type: object
                   manufacturer:
                     type: string
                   model:
                     type: string
                   serialNumber:
                     type: string
-                  status:
-                    properties:
-                      Health:
-                        type: string
-                      HealthRollup:
-                        type: string
-                      State:
-                        type: string
-                    required:
-                    - Health
-                    - HealthRollup
-                    - State
-                    type: object
                 type: object
               observedPowerState:
+                description: ObservedPowerState is the last observed power state from Redfish endpoint
                 type: string
               ready:
-                default: false
+                description: Ready indicates if the host is ready and enrolled
                 type: boolean
               state:
+                description: State represents the current state of the host
                 type: string
-            required:
-            - ready
             type: object
         type: object
     served: true
     storage: true
     subresources:
-      status: {}
+      status: {} 

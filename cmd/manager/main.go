@@ -213,6 +213,15 @@ func main() {
 		os.Exit(1)
 	}
 
+	if err = (&controllers.Beskar7MachineTemplateReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+		Log:    ctrl.Log.WithName("controllers").WithName("Beskar7MachineTemplate"),
+	}).SetupWithManager(context.Background(), mgr, controller.Options{}); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "Beskar7MachineTemplate")
+		os.Exit(1)
+	}
+
 	// Setup webhooks
 	if err = (&webhooks.Beskar7ClusterWebhook{}).SetupWebhookWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create webhook", "webhook", "Beskar7Cluster")

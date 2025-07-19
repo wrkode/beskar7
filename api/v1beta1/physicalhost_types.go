@@ -64,13 +64,16 @@ type HardwareDetails struct {
 // HardwareStatus contains the current status of the host hardware
 type HardwareStatus struct {
 	// Health is the health status of the host
-	Health string `json:"health"`
+	// +optional
+	Health string `json:"health,omitempty"`
 
 	// HealthRollup is the overall health status
-	HealthRollup string `json:"healthRollup"`
+	// +optional
+	HealthRollup string `json:"healthRollup,omitempty"`
 
 	// State is the current state of the host
-	State string `json:"state"`
+	// +optional
+	State string `json:"state,omitempty"`
 }
 
 // PhysicalHostSpec defines the desired state of PhysicalHost

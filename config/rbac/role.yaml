@@ -55,7 +55,7 @@ rules:
   - infrastructure.cluster.x-k8s.io
   resources:
   - beskar7clusters
-  - beskar7machines
+  - beskar7machinetemplates
   verbs:
   - create
   - delete
@@ -69,6 +69,7 @@ rules:
   resources:
   - beskar7clusters/finalizers
   - beskar7machines/finalizers
+  - beskar7machinetemplates/finalizers
   - physicalhosts/finalizers
   verbs:
   - update
@@ -77,11 +78,25 @@ rules:
   resources:
   - beskar7clusters/status
   - beskar7machines/status
+  - beskar7machinetemplates/status
   - physicalhosts/status
   verbs:
   - get
   - patch
   - update
+- apiGroups:
+  - infrastructure.cluster.x-k8s.io
+  resources:
+  - beskar7machines
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+  - watch // Needed to find machines created from this template
 - apiGroups:
   - infrastructure.cluster.x-k8s.io
   resources:

@@ -21,11 +21,13 @@ import (
 )
 
 // Beskar7MachineTemplateSpec defines the desired state of Beskar7MachineTemplate
+// +kubebuilder:object:generate=true
 type Beskar7MachineTemplateSpec struct {
 	Template Beskar7MachineTemplateResource `json:"template"`
 }
 
 // Beskar7MachineTemplateResource defines the template resource for Beskar7Machine
+// +kubebuilder:object:generate=true
 type Beskar7MachineTemplateResource struct {
 	// Spec is the specification of the desired behavior of the machine.
 	Spec Beskar7MachineSpec `json:"spec"`

@@ -33,7 +33,9 @@ import (
 
 	infrastructurev1beta1 "github.com/wrkode/beskar7/api/v1beta1"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
+
 	//+kubebuilder:scaffold:imports
+	"k8s.io/client-go/util/flowcontrol"
 )
 
 // These tests use Ginkgo (BDD-style Go testing framework). Refer to
@@ -77,6 +79,15 @@ var _ = BeforeSuite(func() {
 	cfg, err = testEnv.Start()
 	Expect(err).NotTo(HaveOccurred())
 	Expect(cfg).NotTo(BeNil())
+
+	// Configure higher rate limits for test environment to prevent timeouts
+	// Default values are QPS=5, Burst=10 which are too low for concurrent tests
+	// Disable rate limiting entirely for tests to prevent timeouts
+	cfg.QPS = 1000.0 // Allow 1000 requests per second
+	cfg.Burst = 2000 // Allow bursts of up to 2000 requests
+
+	// Disable rate limiter entirely for tests to prevent any throttling
+	cfg.RateLimiter = flowcontrol.NewFakeAlwaysRateLimiter()
 
 	// === Scheme setup can remain here or move back, order doesn't matter as much now ===
 
