@@ -183,11 +183,26 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 		}
 		Expect(k8sClient.Create(ctx, testNs)).To(Succeed())
 
+		// Create the CAPI Cluster object that the controller will reference
+		capiCluster := &clusterv1.Cluster{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-cluster",
+				Namespace: testNs.Name,
+			},
+			Spec: clusterv1.ClusterSpec{
+				// Add basic cluster spec if needed
+			},
+		}
+		Expect(k8sClient.Create(ctx, capiCluster)).To(Succeed())
+
 		// Create owner CAPI Machine
 		capiMachine = &clusterv1.Machine{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "test-machine",
 				Namespace: testNs.Name,
+				Labels: map[string]string{
+					"cluster.x-k8s.io/cluster-name": "test-cluster",
+				},
 			},
 			Spec: clusterv1.MachineSpec{
 				ClusterName: "test-cluster", // Required field
@@ -295,21 +310,30 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 				},
 			}
 			Expect(k8sClient.Create(ctx, host)).To(Succeed())
-			// >>> Explicitly update the status after creation <<<
+
+			// Wait for the host to be created, then update its status
 			Eventually(func(g Gomega) {
 				// Fetch the created host first
 				createdHost := &infrastructurev1beta1.PhysicalHost{}
 				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: host.Name, Namespace: host.Namespace}, createdHost)).To(Succeed())
-				// Now update its status
-				createdHost.Status = infrastructurev1beta1.PhysicalHostStatus{
-					State: infrastructurev1beta1.StateAvailable,
-					Ready: true,
-				}
-				g.Expect(k8sClient.Status().Update(ctx, createdHost)).To(Succeed())
-			}, "10s", "100ms").Should(Succeed(), "Failed to update PhysicalHost status")
 
-			// Wait slightly for create to settle (optional, might help envtest)
-			time.Sleep(100 * time.Millisecond)
+				// Only update status if it's not already set correctly
+				if createdHost.Status.State != infrastructurev1beta1.StateAvailable {
+					// Update the status
+					createdHost.Status.State = infrastructurev1beta1.StateAvailable
+					createdHost.Status.Ready = true
+					err := k8sClient.Status().Update(ctx, createdHost)
+					g.Expect(err).NotTo(HaveOccurred(), "Status update should succeed")
+				}
+			}, "10s", "500ms").Should(Succeed(), "Failed to update PhysicalHost status")
+
+			// Verify the PhysicalHost status is actually set before proceeding
+			Eventually(func(g Gomega) {
+				verifyHost := &infrastructurev1beta1.PhysicalHost{}
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: host.Name, Namespace: host.Namespace}, verifyHost)).To(Succeed())
+				g.Expect(verifyHost.Status.State).To(Equal(infrastructurev1beta1.StateAvailable))
+				g.Expect(verifyHost.Status.Ready).To(BeTrue())
+			}, "10s", "100ms").Should(Succeed(), "PhysicalHost should be in Available state before test continues")
 
 			// Create dummy secret for Redfish credentials for this host
 			dummySecretForHost := &corev1.Secret{
@@ -1178,7 +1202,7 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 			By("Second reconcile should handle ConfigURL validation error")
 			result, err = reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: key})
 			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("ConfigURL is required for RemoteConfig provisioning mode"))
+			Expect(err.Error()).To(ContainSubstring("ConfigURL must be set when ProvisioningMode is RemoteConfig"))
 
 			// Check that conditions reflect the error
 			Eventually(func(g Gomega) {

@@ -430,6 +430,12 @@ func (r *PhysicalHostReconciler) reconcileNormal(ctx context.Context, logger log
 	}
 	// --- End Reconcile State ---
 
+	// Update the status to persist all changes made during reconciliation
+	if err := r.Status().Update(ctx, physicalHost); err != nil {
+		logger.Error(err, "Failed to update PhysicalHost status")
+		return ctrl.Result{}, err
+	}
+
 	return ctrl.Result{}, nil
 }
 
