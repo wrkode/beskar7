@@ -218,19 +218,19 @@ var _ = Describe("Beskar7Cluster Reconciler", func() {
 			zoneLabel := "topology.kubernetes.io/zone"
 			ph1 := &infrastructurev1beta1.PhysicalHost{
 				ObjectMeta: metav1.ObjectMeta{Name: "fd-host-1", Namespace: testNs.Name, Labels: map[string]string{zoneLabel: "zone-a"}},
-				Spec:       infrastructurev1beta1.PhysicalHostSpec{RedfishConnection: infrastructurev1beta1.RedfishConnection{Address: "dummy1", CredentialsSecretRef: "dummy"}},
+				Spec:       infrastructurev1beta1.PhysicalHostSpec{RedfishConnection: infrastructurev1beta1.RedfishConnection{Address: "https://host1.example.com", CredentialsSecretRef: "dummy"}},
 			}
 			ph2 := &infrastructurev1beta1.PhysicalHost{
 				ObjectMeta: metav1.ObjectMeta{Name: "fd-host-2", Namespace: testNs.Name, Labels: map[string]string{zoneLabel: "zone-b"}},
-				Spec:       infrastructurev1beta1.PhysicalHostSpec{RedfishConnection: infrastructurev1beta1.RedfishConnection{Address: "dummy2", CredentialsSecretRef: "dummy"}},
+				Spec:       infrastructurev1beta1.PhysicalHostSpec{RedfishConnection: infrastructurev1beta1.RedfishConnection{Address: "https://host2.example.com", CredentialsSecretRef: "dummy"}},
 			}
 			ph3 := &infrastructurev1beta1.PhysicalHost{
 				ObjectMeta: metav1.ObjectMeta{Name: "fd-host-3", Namespace: testNs.Name, Labels: map[string]string{zoneLabel: "zone-a"}}, // Duplicate zone
-				Spec:       infrastructurev1beta1.PhysicalHostSpec{RedfishConnection: infrastructurev1beta1.RedfishConnection{Address: "dummy3", CredentialsSecretRef: "dummy"}},
+				Spec:       infrastructurev1beta1.PhysicalHostSpec{RedfishConnection: infrastructurev1beta1.RedfishConnection{Address: "https://host3.example.com", CredentialsSecretRef: "dummy"}},
 			}
 			ph4 := &infrastructurev1beta1.PhysicalHost{
 				ObjectMeta: metav1.ObjectMeta{Name: "fd-host-4", Namespace: testNs.Name}, // No zone label
-				Spec:       infrastructurev1beta1.PhysicalHostSpec{RedfishConnection: infrastructurev1beta1.RedfishConnection{Address: "dummy4", CredentialsSecretRef: "dummy"}},
+				Spec:       infrastructurev1beta1.PhysicalHostSpec{RedfishConnection: infrastructurev1beta1.RedfishConnection{Address: "https://host4.example.com", CredentialsSecretRef: "dummy"}},
 			}
 			Expect(k8sClient.Create(ctx, ph1)).To(Succeed())
 			Expect(k8sClient.Create(ctx, ph2)).To(Succeed())
@@ -263,7 +263,7 @@ var _ = Describe("Beskar7Cluster Reconciler", func() {
 			zoneLabel := "topology.kubernetes.io/zone"
 			ph1 := &infrastructurev1beta1.PhysicalHost{
 				ObjectMeta: metav1.ObjectMeta{Name: "fd-host-opt-1", Namespace: testNs.Name, Labels: map[string]string{zoneLabel: "zone-a"}},
-				Spec:       infrastructurev1beta1.PhysicalHostSpec{RedfishConnection: infrastructurev1beta1.RedfishConnection{Address: "dummy1", CredentialsSecretRef: "dummy"}},
+				Spec:       infrastructurev1beta1.PhysicalHostSpec{RedfishConnection: infrastructurev1beta1.RedfishConnection{Address: "https://host-opt-1.example.com", CredentialsSecretRef: "dummy"}},
 			}
 			Expect(k8sClient.Create(ctx, ph1)).To(Succeed())
 

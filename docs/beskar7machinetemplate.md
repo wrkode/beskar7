@@ -213,10 +213,50 @@ spec:
    ```
    Remove the providerID field from the template specification.
 
+## Controller Behavior
+
+The Beskar7MachineTemplate controller provides automated lifecycle management for template resources:
+
+### Finalizer Management
+- Automatically adds the `beskar7machinetemplate.infrastructure.cluster.x-k8s.io` finalizer on creation
+- Manages proper cleanup when templates are deleted
+
+### Reference Tracking
+- **Deletion Protection**: Templates cannot be deleted while machines still reference them
+- **Automatic Detection**: Controller watches Beskar7Machine resources for owner references
+- **Graceful Cleanup**: Prevents orphaned machines by blocking template deletion until all references are removed
+
+### Template Validation
+- **Runtime Validation**: Controller performs additional validation beyond webhook checks
+- **Integrity Checks**: Ensures ImageURL and OSFamily are properly specified
+- **Error Reporting**: Validation failures are logged and reported through controller status
+
+### Event Watching
+The controller automatically responds to:
+- **Machine Creation/Deletion**: Updates reference tracking when machines are created/destroyed
+- **Template Changes**: Immediately validates and processes template modifications
+- **Cleanup Events**: Triggers reference checks when machines or templates are deleted
+
+### Metrics Integration
+- **Reconciliation Metrics**: Tracks successful/failed reconciliations with timing data
+- **Error Tracking**: Records error types and frequencies for monitoring
+- **Performance Monitoring**: Provides duration metrics for operations
+
+### Pause Support
+Templates support the standard Cluster API pause annotation:
+```yaml
+metadata:
+  annotations:
+    cluster.x-k8s.io/paused: "true"
+```
+When paused, the controller skips reconciliation until the annotation is removed.
+
 ### Best Practices
 
 - **Version your templates**: Use descriptive names with versions (e.g., `worker-template-v1.2`)
 - **Test before deployment**: Validate templates in development environments
 - **Create new templates for changes**: Since templates are immutable, create new versions instead of trying to modify existing ones
 - **Use appropriate provisioning modes**: Choose RemoteConfig for flexibility or PreBakedISO for speed
-- **Validate URLs**: Ensure imageURL and configURL are accessible from your cluster nodes 
+- **Validate URLs**: Ensure imageURL and configURL are accessible from your cluster nodes
+- **Monitor references**: Use `kubectl describe` to check which machines reference a template before deletion
+- **Clean deletion**: Ensure all machines using a template are deleted before removing the template 

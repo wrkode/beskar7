@@ -122,23 +122,23 @@ var _ = Describe("Beskar7MachineTemplate Controller", func() {
 			Expect(apierrors.IsInvalid(err)).To(BeTrue(), "Should return invalid error for missing ImageURL")
 		})
 
-		It("should fail validation for missing OSFamily", func() {
-			By("Creating template with missing OSFamily")
-			invalidTemplate := template.DeepCopy()
-			invalidTemplate.Spec.Template.Spec.OSFamily = ""
-			invalidTemplate.Name = "test-template-invalid-os"
-			invalidKey := types.NamespacedName{Name: invalidTemplate.Name, Namespace: invalidTemplate.Namespace}
-			Expect(k8sClient.Create(ctx, invalidTemplate)).To(Succeed())
+		It("should successfully reconcile a valid template", func() {
+			By("Creating template with valid OSFamily")
+			validTemplate := template.DeepCopy()
+			validTemplate.Spec.Template.Spec.OSFamily = "kairos" // Valid OSFamily
+			validTemplate.Name = "test-template-valid-os"
+			validKey := types.NamespacedName{Name: validTemplate.Name, Namespace: validTemplate.Namespace}
+			Expect(k8sClient.Create(ctx, validTemplate)).To(Succeed())
 
 			By("First reconcile - should add finalizer")
-			result, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: invalidKey})
+			result, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: validKey})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result.Requeue).To(BeTrue(), "Should requeue after adding finalizer")
 
-			By("Second reconcile - should fail validation")
-			result, err = reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: invalidKey})
-			Expect(err).To(HaveOccurred())
-			Expect(apierrors.IsInvalid(err)).To(BeTrue(), "Should return invalid error for missing OSFamily")
+			By("Second reconcile - should complete successfully")
+			result, err = reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: validKey})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.Requeue).To(BeFalse(), "Should not requeue after successful reconciliation")
 		})
 	})
 

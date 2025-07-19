@@ -62,7 +62,7 @@ var _ = Describe("PhysicalHost Controller", func() {
 				},
 				Spec: infrastructurev1beta1.PhysicalHostSpec{
 					RedfishConnection: infrastructurev1beta1.RedfishConnection{
-						Address:              "redfish-mock.example.com", // Doesn't matter for mock
+						Address:              "https://redfish-mock.example.com", // Doesn't matter for mock
 						CredentialsSecretRef: SecretName,
 					},
 				},
@@ -648,7 +648,7 @@ var _ = Describe("PhysicalHost Controller", func() {
 				},
 				Spec: infrastructurev1beta1.PhysicalHostSpec{
 					RedfishConnection: infrastructurev1beta1.RedfishConnection{
-						Address:              "redfish-pause.example.com",
+						Address:              "https://redfish-pause.example.com",
 						CredentialsSecretRef: pauseSecretName,
 					},
 				},

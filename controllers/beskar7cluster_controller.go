@@ -258,6 +258,17 @@ func getFailureDomainKeys(domains clusterv1.FailureDomains) []string {
 
 // failureDomainsEqual compares two FailureDomains maps for equality
 func failureDomainsEqual(a, b clusterv1.FailureDomains) bool {
+	// Handle nil cases
+	if a == nil && b == nil {
+		return true
+	}
+	if (a == nil && len(b) == 0) || (b == nil && len(a) == 0) {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+
 	// Use reflect.DeepEqual for comprehensive comparison
 	return reflect.DeepEqual(a, b)
 }

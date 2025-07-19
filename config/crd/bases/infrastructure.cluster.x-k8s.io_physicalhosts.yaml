@@ -3,7 +3,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.18.0
+    controller-gen.kubebuilder.io/version: (unknown)
   name: physicalhosts.infrastructure.cluster.x-k8s.io
 spec:
   group: infrastructure.cluster.x-k8s.io
@@ -11,71 +11,114 @@ spec:
     kind: PhysicalHost
     listKind: PhysicalHostList
     plural: physicalhosts
-    shortNames:
-    - ph
     singular: physicalhost
   scope: Namespaced
   versions:
-  - additionalPrinterColumns:
-    - description: Current state of the Physical Host
-      jsonPath: .status.state
-      name: State
-      type: string
-    - description: Indicates if the host is ready
-      jsonPath: .status.ready
-      name: Ready
-      type: boolean
-    - jsonPath: .metadata.creationTimestamp
-      name: Age
-      type: date
-    name: v1beta1
+  - name: v1beta1
     schema:
       openAPIV3Schema:
+        description: PhysicalHost is the Schema for the physicalhosts API
         properties:
           apiVersion:
+            description: 'APIVersion defines the versioned schema of this representation
+              of an object. Servers should convert recognized schemas to the latest
+              internal version, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources'
             type: string
           kind:
+            description: 'Kind is a string value representing the REST resource this
+              object represents. Servers may infer this from the endpoint the client
+              submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds'
             type: string
           metadata:
             type: object
           spec:
+            description: PhysicalHostSpec defines the desired state of PhysicalHost
             properties:
               bootIsoSource:
+                description: BootISOSource is the URL of the ISO image to use for
+                  provisioning
                 type: string
               consumerRef:
+                description: ConsumerRef is a reference to the Beskar7Machine that
+                  is using this host
                 properties:
                   apiVersion:
+                    description: API version of the referent.
                     type: string
                   fieldPath:
+                    description: 'If referring to a piece of an object instead of
+                      an entire object, this string should contain a valid JSON/Go
+                      field access statement, such as deserialized.ObjectMeta.Name.
+                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/object-references/#object-reference'
                     type: string
                   kind:
+                    description: 'Kind of the referent. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds'
                     type: string
                   name:
+                    description: 'Name of the referent. More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names'
                     type: string
                   namespace:
+                    description: 'Namespace of the referent. More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/namespaces/'
                     type: string
                   resourceVersion:
+                    description: 'Specific resourceVersion to which this reference
+                      is made, if any. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#concurrency-control-and-consistency'
                     type: string
                   uid:
+                    description: 'UID of the referent. More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#uids'
                     type: string
                 type: object
                 x-kubernetes-map-type: atomic
               redfishConnection:
+                description: RedfishConnection contains the connection details for
+                  the Redfish endpoint
                 properties:
                   address:
+                    description: Address is the URL of the Redfish service
+                    pattern: ^(https?://)[a-zA-Z0-9.-]+(:[0-9]+)?(/.*)?$
                     type: string
                   credentialsSecretRef:
+                    description: CredentialsSecretRef is the name of the secret containing
+                      the Redfish credentials
+                    minLength: 1
                     type: string
                   insecureSkipVerify:
+                    default: false
+                    description: InsecureSkipVerify determines whether to skip TLS
+                      certificate verification
                     type: boolean
                 required:
                 - address
                 - credentialsSecretRef
                 type: object
               userDataSecretRef:
+                description: UserDataSecretRef is a reference to a secret containing
+                  cloud-init user data
                 properties:
+                  apiVersion:
+                    description: API version of the referent.
+                    type: string
+                  fieldPath:
+                    description: 'If referring to a piece of an object instead of
+                      an entire object, this string should contain a valid JSON/Go
+                      field access statement, such as deserialized.ObjectMeta.Name.
+                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/object-references/#object-reference'
+                    type: string
+                  kind:
+                    description: 'Kind of the referent. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds'
+                    type: string
                   name:
-                    default: ""
+                    description: 'Name of the referent. More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names'
+                    type: string
+                  namespace:
+                    description: 'Namespace of the referent. More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/namespaces/'
+                    type: string
+                  resourceVersion:
+                    description: 'Specific resourceVersion to which this reference
+                      is made, if any. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#concurrency-control-and-consistency'
+                    type: string
+                  uid:
+                    description: 'UID of the referent. More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#uids'
                     type: string
                 type: object
                 x-kubernetes-map-type: atomic
@@ -83,29 +126,47 @@ spec:
             - redfishConnection
             type: object
           status:
+            description: PhysicalHostStatus defines the observed state of PhysicalHost
             properties:
               conditions:
+                description: Conditions contains the different condition statuses
+                  for this PhysicalHost.
                 items:
+                  description: Condition defines an observation of a Cluster API resource
+                    operational state.
                   properties:
                     lastTransitionTime:
+                      description: Last time the condition transitioned from one status
+                        to another. This should be when the underlying condition changed.
+                        If that is not known, then using the time when the API field
+                        changed is acceptable.
                       format: date-time
                       type: string
                     message:
-                      maxLength: 10240
-                      minLength: 1
+                      description: A human readable message indicating details about
+                        the transition. This field may be empty.
                       type: string
                     reason:
-                      maxLength: 256
-                      minLength: 1
+                      description: The reason for the condition's last transition
+                        in CamelCase. The specific API may choose whether or not this
+                        field is considered a guaranteed API. This field may not be
+                        empty.
                       type: string
                     severity:
-                      maxLength: 32
+                      description: Severity provides an explicit classification of
+                        Reason code, so the users or machines can immediately understand
+                        the current situation and act accordingly. The Severity field
+                        MUST be set only when Status=False.
                       type: string
                     status:
+                      description: Status of the condition, one of True, False, Unknown.
                       type: string
                     type:
-                      maxLength: 256
-                      minLength: 1
+                      description: Type of condition in CamelCase or in foo.example.com/CamelCase.
+                        Many .condition.type values are consistent across resources
+                        like Available, but because arbitrary conditions can be useful
+                        (see .node.status.conditions), the ability to deconflict is
+                        important.
                       type: string
                   required:
                   - lastTransitionTime
@@ -113,42 +174,80 @@ spec:
                   - type
                   type: object
                 type: array
-              errorMessage:
-                type: string
               hardwareDetails:
+                description: HardwareDetails contains information about the host's
+                  hardware
                 properties:
+                  firmware:
+                    description: Firmware contains firmware information
+                    properties:
+                      version:
+                        description: Version is the firmware version
+                        type: string
+                    type: object
                   manufacturer:
+                    description: Manufacturer is the manufacturer of the hardware
                     type: string
                   model:
+                    description: Model is the model name/number
                     type: string
                   serialNumber:
+                    description: SerialNumber is the hardware serial number
                     type: string
                   status:
+                    description: Status contains the current status of the host hardware
                     properties:
-                      Health:
+                      health:
+                        description: Health is the health status of the host
                         type: string
-                      HealthRollup:
+                      healthRollup:
+                        description: HealthRollup is the overall health status
                         type: string
-                      State:
+                      state:
+                        description: State is the current state of the host
                         type: string
-                    required:
-                    - Health
-                    - HealthRollup
-                    - State
                     type: object
                 type: object
-              observedPowerState:
+              machineRef:
+                description: MachineRef will point to the corresponding Machine if
+                  it exists.
+                properties:
+                  apiVersion:
+                    description: API version of the referent.
+                    type: string
+                  fieldPath:
+                    description: 'If referring to a piece of an object instead of
+                      an entire object, this string should contain a valid JSON/Go
+                      field access statement, such as deserialized.ObjectMeta.Name.
+                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/object-references/#object-reference'
+                    type: string
+                  kind:
+                    description: 'Kind of the referent. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds'
+                    type: string
+                  name:
+                    description: 'Name of the referent. More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names'
+                    type: string
+                  namespace:
+                    description: 'Namespace of the referent. More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/namespaces/'
+                    type: string
+                  resourceVersion:
+                    description: 'Specific resourceVersion to which this reference
+                      is made, if any. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#concurrency-control-and-consistency'
+                    type: string
+                  uid:
+                    description: 'UID of the referent. More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#uids'
+                    type: string
+                type: object
+                x-kubernetes-map-type: atomic
+              phase:
+                description: Phase represents the current phase of host provisioning
                 type: string
               ready:
-                default: false
+                description: Ready denotes that the host is available for provisioning
                 type: boolean
-              state:
-                type: string
-            required:
-            - ready
             type: object
         type: object
     served: true
     storage: true
     subresources:
-      status: {}
+      status: {} 
