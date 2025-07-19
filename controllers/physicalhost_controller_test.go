@@ -11,6 +11,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/record"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	conditions "sigs.k8s.io/cluster-api/util/conditions"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -18,6 +19,7 @@ import (
 
 	infrastructurev1beta1 "github.com/wrkode/beskar7/api/v1beta1"
 	internalredfish "github.com/wrkode/beskar7/internal/redfish" // Import internal redfish
+	"github.com/wrkode/beskar7/internal/statemachine"
 )
 
 var _ = Describe("PhysicalHost Controller", func() {
@@ -82,9 +84,10 @@ var _ = Describe("PhysicalHost Controller", func() {
 
 			// Create the reconciler instance for the test
 			reconciler = &PhysicalHostReconciler{
-				Client: k8sClient, // Use the properly configured client from test suite
-				Scheme: k8sClient.Scheme(),
-				Log:    ctrl.Log.WithName("physicalhost-test"), // Add logger
+				Client:   k8sClient, // Use the properly configured client from test suite
+				Scheme:   k8sClient.Scheme(),
+				Log:      ctrl.Log.WithName("physicalhost-test"),
+				Recorder: record.NewFakeRecorder(100), // Add event recorder for conditions
 				// Define a factory that returns our mock client instance
 				RedfishClientFactory: func(ctx context.Context, address, username, password string, insecure bool) (internalredfish.Client, error) {
 					// You could add assertions here on address/username/password if needed
@@ -94,6 +97,10 @@ var _ = Describe("PhysicalHost Controller", func() {
 				reconcileTimeout:  60 * time.Second, // Internal reconcile timeout
 				stuckStateTimeout: 5 * time.Minute,  // Stuck state detection timeout
 				maxRetries:        3,                // Max retries for state transitions
+				// Initialize state machine components
+				stateMachine:         statemachine.NewPhysicalHostStateMachine(ctrl.Log.WithName("state-machine")),
+				stateTransitionGuard: statemachine.NewStateTransitionGuard(k8sClient, ctrl.Log.WithName("transition-guard")),
+				stateRecoveryManager: statemachine.NewStateRecoveryManager(k8sClient, ctrl.Log.WithName("recovery-manager")),
 			}
 		})
 
@@ -246,9 +253,10 @@ var _ = Describe("PhysicalHost Controller", func() {
 
 			// Create reconciler that simulates connection failure
 			failedReconciler := &PhysicalHostReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
-				Log:    ctrl.Log.WithName("physicalhost-test-failed"),
+				Client:   k8sClient,
+				Scheme:   k8sClient.Scheme(),
+				Log:      ctrl.Log.WithName("physicalhost-test-failed"),
+				Recorder: record.NewFakeRecorder(100),
 				RedfishClientFactory: func(ctx context.Context, address, username, password string, insecure bool) (internalredfish.Client, error) {
 					return nil, fmt.Errorf("connection timeout: unable to connect to %s", address)
 				},
@@ -256,6 +264,10 @@ var _ = Describe("PhysicalHost Controller", func() {
 				reconcileTimeout:  60 * time.Second,
 				stuckStateTimeout: 5 * time.Minute,
 				maxRetries:        3,
+				// Initialize state machine components
+				stateMachine:         statemachine.NewPhysicalHostStateMachine(ctrl.Log.WithName("state-machine")),
+				stateTransitionGuard: statemachine.NewStateTransitionGuard(k8sClient, ctrl.Log.WithName("transition-guard")),
+				stateRecoveryManager: statemachine.NewStateRecoveryManager(k8sClient, ctrl.Log.WithName("recovery-manager")),
 			}
 
 			Expect(k8sClient.Create(ctx, failedConnPh)).To(Succeed())
@@ -390,9 +402,10 @@ var _ = Describe("PhysicalHost Controller", func() {
 
 			// Create reconciler with failing query client
 			queryFailReconciler := &PhysicalHostReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
-				Log:    ctrl.Log.WithName("physicalhost-test-queryfail"),
+				Client:   k8sClient,
+				Scheme:   k8sClient.Scheme(),
+				Log:      ctrl.Log.WithName("physicalhost-test-queryfail"),
+				Recorder: record.NewFakeRecorder(100),
 				RedfishClientFactory: func(ctx context.Context, address, username, password string, insecure bool) (internalredfish.Client, error) {
 					return queryFailMockClient, nil // Connection succeeds, queries fail
 				},
@@ -400,6 +413,10 @@ var _ = Describe("PhysicalHost Controller", func() {
 				reconcileTimeout:  60 * time.Second,
 				stuckStateTimeout: 5 * time.Minute,
 				maxRetries:        3,
+				// Initialize state machine components
+				stateMachine:         statemachine.NewPhysicalHostStateMachine(ctrl.Log.WithName("state-machine")),
+				stateTransitionGuard: statemachine.NewStateTransitionGuard(k8sClient, ctrl.Log.WithName("transition-guard")),
+				stateRecoveryManager: statemachine.NewStateRecoveryManager(k8sClient, ctrl.Log.WithName("recovery-manager")),
 			}
 
 			// Create PhysicalHost
@@ -459,9 +476,10 @@ var _ = Describe("PhysicalHost Controller", func() {
 
 			// Create reconciler with provision tracking client
 			provisionReconciler := &PhysicalHostReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
-				Log:    ctrl.Log.WithName("physicalhost-test-provision"),
+				Client:   k8sClient,
+				Scheme:   k8sClient.Scheme(),
+				Log:      ctrl.Log.WithName("physicalhost-test-provision"),
+				Recorder: record.NewFakeRecorder(100),
 				RedfishClientFactory: func(ctx context.Context, address, username, password string, insecure bool) (internalredfish.Client, error) {
 					return provisionMockClient, nil
 				},
@@ -469,6 +487,10 @@ var _ = Describe("PhysicalHost Controller", func() {
 				reconcileTimeout:  60 * time.Second,
 				stuckStateTimeout: 5 * time.Minute,
 				maxRetries:        3,
+				// Initialize state machine components
+				stateMachine:         statemachine.NewPhysicalHostStateMachine(ctrl.Log.WithName("state-machine")),
+				stateTransitionGuard: statemachine.NewStateTransitionGuard(k8sClient, ctrl.Log.WithName("transition-guard")),
+				stateRecoveryManager: statemachine.NewStateRecoveryManager(k8sClient, ctrl.Log.WithName("recovery-manager")),
 			}
 
 			// Create PhysicalHost
@@ -550,9 +572,10 @@ var _ = Describe("PhysicalHost Controller", func() {
 
 			// Create reconciler with address detection failure
 			addrFailReconciler := &PhysicalHostReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
-				Log:    ctrl.Log.WithName("physicalhost-test-addrfail"),
+				Client:   k8sClient,
+				Scheme:   k8sClient.Scheme(),
+				Log:      ctrl.Log.WithName("physicalhost-test-addrfail"),
+				Recorder: record.NewFakeRecorder(100),
 				RedfishClientFactory: func(ctx context.Context, address, username, password string, insecure bool) (internalredfish.Client, error) {
 					return addrFailMockClient, nil
 				},
@@ -560,6 +583,10 @@ var _ = Describe("PhysicalHost Controller", func() {
 				reconcileTimeout:  60 * time.Second,
 				stuckStateTimeout: 5 * time.Minute,
 				maxRetries:        3,
+				// Initialize state machine components
+				stateMachine:         statemachine.NewPhysicalHostStateMachine(ctrl.Log.WithName("state-machine")),
+				stateTransitionGuard: statemachine.NewStateTransitionGuard(k8sClient, ctrl.Log.WithName("transition-guard")),
+				stateRecoveryManager: statemachine.NewStateRecoveryManager(k8sClient, ctrl.Log.WithName("recovery-manager")),
 			}
 
 			// Create PhysicalHost
@@ -625,9 +652,10 @@ var _ = Describe("PhysicalHost Controller", func() {
 
 			By("Creating reconciler that fails connections during deletion")
 			deleteFailReconciler := &PhysicalHostReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
-				Log:    ctrl.Log.WithName("physicalhost-test-deletefail"),
+				Client:   k8sClient,
+				Scheme:   k8sClient.Scheme(),
+				Log:      ctrl.Log.WithName("physicalhost-test-deletefail"),
+				Recorder: record.NewFakeRecorder(100),
 				RedfishClientFactory: func(ctx context.Context, address, username, password string, insecure bool) (internalredfish.Client, error) {
 					return nil, fmt.Errorf("connection failed during deletion")
 				},
@@ -635,6 +663,10 @@ var _ = Describe("PhysicalHost Controller", func() {
 				reconcileTimeout:  60 * time.Second,
 				stuckStateTimeout: 5 * time.Minute,
 				maxRetries:        3,
+				// Initialize state machine components
+				stateMachine:         statemachine.NewPhysicalHostStateMachine(ctrl.Log.WithName("state-machine")),
+				stateTransitionGuard: statemachine.NewStateTransitionGuard(k8sClient, ctrl.Log.WithName("transition-guard")),
+				stateRecoveryManager: statemachine.NewStateRecoveryManager(k8sClient, ctrl.Log.WithName("recovery-manager")),
 			}
 
 			By("Deleting the PhysicalHost")
@@ -707,9 +739,10 @@ var _ = Describe("PhysicalHost Controller", func() {
 
 			// Create the reconciler instance for the test
 			reconciler = &PhysicalHostReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
-				Log:    ctrl.Log.WithName("physicalhost-test-pause"),
+				Client:   k8sClient,
+				Scheme:   k8sClient.Scheme(),
+				Log:      ctrl.Log.WithName("physicalhost-test-pause"),
+				Recorder: record.NewFakeRecorder(100),
 				RedfishClientFactory: func(ctx context.Context, address, username, password string, insecure bool) (internalredfish.Client, error) {
 					return mockRfClient, nil
 				},
@@ -717,6 +750,10 @@ var _ = Describe("PhysicalHost Controller", func() {
 				reconcileTimeout:  60 * time.Second,
 				stuckStateTimeout: 5 * time.Minute,
 				maxRetries:        3,
+				// Initialize state machine components
+				stateMachine:         statemachine.NewPhysicalHostStateMachine(ctrl.Log.WithName("state-machine")),
+				stateTransitionGuard: statemachine.NewStateTransitionGuard(k8sClient, ctrl.Log.WithName("transition-guard")),
+				stateRecoveryManager: statemachine.NewStateRecoveryManager(k8sClient, ctrl.Log.WithName("recovery-manager")),
 			}
 		})
 

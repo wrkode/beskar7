@@ -323,8 +323,7 @@ Before running the tests, you need to download the required CRDs:
 ./hack/download-test-crds.sh
 
 # Run the tests
-export KUBEBUILDER_ASSETS=$(go run sigs.k8s.io/controller-runtime/tools/setup-envtest@latest use 1.31.x -p path)
-go test ./controllers/... -v -ginkgo.v
+export KUBEBUILDER_ASSETS=$(go run sigs.k8s.io/controller-runtime/tools/setup-envtest@latest use 1.31.x -p path) && go test ./controllers/... -v -ginkgo.v --timeout=10m
 ```
 
 The test setup is designed to be portable and work across different systems. All required CRDs are downloaded locally and referenced from the repository, ensuring consistent test behavior across different environments.
