@@ -1,0 +1,341 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  # Job 1: Code Quality and Linting
+  lint:
+    name: Lint and Code Quality
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.24'
+        
+    - name: Install dependencies
+      run: |
+        go mod download
+        go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+        
+    - name: Run golangci-lint
+      run: golangci-lint run --verbose --timeout=5m
+      
+    - name: Check Go mod tidy
+      run: |
+        go mod tidy
+        git diff --exit-code go.mod go.sum
+        
+    - name: Check formatting
+      run: |
+        gofmt -s -d .
+        if [ -n "$(gofmt -s -d .)" ]; then
+          echo "Go code is not formatted properly. Run 'gofmt -s -w .'"
+          exit 1
+        fi
+
+  # Job 2: Security Scanning
+  security:
+    name: Security Scanning
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.24'
+        
+    - name: Run Gosec Security Scanner
+      uses: securecodewarrior/github-action-gosec@master
+      with:
+        args: '-no-fail -fmt sarif -out gosec.sarif ./...'
+        
+    - name: Upload SARIF file
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: gosec.sarif
+        
+    - name: Run Trivy vulnerability scanner
+      uses: aquasecurity/trivy-action@master
+      with:
+        scan-type: 'fs'
+        ignore-unfixed: true
+        format: 'sarif'
+        output: 'trivy-results.sarif'
+        
+    - name: Upload Trivy scan results to GitHub Security tab
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: 'trivy-results.sarif'
+
+  # Job 3: Unit Tests
+  test:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        go-version: ['1.23', '1.24']
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Go ${{ matrix.go-version }}
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ matrix.go-version }}
+        
+    - name: Install dependencies
+      run: go mod download
+      
+    - name: Set up test environment
+      run: |
+        # Install kubebuilder for envtest
+        curl -L -o kubebuilder "https://go.kubebuilder.io/dl/latest/$(go env GOOS)/$(go env GOARCH)"
+        chmod +x kubebuilder && sudo mv kubebuilder /usr/local/bin/
+        
+    - name: Run unit tests
+      run: |
+        # Run tests with coverage, excluding integration tests
+        go test -v -race -coverprofile=coverage.out -covermode=atomic \
+          $(go list ./... | grep -v /test/integration)
+          
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v4
+      with:
+        file: ./coverage.out
+        flags: unittests
+        name: codecov-umbrella
+        
+    - name: Generate coverage report
+      run: |
+        go tool cover -html=coverage.out -o coverage.html
+        
+    - name: Upload coverage report
+      uses: actions/upload-artifact@v4
+      with:
+        name: coverage-report-${{ matrix.go-version }}
+        path: coverage.html
+
+  # Job 4: Integration Tests
+  integration-test:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.24'
+        
+    - name: Install dependencies
+      run: go mod download
+      
+    - name: Set up test environment
+      run: |
+        # Install kubebuilder for envtest
+        curl -L -o kubebuilder "https://go.kubebuilder.io/dl/latest/$(go env GOOS)/$(go env GOARCH)"
+        chmod +x kubebuilder && sudo mv kubebuilder /usr/local/bin/
+        
+    - name: Run integration tests
+      run: |
+        go test -v -tags=integration ./test/integration/... -timeout=30m
+        
+  # Job 5: Build and Test Container Image
+  container:
+    name: Container Build and Test
+    runs-on: ubuntu-latest
+    needs: [lint, test]
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+      
+    - name: Build container image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        platforms: linux/amd64,linux/arm64
+        push: false
+        tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:test
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+        
+    - name: Run container security scan
+      uses: aquasecurity/trivy-action@master
+      with:
+        image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:test
+        format: 'sarif'
+        output: 'container-scan.sarif'
+        
+    - name: Upload container scan results
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: 'container-scan.sarif'
+
+  # Job 6: Generate and Validate Manifests
+  manifests:
+    name: Generate and Validate Manifests
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.24'
+        
+    - name: Install dependencies
+      run: |
+        go mod download
+        make install-controller-gen
+        
+    - name: Generate manifests
+      run: make manifests
+      
+    - name: Verify no changes
+      run: |
+        git diff --exit-code
+        if [ $? -ne 0 ]; then
+          echo "Generated manifests are out of date. Please run 'make manifests' and commit the changes."
+          exit 1
+        fi
+        
+    - name: Validate CRDs
+      run: |
+        # Validate CRD syntax
+        for crd in config/crd/bases/*.yaml; do
+          echo "Validating $crd"
+          kubectl --dry-run=client apply -f "$crd"
+        done
+        
+    - name: Generate release manifests
+      run: make release-manifests
+      
+    - name: Upload release manifests
+      uses: actions/upload-artifact@v4
+      with:
+        name: release-manifests
+        path: beskar7-manifests-*.yaml
+
+  # Job 7: End-to-End Test Setup Validation
+  e2e-setup:
+    name: E2E Setup Validation
+    runs-on: ubuntu-latest
+    needs: [manifests]
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Create kind cluster
+      uses: helm/kind-action@v1
+      with:
+        cluster_name: beskar7-test
+        kubectl_version: v1.31.0
+        
+    - name: Download release manifests
+      uses: actions/download-artifact@v4
+      with:
+        name: release-manifests
+        
+    - name: Install cert-manager
+      run: |
+        kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.12.0/cert-manager.crds.yaml
+        kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.12.0/cert-manager.yaml
+        kubectl wait --for=condition=Available --timeout=300s deployment/cert-manager -n cert-manager
+        kubectl wait --for=condition=Available --timeout=300s deployment/cert-manager-cainjector -n cert-manager
+        kubectl wait --for=condition=Available --timeout=300s deployment/cert-manager-webhook -n cert-manager
+        
+    - name: Apply Beskar7 manifests
+      run: |
+        kubectl apply -f beskar7-manifests-*.yaml
+        
+    - name: Wait for controller deployment
+      run: |
+        kubectl wait --for=condition=Available --timeout=300s deployment/beskar7-controller-manager -n beskar7-system
+        
+    - name: Test basic functionality
+      run: |
+        # Create a test PhysicalHost to verify CRDs are working
+        cat <<EOF | kubectl apply -f -
+        apiVersion: v1
+        kind: Secret
+        metadata:
+          name: test-credentials
+          namespace: default
+        stringData:
+          username: testuser
+          password: testpass
+        ---
+        apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+        kind: PhysicalHost
+        metadata:
+          name: test-host
+          namespace: default
+        spec:
+          redfishConnection:
+            address: "https://test.example.com"
+            credentialsSecretRef: "test-credentials"
+        EOF
+        
+        # Wait for the PhysicalHost to be processed
+        sleep 10
+        kubectl get physicalhost test-host -o yaml
+        
+        # Cleanup
+        kubectl delete physicalhost test-host
+        kubectl delete secret test-credentials
+
+  # Job 8: Performance Benchmarks
+  benchmark:
+    name: Performance Benchmarks
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.24'
+        
+    - name: Run benchmarks
+      run: |
+        go test -bench=. -benchmem -run=^$ ./... > benchmark.txt
+        
+    - name: Upload benchmark results
+      uses: actions/upload-artifact@v4
+      with:
+        name: benchmark-results
+        path: benchmark.txt
+
+  # Summary Job
+  ci-success:
+    name: CI Success
+    runs-on: ubuntu-latest
+    needs: [lint, security, test, integration-test, container, manifests, e2e-setup]
+    if: always()
+    steps:
+    - name: Check all jobs status
+      run: |
+        if [[ "${{ needs.lint.result }}" != "success" || \
+              "${{ needs.security.result }}" != "success" || \
+              "${{ needs.test.result }}" != "success" || \
+              "${{ needs.integration-test.result }}" != "success" || \
+              "${{ needs.container.result }}" != "success" || \
+              "${{ needs.manifests.result }}" != "success" || \
+              "${{ needs.e2e-setup.result }}" != "success" ]]; then
+          echo "One or more critical jobs failed"
+          exit 1
+        fi
+        echo "All critical CI jobs passed successfully!" 

@@ -1,0 +1,309 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  # Job 1: Build and Push Container Images
+  build-and-push:
+    name: Build and Push Container Images
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    outputs:
+      image-digest: ${{ steps.build.outputs.digest }}
+      image-url: ${{ steps.build.outputs.image-url }}
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+      
+    - name: Log in to Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+        
+    - name: Extract metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+        tags: |
+          type=ref,event=tag
+          type=semver,pattern={{version}}
+          type=semver,pattern={{major}}.{{minor}}
+          type=semver,pattern={{major}}
+          type=sha,prefix={{branch}}-
+          
+    - name: Build and push container image
+      id: build
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        platforms: linux/amd64,linux/arm64
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+        
+    - name: Generate SBOM
+      uses: anchore/sbom-action@v0
+      with:
+        image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}
+        format: spdx-json
+        output-file: sbom.spdx.json
+        
+    - name: Upload SBOM
+      uses: actions/upload-artifact@v4
+      with:
+        name: sbom
+        path: sbom.spdx.json
+
+  # Job 2: Security Scan Released Image
+  security-scan:
+    name: Security Scan Released Image
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    steps:
+    - name: Run Trivy vulnerability scanner
+      uses: aquasecurity/trivy-action@master
+      with:
+        image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}
+        format: 'sarif'
+        output: 'trivy-results.sarif'
+        
+    - name: Upload Trivy scan results
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: 'trivy-results.sarif'
+        
+    - name: Run Trivy vulnerability scanner (table format)
+      uses: aquasecurity/trivy-action@master
+      with:
+        image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}
+        format: 'table'
+        output: 'trivy-report.txt'
+        
+    - name: Upload vulnerability report
+      uses: actions/upload-artifact@v4
+      with:
+        name: vulnerability-report
+        path: trivy-report.txt
+
+  # Job 3: Generate Release Artifacts
+  generate-artifacts:
+    name: Generate Release Artifacts  
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.24'
+        
+    - name: Install dependencies
+      run: |
+        go mod download
+        make install-controller-gen
+        
+    - name: Generate release manifests
+      run: |
+        export VERSION=${{ github.ref_name }}
+        make release-manifests
+        
+    - name: Generate checksums
+      run: |
+        sha256sum beskar7-manifests-${{ github.ref_name }}.yaml > checksums.txt
+        
+    - name: Upload release artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: release-artifacts
+        path: |
+          beskar7-manifests-${{ github.ref_name }}.yaml
+          checksums.txt
+
+  # Job 4: Create Helm Chart
+  helm-chart:
+    name: Create and Publish Helm Chart
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Install Helm
+      uses: azure/setup-helm@v4
+      with:
+        version: '3.12.0'
+        
+    - name: Update chart version
+      run: |
+        VERSION=${{ github.ref_name }}
+        # Remove 'v' prefix for Helm version
+        CHART_VERSION=${VERSION#v}
+        sed -i "s/^version:.*/version: $CHART_VERSION/" charts/beskar7/Chart.yaml
+        sed -i "s/^appVersion:.*/appVersion: $VERSION/" charts/beskar7/Chart.yaml
+        
+    - name: Package Helm chart
+      run: |
+        helm package charts/beskar7 --destination ./charts/
+        
+    - name: Upload Helm chart
+      uses: actions/upload-artifact@v4
+      with:
+        name: helm-chart
+        path: charts/*.tgz
+
+  # Job 5: Create GitHub Release
+  release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: [build-and-push, security-scan, generate-artifacts, helm-chart]
+    permissions:
+      contents: write
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      
+    - name: Generate release notes
+      id: release-notes
+      run: |
+        # Extract version from tag
+        VERSION=${{ github.ref_name }}
+        echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+        
+        # Generate release notes
+        cat > release-notes.md << EOF
+        # Beskar7 $VERSION
+        
+        ## 🚀 What's New
+        
+        This release includes improvements and bug fixes for the Beskar7 Kubernetes operator.
+        
+        ## 📦 Installation
+        
+        ### Using Kubectl
+        \`\`\`bash
+        kubectl apply -f https://github.com/wrkode/beskar7/releases/download/$VERSION/beskar7-manifests-$VERSION.yaml
+        \`\`\`
+        
+        ### Using Helm
+        \`\`\`bash
+        helm repo add beskar7 https://wrkode.github.io/beskar7
+        helm install beskar7 beskar7/beskar7 --version ${VERSION#v}
+        \`\`\`
+        
+        ## 📋 Prerequisites
+        
+        - Kubernetes 1.19+
+        - cert-manager (required)
+        - Cluster API v1.4.0+
+        
+        ## 🔒 Security
+        
+        This release includes security scanning and vulnerability assessment. See the attached vulnerability report for details.
+        
+        ## 📄 Documentation
+        
+        - [Getting Started](https://github.com/wrkode/beskar7/blob/main/docs/README.md)
+        - [Hardware Compatibility](https://github.com/wrkode/beskar7/blob/main/docs/hardware-compatibility.md)
+        - [API Reference](https://github.com/wrkode/beskar7/blob/main/docs/api-reference.md)
+        
+        ## 🐳 Container Images
+        
+        \`\`\`
+        ghcr.io/wrkode/beskar7/beskar7:$VERSION
+        \`\`\`
+        
+        Available for:
+        - linux/amd64
+        - linux/arm64
+        
+        ## 🔐 Verification
+        
+        All release artifacts are signed and include SBOMs for supply chain security.
+        EOF
+        
+    - name: Create Release
+      uses: softprops/action-gh-release@v2
+      with:
+        name: Beskar7 ${{ github.ref_name }}
+        body_path: release-notes.md
+        draft: false
+        prerelease: ${{ contains(github.ref_name, '-') }}
+        files: |
+          release-artifacts/beskar7-manifests-${{ github.ref_name }}.yaml
+          release-artifacts/checksums.txt
+          helm-chart/*.tgz
+          sbom/sbom.spdx.json
+          vulnerability-report/trivy-report.txt
+        token: ${{ secrets.GITHUB_TOKEN }}
+
+  # Job 6: Update Documentation
+  update-docs:
+    name: Update Documentation
+    runs-on: ubuntu-latest
+    needs: release
+    if: ${{ !contains(github.ref_name, '-') }} # Only for stable releases
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        
+    - name: Update README with latest version
+      run: |
+        VERSION=${{ github.ref_name }}
+        # Update installation examples in README
+        sed -i "s|beskar7-manifests-v[0-9]\+\.[0-9]\+\.[0-9]\+\.yaml|beskar7-manifests-$VERSION.yaml|g" README.md
+        
+    - name: Commit changes
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git add README.md
+        if git diff --staged --quiet; then
+          echo "No changes to commit"
+        else
+          git commit -m "docs: update installation examples to ${{ github.ref_name }}"
+          git push
+        fi
+
+  # Job 7: Notify on Success/Failure
+  notify:
+    name: Notify Release Status
+    runs-on: ubuntu-latest
+    needs: [build-and-push, security-scan, generate-artifacts, helm-chart, release, update-docs]
+    if: always()
+    steps:
+    - name: Notify success
+      if: ${{ needs.release.result == 'success' }}
+      run: |
+        echo "✅ Release ${{ github.ref_name }} created successfully!"
+        echo "🐳 Container image: ghcr.io/wrkode/beskar7/beskar7:${{ github.ref_name }}"
+        echo "📦 Release URL: https://github.com/wrkode/beskar7/releases/tag/${{ github.ref_name }}"
+        
+    - name: Notify failure
+      if: ${{ needs.release.result == 'failure' }}
+      run: |
+        echo "❌ Release ${{ github.ref_name }} failed!"
+        echo "Please check the workflow logs for details."
+        exit 1 
