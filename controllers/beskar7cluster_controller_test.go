@@ -202,9 +202,136 @@ var _ = Describe("Beskar7Cluster Reconciler", func() {
 			}, "5s", "100ms").Should(Succeed(), "ControlPlaneEndpoint should be derived correctly")
 		})
 
-		// TODO: Add test for machine ready but no address
-		// TODO: Add test for machine ready but only external address
-		// TODO: Add test for machine not ready
+		It("should handle machine ready but no address", func() {
+			// Create a machine that's ready but has no addresses
+			machineWithoutAddress := &clusterv1.Machine{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "machine-no-address",
+					Namespace: testNs.Name,
+					Labels: map[string]string{
+						clusterv1.ClusterNameLabel:         b7cluster.Name,
+						clusterv1.MachineControlPlaneLabel: "",
+					},
+				},
+				Status: clusterv1.MachineStatus{
+					Phase: string(clusterv1.MachinePhaseRunning),
+					Conditions: clusterv1.Conditions{
+						{
+							Type:   clusterv1.InfrastructureReadyCondition,
+							Status: corev1.ConditionTrue,
+						},
+					},
+					// No addresses provided
+				},
+			}
+			Expect(k8sClient.Create(ctx, machineWithoutAddress)).To(Succeed())
+
+			// Create the Beskar7Cluster
+			Expect(k8sClient.Create(ctx, b7cluster)).To(Succeed())
+			reconciler := &Beskar7ClusterReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}
+
+			// Reconcile and expect no control plane endpoint to be set
+			_, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: key})
+			Expect(err).NotTo(HaveOccurred())
+
+			// Verify that control plane endpoint is not set due to missing address
+			Eventually(func(g Gomega) {
+				g.Expect(k8sClient.Get(ctx, key, b7cluster)).To(Succeed())
+				g.Expect(b7cluster.Status.ControlPlaneEndpoint.Host).To(BeEmpty())
+				g.Expect(b7cluster.Status.ControlPlaneEndpoint.Port).To(Equal(int32(0)))
+			}, "5s", "100ms").Should(Succeed(), "ControlPlaneEndpoint should remain unset without address")
+		})
+
+		It("should handle machine ready but only external address", func() {
+			// Create a machine that's ready but only has external IP
+			machineWithExternalOnly := &clusterv1.Machine{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "machine-external-only",
+					Namespace: testNs.Name,
+					Labels: map[string]string{
+						clusterv1.ClusterNameLabel:         b7cluster.Name,
+						clusterv1.MachineControlPlaneLabel: "",
+					},
+				},
+				Status: clusterv1.MachineStatus{
+					Phase: string(clusterv1.MachinePhaseRunning),
+					Conditions: clusterv1.Conditions{
+						{
+							Type:   clusterv1.InfrastructureReadyCondition,
+							Status: corev1.ConditionTrue,
+						},
+					},
+					Addresses: []clusterv1.MachineAddress{
+						{
+							Type:    clusterv1.MachineExternalIP,
+							Address: "203.0.113.10", // External IP only
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, machineWithExternalOnly)).To(Succeed())
+
+			// Create the Beskar7Cluster
+			Expect(k8sClient.Create(ctx, b7cluster)).To(Succeed())
+			reconciler := &Beskar7ClusterReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}
+
+			// Reconcile - should use external IP as fallback
+			_, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: key})
+			Expect(err).NotTo(HaveOccurred())
+
+			// Verify that control plane endpoint uses external IP
+			Eventually(func(g Gomega) {
+				g.Expect(k8sClient.Get(ctx, key, b7cluster)).To(Succeed())
+				g.Expect(b7cluster.Status.ControlPlaneEndpoint.Host).To(Equal("203.0.113.10"))
+				g.Expect(b7cluster.Status.ControlPlaneEndpoint.Port).To(Equal(int32(6443)))
+			}, "5s", "100ms").Should(Succeed(), "ControlPlaneEndpoint should use external IP as fallback")
+		})
+
+		It("should handle machine not ready", func() {
+			// Create a machine that's not ready
+			notReadyMachine := &clusterv1.Machine{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "machine-not-ready",
+					Namespace: testNs.Name,
+					Labels: map[string]string{
+						clusterv1.ClusterNameLabel:         b7cluster.Name,
+						clusterv1.MachineControlPlaneLabel: "",
+					},
+				},
+				Status: clusterv1.MachineStatus{
+					Phase: string(clusterv1.MachinePhaseProvisioning),
+					Conditions: clusterv1.Conditions{
+						{
+							Type:   clusterv1.InfrastructureReadyCondition,
+							Status: corev1.ConditionFalse,
+							Reason: "ProvisioningInProgress",
+						},
+					},
+					Addresses: []clusterv1.MachineAddress{
+						{
+							Type:    clusterv1.MachineInternalIP,
+							Address: "192.168.1.15",
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, notReadyMachine)).To(Succeed())
+
+			// Create the Beskar7Cluster
+			Expect(k8sClient.Create(ctx, b7cluster)).To(Succeed())
+			reconciler := &Beskar7ClusterReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}
+
+			// Reconcile - should not set control plane endpoint for non-ready machine
+			_, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: key})
+			Expect(err).NotTo(HaveOccurred())
+
+			// Verify that control plane endpoint is not set for non-ready machine
+			Eventually(func(g Gomega) {
+				g.Expect(k8sClient.Get(ctx, key, b7cluster)).To(Succeed())
+				g.Expect(b7cluster.Status.ControlPlaneEndpoint.Host).To(BeEmpty())
+				g.Expect(b7cluster.Status.ControlPlaneEndpoint.Port).To(Equal(int32(0)))
+			}, "5s", "100ms").Should(Succeed(), "ControlPlaneEndpoint should not be set for non-ready machine")
+		})
 
 		// TODO: Add tests for failure domain discovery
 		It("should discover FailureDomains from PhysicalHost labels", func() {

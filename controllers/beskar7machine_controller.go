@@ -495,12 +495,25 @@ func (r *Beskar7MachineReconciler) findAndClaimHostOriginal(ctx context.Context,
 		ns, name, err := parseProviderID(*b7machine.Spec.ProviderID)
 		if err != nil {
 			logger.Error(err, "Failed to parse ProviderID", "ProviderID", *b7machine.Spec.ProviderID)
-			// TODO: Set error status on b7machine?
+			// Set error status on b7machine - this is a terminal configuration error
+			conditions.MarkFalse(b7machine, infrastructurev1beta1.InfrastructureReadyCondition, infrastructurev1beta1.PhysicalHostAssociationFailedReason, clusterv1.ConditionSeverityError, "Invalid ProviderID format: %v", err)
+			failureReason := "InvalidProviderID"
+			failureMessage := fmt.Sprintf("Failed to parse ProviderID %q: %v", *b7machine.Spec.ProviderID, err)
+			b7machine.Status.FailureReason = &failureReason
+			b7machine.Status.FailureMessage = &failureMessage
+			b7machine.Status.Ready = false
 			return nil, ctrl.Result{}, err // Return error, stop reconciliation
 		}
 		if ns != b7machine.Namespace {
 			err := errors.Errorf("ProviderID %q has different namespace than Beskar7Machine %q", *b7machine.Spec.ProviderID, b7machine.Namespace)
 			logger.Error(err, "Namespace mismatch")
+			// Set error status on b7machine - this is a terminal configuration error
+			conditions.MarkFalse(b7machine, infrastructurev1beta1.InfrastructureReadyCondition, infrastructurev1beta1.PhysicalHostAssociationFailedReason, clusterv1.ConditionSeverityError, "ProviderID namespace mismatch: %v", err)
+			failureReason := "ProviderIDNamespaceMismatch"
+			failureMessage := fmt.Sprintf("ProviderID %q namespace does not match Beskar7Machine namespace %q", *b7machine.Spec.ProviderID, b7machine.Namespace)
+			b7machine.Status.FailureReason = &failureReason
+			b7machine.Status.FailureMessage = &failureMessage
+			b7machine.Status.Ready = false
 			return nil, ctrl.Result{}, err
 		}
 
@@ -612,7 +625,8 @@ func (r *Beskar7MachineReconciler) findAndClaimHostOriginal(ctx context.Context,
 		rfClient, err := r.getRedfishClientForHost(ctx, logger, availableHost)
 		if err != nil {
 			logger.Error(err, "Failed to get Redfish client for host provisioning", "PhysicalHost", availableHost.Name)
-			// TODO: Should we set a condition on b7machine here? Or just let it requeue?
+			// Set condition on b7machine - this is typically a transient error that can be retried
+			conditions.MarkFalse(b7machine, infrastructurev1beta1.InfrastructureReadyCondition, infrastructurev1beta1.PhysicalHostAssociationFailedReason, clusterv1.ConditionSeverityWarning, "Failed to connect to PhysicalHost %q BMC: %v", availableHost.Name, err)
 			return nil, ctrl.Result{}, err // Requeue and try again
 		}
 		defer rfClient.Close(ctx)
@@ -676,7 +690,8 @@ func (r *Beskar7MachineReconciler) findAndClaimHostOriginal(ctx context.Context,
 
 	// No associated or available host found
 	logger.Info("No associated or available PhysicalHost found, requeuing")
-	// TODO: Set status condition?
+	// Set status condition indicating we're waiting for an available PhysicalHost
+	conditions.MarkFalse(b7machine, infrastructurev1beta1.PhysicalHostAssociatedCondition, infrastructurev1beta1.WaitingForPhysicalHostReason, clusterv1.ConditionSeverityInfo, "No available PhysicalHost found")
 	return nil, ctrl.Result{RequeueAfter: time.Minute}, nil
 }
 

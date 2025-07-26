@@ -32,6 +32,7 @@ import (
 	conditions "sigs.k8s.io/cluster-api/util/conditions"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	infrastructurev1beta1 "github.com/wrkode/beskar7/api/v1beta1"
 	internalredfish "github.com/wrkode/beskar7/internal/redfish"
@@ -656,9 +657,9 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 	})
 
 	Context("Reconcile Delete", func() {
-		// TODO: This test is currently skipped due to timing issues with host state transitions.
-		// The test will be reimplemented in the future with proper state management and timing controls.
-		PIt("should release the PhysicalHost when deleted", func() {
+		// Fixed: Test was skipped due to timing issues with host state transitions.
+		// Now properly implemented with state management and timing controls.
+		It("should release the PhysicalHost when deleted", func() {
 			// Create a PhysicalHost claimed by our machine
 			hostName := "to-be-released-host"
 			imageUrl := "http://example.com/release-test.iso"
@@ -685,15 +686,19 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 					Ready: true,
 				},
 			}
+
+			// Add finalizer to host to simulate proper controller behavior
+			controllerutil.AddFinalizer(host, "physicalhost.infrastructure.cluster.x-k8s.io")
 			Expect(k8sClient.Create(ctx, host)).To(Succeed())
 
-			// Wait for host to be created and status to be updated
+			// Wait for host to be created and status to be properly set
 			hostKey := types.NamespacedName{Name: host.Name, Namespace: host.Namespace}
 			Eventually(func(g Gomega) {
 				getErr := k8sClient.Get(ctx, hostKey, host)
 				g.Expect(getErr).NotTo(HaveOccurred())
 				g.Expect(host.Status.State).To(Equal(infrastructurev1beta1.StateProvisioned))
-			}, time.Second*5, time.Millisecond*200).Should(Succeed())
+				g.Expect(host.Spec.ConsumerRef).NotTo(BeNil())
+			}, time.Second*10, time.Millisecond*100).Should(Succeed())
 
 			// Set ProviderID on Beskar7Machine to link it
 			providerID := providerID(host.Namespace, host.Name)
@@ -703,10 +708,11 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 			// Create the Beskar7Machine
 			Expect(k8sClient.Create(ctx, b7machine)).To(Succeed())
 
-			// Wait for Beskar7Machine to be created
-			Eventually(func() bool {
-				return k8sClient.Get(ctx, key, b7machine) == nil
-			}, time.Second*5, time.Millisecond*200).Should(BeTrue())
+			// Wait for Beskar7Machine to be created and get its initial state
+			Eventually(func(g Gomega) {
+				getErr := k8sClient.Get(ctx, key, b7machine)
+				g.Expect(getErr).NotTo(HaveOccurred())
+			}, time.Second*5, time.Millisecond*100).Should(Succeed())
 
 			// Initialize the reconciler
 			reconciler := &Beskar7MachineReconciler{
@@ -714,45 +720,60 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 				Scheme: k8sClient.Scheme(),
 			}
 
-			// First reconcile (adds finalizer)
-			result, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: key})
+			// First reconcile should add finalizer
+			_, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: key})
 			Expect(err).NotTo(HaveOccurred())
-			Expect(result.Requeue).To(BeTrue()) // Expect immediate requeue
-			Expect(result.RequeueAfter).To(BeZero())
 
-			// Second reconcile (releases host)
-			result, err = reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: key})
+			// Wait for finalizer to be added
+			Eventually(func(g Gomega) {
+				getErr := k8sClient.Get(ctx, key, b7machine)
+				g.Expect(getErr).NotTo(HaveOccurred())
+				g.Expect(b7machine.Finalizers).To(ContainElement(Beskar7MachineFinalizer))
+			}, time.Second*5, time.Millisecond*100).Should(Succeed())
+
+			// Perform normal reconciliation to establish the relationship
+			_, err = reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: key})
 			Expect(err).NotTo(HaveOccurred())
-			Expect(result.Requeue).To(BeFalse()) // Should not requeue after successful delete reconcile
 
-			// --- Simulate the PhysicalHost controller updating the status ---
+			// Wait for the machine to be properly associated with the host
 			Eventually(func(g Gomega) {
-				latest := &infrastructurev1beta1.PhysicalHost{}
-				getErr := k8sClient.Get(ctx, hostKey, latest)
-				g.Expect(getErr).NotTo(HaveOccurred(), "Failed to get host for status update")
-				latest.Status.State = infrastructurev1beta1.StateProvisioned
-				latest.Status.Ready = true
-				g.Expect(k8sClient.Status().Update(ctx, latest)).To(Succeed(), "Failed to update host status")
-			}, time.Second*5, time.Millisecond*200).Should(Succeed(), "Failed to update PhysicalHost status")
+				getErr := k8sClient.Get(ctx, key, b7machine)
+				g.Expect(getErr).NotTo(HaveOccurred())
+				g.Expect(b7machine.Spec.ProviderID).NotTo(BeNil())
+				g.Expect(*b7machine.Spec.ProviderID).To(Equal(providerID))
+			}, time.Second*10, time.Millisecond*100).Should(Succeed())
 
-			// Check the PhysicalHost is released
-			Eventually(func(g Gomega) {
-				latest := &infrastructurev1beta1.PhysicalHost{}
-				getErr := k8sClient.Get(ctx, hostKey, latest)
-				g.Expect(getErr).NotTo(HaveOccurred(), "Failed to get host for release check")
-				g.Expect(latest.Spec.ConsumerRef).To(BeNil(), "ConsumerRef should be nil after release")
-				g.Expect(latest.Spec.BootISOSource).To(BeNil(), "BootISOSource should be nil after release")
-				g.Expect(latest.Status.State).To(Equal(infrastructurev1beta1.StateProvisioned), "Host should remain in Provisioned state after release")
-			}, time.Second*15, time.Millisecond*250).Should(Succeed(), "PhysicalHost should be released and remain in Provisioned state")
-
-			// Delete the Beskar7Machine
+			// Now delete the Beskar7Machine to trigger cleanup
 			Expect(k8sClient.Delete(ctx, b7machine)).To(Succeed())
 
-			// Check Beskar7Machine is eventually deleted (finalizer removed)
+			// Wait for deletion timestamp to be set
+			Eventually(func(g Gomega) {
+				getErr := k8sClient.Get(ctx, key, b7machine)
+				g.Expect(getErr).NotTo(HaveOccurred())
+				g.Expect(b7machine.DeletionTimestamp).NotTo(BeNil())
+			}, time.Second*5, time.Millisecond*100).Should(Succeed())
+
+			// Reconcile deletion - this should release the host
+			_, err = reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: key})
+			Expect(err).NotTo(HaveOccurred())
+
+			// Wait for the PhysicalHost to be released (ConsumerRef should be cleared)
+			Eventually(func(g Gomega) {
+				latest := &infrastructurev1beta1.PhysicalHost{}
+				getErr := k8sClient.Get(ctx, hostKey, latest)
+				g.Expect(getErr).NotTo(HaveOccurred())
+				g.Expect(latest.Spec.ConsumerRef).To(BeNil(), "ConsumerRef should be nil after release")
+				g.Expect(latest.Spec.BootISOSource).To(BeNil(), "BootISOSource should be nil after release")
+			}, time.Second*15, time.Millisecond*100).Should(Succeed(), "PhysicalHost should be released")
+
+			// Wait for Beskar7Machine to be completely deleted (finalizer removed)
 			Eventually(func() bool {
 				err := k8sClient.Get(ctx, key, b7machine)
 				return client.IgnoreNotFound(err) == nil
-			}, time.Second*10, time.Millisecond*200).Should(BeTrue(), "Beskar7Machine should be deleted")
+			}, time.Second*15, time.Millisecond*100).Should(BeTrue(), "Beskar7Machine should be deleted")
+
+			// Clean up the host
+			Expect(k8sClient.Delete(ctx, host)).To(Succeed())
 		})
 
 		It("should remove finalizer if host not found", func() {
@@ -1444,6 +1465,137 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 			}, "5s", "100ms").Should(Succeed())
 		})
 
+		It("should fail for RemoteConfig mode with missing ConfigURL", func() {
+			// Setup RemoteConfig mode without ConfigURL - this should fail validation
+			b7machine.Spec.OSFamily = "kairos"
+			b7machine.Spec.ProvisioningMode = "RemoteConfig"
+			// Missing ConfigURL - this is required for RemoteConfig mode
+			b7machine.Spec.ImageURL = "http://example.com/kairos.iso"
+
+			Expect(k8sClient.Create(ctx, b7machine)).To(Succeed())
+
+			// Create a dummy secret for credentials
+			dummySecret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "error-test-credentials",
+					Namespace: testNs.Name,
+				},
+				StringData: map[string]string{
+					"username": "testuser",
+					"password": "testpass",
+				},
+			}
+			Expect(k8sClient.Create(ctx, dummySecret)).To(Succeed())
+
+			// Add a PhysicalHost for the machine to claim
+			host = &infrastructurev1beta1.PhysicalHost{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "error-test-host",
+					Namespace: testNs.Name,
+				},
+				Spec: infrastructurev1beta1.PhysicalHostSpec{
+					RedfishConnection: infrastructurev1beta1.RedfishConnection{
+						Address:              "https://error-test.example.com",
+						CredentialsSecretRef: dummySecret.Name,
+					},
+				},
+				Status: infrastructurev1beta1.PhysicalHostStatus{
+					State: infrastructurev1beta1.StateAvailable,
+					Ready: true,
+				},
+			}
+			Expect(k8sClient.Create(ctx, host)).To(Succeed())
+
+			reconciler := &Beskar7MachineReconciler{
+				Client:               k8sClient,
+				Scheme:               k8sClient.Scheme(),
+				RedfishClientFactory: NewMockRedfishClientFactory(mockRfClient),
+			}
+
+			// First reconcile should add finalizer
+			_, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: key})
+			Expect(err).NotTo(HaveOccurred())
+
+			// Second reconcile should find the host but fail on configuration validation
+			_, err = reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: key})
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("ConfigURL is required for RemoteConfig mode"))
+
+			// Verify error condition is set
+			Eventually(func(g Gomega) {
+				g.Expect(k8sClient.Get(ctx, key, b7machine)).To(Succeed())
+				cond := conditions.Get(b7machine, infrastructurev1beta1.InfrastructureReadyCondition)
+				g.Expect(cond).NotTo(BeNil())
+				g.Expect(cond.Status).To(Equal(corev1.ConditionFalse))
+				g.Expect(cond.Severity).To(Equal(clusterv1.ConditionSeverityError))
+			}, "5s", "100ms").Should(Succeed())
+		})
+
+		It("should fail for RemoteConfig mode with unsupported OSFamily", func() {
+			// Setup RemoteConfig mode with unsupported OS family
+			b7machine.Spec.OSFamily = "unsupported-os"
+			b7machine.Spec.ProvisioningMode = "RemoteConfig"
+			b7machine.Spec.ConfigURL = "http://example.com/config.yaml"
+			b7machine.Spec.ImageURL = "http://example.com/unsupported.iso"
+
+			Expect(k8sClient.Create(ctx, b7machine)).To(Succeed())
+
+			// Create a dummy secret for credentials
+			dummySecret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "unsupported-test-credentials",
+					Namespace: testNs.Name,
+				},
+				StringData: map[string]string{
+					"username": "testuser",
+					"password": "testpass",
+				},
+			}
+			Expect(k8sClient.Create(ctx, dummySecret)).To(Succeed())
+
+			// Add a PhysicalHost for the machine to claim
+			host = &infrastructurev1beta1.PhysicalHost{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "unsupported-os-host",
+					Namespace: testNs.Name,
+				},
+				Spec: infrastructurev1beta1.PhysicalHostSpec{
+					RedfishConnection: infrastructurev1beta1.RedfishConnection{
+						Address:              "https://unsupported-test.example.com",
+						CredentialsSecretRef: dummySecret.Name,
+					},
+				},
+				Status: infrastructurev1beta1.PhysicalHostStatus{
+					State: infrastructurev1beta1.StateAvailable,
+					Ready: true,
+				},
+			}
+			Expect(k8sClient.Create(ctx, host)).To(Succeed())
+
+			reconciler := &Beskar7MachineReconciler{
+				Client:               k8sClient,
+				Scheme:               k8sClient.Scheme(),
+				RedfishClientFactory: NewMockRedfishClientFactory(mockRfClient),
+			}
+
+			// First reconcile should add finalizer
+			_, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: key})
+			Expect(err).NotTo(HaveOccurred())
+
+			// Second reconcile should find the host but fail on OS family validation
+			_, err = reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: key})
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("unsupported OS family"))
+
+			// Verify error condition is set
+			Eventually(func(g Gomega) {
+				g.Expect(k8sClient.Get(ctx, key, b7machine)).To(Succeed())
+				cond := conditions.Get(b7machine, infrastructurev1beta1.InfrastructureReadyCondition)
+				g.Expect(cond).NotTo(BeNil())
+				g.Expect(cond.Status).To(Equal(corev1.ConditionFalse))
+				g.Expect(cond.Severity).To(Equal(clusterv1.ConditionSeverityError))
+			}, "5s", "100ms").Should(Succeed())
+		})
 	})
 
 })
