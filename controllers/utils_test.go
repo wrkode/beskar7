@@ -17,8 +17,6 @@ limitations under the License.
 package controllers
 
 import (
-	"testing"
-
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -27,10 +25,8 @@ import (
 	infrastructurev1beta1 "github.com/wrkode/beskar7/api/v1beta1"
 )
 
-func TestUtils(t *testing.T) {
-	RegisterFailHandler(Fail)
-	RunSpecs(t, "Utils Suite")
-}
+// Utils tests are integrated into the main controller suite
+// No separate test function needed - Ginkgo will find the Describe blocks
 
 var _ = Describe("Utils", func() {
 	Describe("isPaused", func() {
