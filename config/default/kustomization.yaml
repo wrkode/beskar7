@@ -33,10 +33,6 @@ patchesStrategicMerge:
 # through a ComponentConfig type
 #- manager_config_patch.yaml
 
-resources:
-# Security policies and configurations
-- ../security/security-policy.yaml
-- ../security/network-policy.yaml
 
 # TODO(user): Add transformations like Annotations, Labels, ConfigMapReplacements
 

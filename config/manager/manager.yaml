@@ -1,21 +1,21 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: beskar7-controller-manager
+  name: controller-manager
   namespace: beskar7-system
   labels:
     control-plane: controller-manager
 spec:
   selector:
     matchLabels:
-      control-plane: beskar7-controller-manager
+      control-plane: controller-manager
   replicas: 1
   template:
     metadata:
       annotations:
         kubectl.kubernetes.io/default-container: manager
       labels:
-        control-plane: beskar7-controller-manager
+        control-plane: controller-manager
     spec:
       securityContext:
         runAsNonRoot: true
