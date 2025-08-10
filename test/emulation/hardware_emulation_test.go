@@ -29,7 +29,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+    // metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	infrastructurev1beta1 "github.com/wrkode/beskar7/api/v1beta1"
 	"github.com/wrkode/beskar7/controllers"
@@ -217,9 +217,9 @@ var _ = Describe("Hardware Emulation Tests", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			// Verify power state changed
-			systemInfo, err := client.GetSystemInfo(ctx)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(string(systemInfo.PowerState)).To(Equal("Off"))
+            ps, err := client.GetPowerState(ctx)
+            Expect(err).NotTo(HaveOccurred())
+            Expect(string(ps)).To(Equal("Off"))
 		})
 
 		It("should handle boot source configuration on emulated server", func() {
@@ -264,7 +264,7 @@ var _ = Describe("Hardware Emulation Tests", func() {
 						_, err := client.GetSystemInfo(ctx)
 						Expect(err).NotTo(HaveOccurred())
 
-						err = client.SetPowerState(ctx, internalredfish.PowerStateOn)
+                        err = client.SetPowerState(ctx, redfish.OnPowerState)
 						Expect(err).NotTo(HaveOccurred())
 
 						time.Sleep(10 * time.Millisecond) // Small delay between operations
@@ -294,10 +294,10 @@ var _ = Describe("Hardware Emulation Tests", func() {
 
 					// Alternate between power states
 					if i%2 == 0 {
-						err := client.SetPowerState(ctx, internalredfish.PowerStateOn)
+                        err := client.SetPowerState(ctx, redfish.OnPowerState)
 						Expect(err).NotTo(HaveOccurred())
 					} else {
-						err := client.SetPowerState(ctx, internalredfish.PowerStateOff)
+                        err := client.SetPowerState(ctx, redfish.OffPowerState)
 						Expect(err).NotTo(HaveOccurred())
 					}
 					done <- true

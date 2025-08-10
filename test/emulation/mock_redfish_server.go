@@ -318,12 +318,15 @@ func (mrs *MockRedfishServer) handleRequest(w http.ResponseWriter, r *http.Reque
 		mrs.handleSystemGet(w, r)
 	case strings.HasPrefix(r.URL.Path, "/redfish/v1/Systems/") && strings.HasSuffix(r.URL.Path, "/Actions/ComputerSystem.Reset") && r.Method == http.MethodPost:
 		mrs.handleSystemReset(w, r)
-	case strings.HasPrefix(r.URL.Path, "/redfish/v1/Managers"):
-		mrs.handleManagerRequest(w, r)
-	case strings.Contains(r.URL.Path, "VirtualMedia"):
-		mrs.handleVirtualMediaRequest(w, r)
-	case strings.Contains(r.URL.Path, "Bios"):
-		mrs.handleBIOSRequest(w, r)
+    case strings.HasPrefix(r.URL.Path, "/redfish/v1/Managers"):
+        // Minimal Manager handlers could be added here if needed in future
+        w.WriteHeader(http.StatusNotFound)
+    case strings.Contains(r.URL.Path, "VirtualMedia"):
+        // Basic virtual media endpoints are handled via SetBootSourceISO in client tests
+        w.WriteHeader(http.StatusNotFound)
+    case strings.Contains(r.URL.Path, "Bios"):
+        // BIOS attribute GET/PATCH can be added if tests require deeper emulation
+        w.WriteHeader(http.StatusNotFound)
 	default:
 		http.NotFound(w, r)
 	}
