@@ -96,17 +96,42 @@ func (c *HostClaimCoordinator) ClaimHost(ctx context.Context, request ClaimReque
 		}, nil
 	}
 
-	// Select the best host using deterministic algorithm
-	selectedHost := c.selectHostDeterministic(availableHosts, request.Machine)
-	logger.Info("Selected host for claiming", "host", selectedHost.Name)
+	// Start with a deterministic host, but fall back across the list to ensure progress
+	startHost := c.selectHostDeterministic(availableHosts, request.Machine)
 
-	// Attempt atomic claim with retries
-	result, err := c.attemptAtomicClaim(ctx, selectedHost, request)
-	if err != nil {
-		return nil, fmt.Errorf("failed to claim host %s: %w", selectedHost.Name, err)
+	// Find starting index
+	startIndex := 0
+	for i := range availableHosts {
+		if availableHosts[i].Name == startHost.Name {
+			startIndex = i
+			break
+		}
 	}
 
-	return result, nil
+	// Try each available host in round-robin order starting from startIndex
+	for offset := 0; offset < len(availableHosts); offset++ {
+		candidate := availableHosts[(startIndex+offset)%len(availableHosts)]
+		logger.Info("Selected host for claiming", "host", candidate.Name)
+
+		result, err := c.attemptAtomicClaim(ctx, candidate, request)
+		if err != nil {
+			// Hard failure trying to claim this host; move on to next
+			logger.V(1).Info("Error attempting to claim host; trying next candidate", "host", candidate.Name, "error", err)
+			continue
+		}
+		if result != nil && result.ClaimSuccess {
+			return result, nil
+		}
+		// If not successful, continue to next candidate host
+	}
+
+	// If we reach here, none of the available hosts could be claimed now; advise retry
+	return &ClaimResult{
+		ClaimSuccess: false,
+		Retry:        true,
+		RetryAfter:   5 * time.Second,
+		Error:        fmt.Errorf("no hosts could be claimed at this time"),
+	}, nil
 }
 
 // findAssociatedHost finds a host already associated with the machine
@@ -296,6 +321,19 @@ func (c *HostClaimCoordinator) attemptAtomicClaim(ctx context.Context, host *inf
 			return nil, fmt.Errorf("failed to update host during claim: %w", err)
 		}
 
+		// Update status to reflect claimed state
+		latestForStatus := &infrastructurev1beta1.PhysicalHost{}
+		if err := c.Get(ctx, client.ObjectKeyFromObject(claimedHost), latestForStatus); err == nil {
+			latestForStatus.Status.State = infrastructurev1beta1.StateClaimed
+			// Keep Ready true while claimed to allow subsequent operations
+			latestForStatus.Status.Ready = true
+			if err := c.Status().Update(ctx, latestForStatus); err != nil {
+				logger.V(1).Info("Failed to update host status after claim", "error", err)
+			}
+		} else {
+			logger.V(1).Info("Failed to re-fetch host for status update after claim", "error", err)
+		}
+
 		logger.Info("Successfully claimed host atomically", "attempt", attempt+1)
 		return &ClaimResult{
 			Host:         claimedHost,
@@ -346,6 +384,18 @@ func (c *HostClaimCoordinator) ReleaseHost(ctx context.Context, machine *infrast
 	// Update the host
 	if err := c.Update(ctx, host); err != nil {
 		return fmt.Errorf("failed to release host %s: %w", host.Name, err)
+	}
+
+	// Update status to Available
+	latestForStatus := &infrastructurev1beta1.PhysicalHost{}
+	if err := c.Get(ctx, client.ObjectKeyFromObject(host), latestForStatus); err == nil {
+		latestForStatus.Status.State = infrastructurev1beta1.StateAvailable
+		latestForStatus.Status.Ready = true
+		if err := c.Status().Update(ctx, latestForStatus); err != nil {
+			logger.V(1).Info("Failed to update host status after release", "error", err)
+		}
+	} else {
+		logger.V(1).Info("Failed to re-fetch host for status update after release", "error", err)
 	}
 
 	logger.Info("Successfully released host")

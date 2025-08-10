@@ -26,6 +26,10 @@ import (
 	"testing"
 	"time"
 
+	"os"
+	"os/exec"
+	"strings"
+
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
@@ -67,12 +71,25 @@ var _ = BeforeSuite(func() {
 	Expect(infrastructurev1beta1.AddToScheme(scheme.Scheme)).To(Succeed())
 	Expect(clusterv1.AddToScheme(scheme.Scheme)).To(Succeed())
 
+	// Ensure envtest binary assets are available (etcd, kube-apiserver, kubectl)
+	if os.Getenv("KUBEBUILDER_ASSETS") == "" {
+		By("resolving envtest assets via setup-envtest")
+		cmd := exec.Command("bash", "-lc", "go run sigs.k8s.io/controller-runtime/tools/setup-envtest@latest use 1.31.x -p path")
+		cmd.Env = os.Environ()
+		output, err := cmd.CombinedOutput()
+		Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("failed to resolve envtest assets: %v\n%s", err, string(output)))
+		assetsPath := strings.TrimSpace(string(output))
+		Expect(assetsPath).NotTo(BeEmpty(), "setup-envtest returned empty path")
+		Expect(os.Setenv("KUBEBUILDER_ASSETS", assetsPath)).To(Succeed())
+	}
+
 	By("bootstrapping test environment")
 	testEnv = &envtest.Environment{
 		CRDDirectoryPaths: []string{
 			filepath.Join("..", "..", "config", "crd", "bases"),
 		},
 		ErrorIfCRDPathMissing: true,
+		BinaryAssetsDirectory: os.Getenv("KUBEBUILDER_ASSETS"),
 	}
 
 	var err error
@@ -92,7 +109,9 @@ var _ = BeforeSuite(func() {
 var _ = AfterSuite(func() {
 	cancel()
 	By("tearing down the test environment")
-	Expect(testEnv.Stop()).To(Succeed())
+	if testEnv != nil {
+		Expect(testEnv.Stop()).To(Succeed())
+	}
 })
 
 var _ = Describe("Concurrent Provisioning Integration", func() {
@@ -140,6 +159,10 @@ var _ = Describe("Concurrent Provisioning Integration", func() {
 				},
 			}
 			Expect(k8sClient.Create(ctx, host)).To(Succeed())
+			// Status fields are not persisted on Create; update status explicitly
+			host.Status.State = infrastructurev1beta1.StateAvailable
+			host.Status.Ready = true
+			Expect(k8sClient.Status().Update(ctx, host)).To(Succeed())
 
 			By("Creating a machine")
 			machine := &infrastructurev1beta1.Beskar7Machine{
@@ -233,6 +256,9 @@ var _ = Describe("Concurrent Provisioning Integration", func() {
 					},
 				}
 				Expect(k8sClient.Create(ctx, hosts[i])).To(Succeed())
+				hosts[i].Status.State = infrastructurev1beta1.StateAvailable
+				hosts[i].Status.Ready = true
+				Expect(k8sClient.Status().Update(ctx, hosts[i])).To(Succeed())
 			}
 
 			By("Creating multiple machines")
@@ -257,10 +283,9 @@ var _ = Describe("Concurrent Provisioning Integration", func() {
 			results := make([]*coordination.ClaimResult, numMachines)
 			errors := make([]error, numMachines)
 
-            for i := 0; i < numMachines; i++ {
-                idx := i
-                wg.Add(1)
-                go func(index int) {
+			for i := 0; i < numMachines; i++ {
+				wg.Add(1)
+				go func(index int) {
 					defer GinkgoRecover()
 					defer wg.Done()
 
@@ -329,6 +354,10 @@ var _ = Describe("Concurrent Provisioning Integration", func() {
 				},
 			}
 			Expect(k8sClient.Create(ctx, host)).To(Succeed())
+			// Mark as claimed via status subresource
+			host.Status.State = infrastructurev1beta1.StateClaimed
+			host.Status.Ready = true
+			Expect(k8sClient.Status().Update(ctx, host)).To(Succeed())
 
 			machine := &infrastructurev1beta1.Beskar7Machine{
 				ObjectMeta: metav1.ObjectMeta{
@@ -414,6 +443,9 @@ var _ = Describe("Concurrent Provisioning Integration", func() {
 				},
 			}
 			Expect(k8sClient.Create(ctx, host)).To(Succeed())
+			host.Status.State = infrastructurev1beta1.StateAvailable
+			host.Status.Ready = true
+			Expect(k8sClient.Status().Update(ctx, host)).To(Succeed())
 
 			machine := &infrastructurev1beta1.Beskar7Machine{
 				ObjectMeta: metav1.ObjectMeta{
@@ -486,6 +518,9 @@ var _ = Describe("Concurrent Provisioning Integration", func() {
 					},
 				}
 				Expect(k8sClient.Create(ctx, host)).To(Succeed())
+				host.Status.State = infrastructurev1beta1.StateAvailable
+				host.Status.Ready = true
+				Expect(k8sClient.Status().Update(ctx, host)).To(Succeed())
 			}
 
 			By("Creating many machines")
@@ -511,10 +546,9 @@ var _ = Describe("Concurrent Provisioning Integration", func() {
 			errors := make([]error, numMachines)
 			startTime := time.Now()
 
-            for i := 0; i < numMachines; i++ {
-                idx := i
-                wg.Add(1)
-                go func(index int) {
+			for i := 0; i < numMachines; i++ {
+				wg.Add(1)
+				go func(index int) {
 					defer GinkgoRecover()
 					defer wg.Done()
 
@@ -525,8 +559,8 @@ var _ = Describe("Concurrent Provisioning Integration", func() {
 						},
 					}
 
-                    results[index], errors[index] = coordinator.ClaimHost(ctx, request)
-                }(idx)
+					results[index], errors[index] = coordinator.ClaimHost(ctx, request)
+				}(i)
 			}
 
 			wg.Wait()

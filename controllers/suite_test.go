@@ -18,7 +18,10 @@ package controllers
 
 import (
 	"context"
+	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -65,14 +68,27 @@ var _ = BeforeSuite(func() {
 	Expect(clusterv1.AddToScheme(scheme.Scheme)).To(Succeed())
 	//+kubebuilder:scaffold:scheme
 
+	// Ensure envtest assets are available
+	if os.Getenv("KUBEBUILDER_ASSETS") == "" {
+		By("resolving envtest assets via setup-envtest")
+		cmd := exec.Command("bash", "-lc", "go run sigs.k8s.io/controller-runtime/tools/setup-envtest@latest use 1.31.x -p path")
+		cmd.Env = os.Environ()
+		output, err := cmd.CombinedOutput()
+		Expect(err).NotTo(HaveOccurred(), string(output))
+		assetsPath := strings.TrimSpace(string(output))
+		Expect(assetsPath).NotTo(BeEmpty())
+		Expect(os.Setenv("KUBEBUILDER_ASSETS", assetsPath)).To(Succeed())
+	}
+
 	By("bootstrapping test environment")
-    testEnv = &envtest.Environment{
-        CRDDirectoryPaths: []string{
-            filepath.Join("..", "config", "crd", "bases"),           // Beskar7 CRDs
-            filepath.Join("..", "config", "test-external-crds"),      // Minimal external CRDs (e.g., CAPI Cluster/Machine)
-        },
-        ErrorIfCRDPathMissing: true,
-    }
+	testEnv = &envtest.Environment{
+		CRDDirectoryPaths: []string{
+			filepath.Join("..", "config", "crd", "bases"),       // Beskar7 CRDs
+			filepath.Join("..", "config", "test-external-crds"), // Minimal external CRDs (e.g., CAPI Cluster/Machine)
+		},
+		ErrorIfCRDPathMissing: true,
+		BinaryAssetsDirectory: os.Getenv("KUBEBUILDER_ASSETS"),
+	}
 
 	var err error
 	// cfg is defined in this file globally.
@@ -119,5 +135,7 @@ var _ = BeforeSuite(func() {
 var _ = AfterSuite(func() {
 	cancel()
 	By("tearing down the test environment")
-	Expect(testEnv.Stop()).To(Succeed())
+	if testEnv != nil {
+		Expect(testEnv.Stop()).To(Succeed())
+	}
 })
