@@ -66,13 +66,12 @@ var _ = BeforeSuite(func() {
 	//+kubebuilder:scaffold:scheme
 
 	By("bootstrapping test environment")
-	testEnv = &envtest.Environment{
-		CRDDirectoryPaths: []string{
-			filepath.Join("..", "config", "crd", "bases"), // Local CRDs
-			filepath.Join("..", "config", "test-crds"),    // Downloaded test CRDs
-		},
-		ErrorIfCRDPathMissing: true,
-	}
+    testEnv = &envtest.Environment{
+        CRDDirectoryPaths: []string{
+            filepath.Join("..", "config", "crd", "bases"), // Local CRDs
+        },
+        ErrorIfCRDPathMissing: true,
+    }
 
 	var err error
 	// cfg is defined in this file globally.

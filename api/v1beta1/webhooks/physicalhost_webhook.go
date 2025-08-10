@@ -246,12 +246,18 @@ func (webhook *PhysicalHostWebhook) validateCredentialSecret(ctx context.Context
 	var allErrs field.ErrorList
 
 	secretName := host.Spec.RedfishConnection.CredentialsSecretRef
-	secret := &corev1.Secret{}
+    // If no client is set (unit-test or dry-run), return a warning and skip strict validation
+    if webhook.Client == nil {
+        warnings = append(warnings, fmt.Sprintf("Credential secret '%s' cannot be validated in this context.", secretName))
+        return warnings, allErrs
+    }
 
-	err := webhook.Client.Get(ctx, client.ObjectKey{
-		Namespace: host.Namespace,
-		Name:      secretName,
-	}, secret)
+    secret := &corev1.Secret{}
+
+    err := webhook.Client.Get(ctx, client.ObjectKey{
+        Namespace: host.Namespace,
+        Name:      secretName,
+    }, secret)
 
 	if err != nil {
 		// Secret doesn't exist - this will be handled at runtime
