@@ -29,12 +29,13 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
-    // metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	// metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"github.com/stmcginnis/gofish/redfish"
 	infrastructurev1beta1 "github.com/wrkode/beskar7/api/v1beta1"
 	"github.com/wrkode/beskar7/controllers"
 	internalredfish "github.com/wrkode/beskar7/internal/redfish"
-    "github.com/stmcginnis/gofish/redfish"
 )
 
 func TestHardwareEmulation(t *testing.T) {
@@ -46,12 +47,10 @@ var _ = Describe("Hardware Emulation Tests", func() {
 	var (
 		mockServer *MockRedfishServer
 		ctx        context.Context
-		namespace  string
 	)
 
 	BeforeEach(func() {
 		ctx = context.Background()
-		namespace = "emulation-test"
 	})
 
 	AfterEach(func() {
@@ -66,10 +65,10 @@ var _ = Describe("Hardware Emulation Tests", func() {
 			mockServer = NewMockRedfishServer(VendorDell)
 			defer mockServer.Close()
 
-			// Test vendor-specific information
-			systemInfo := mockServer.systemInfo
-			Expect(systemInfo.Manufacturer).To(Equal("Dell Inc."))
-			Expect(systemInfo.Model).To(ContainSubstring("PowerEdge"))
+			// Test vendor-specific information from mock server
+			srvInfo := mockServer.systemInfo
+			Expect(srvInfo.Manufacturer).To(Equal("Dell Inc."))
+			Expect(srvInfo.Model).To(ContainSubstring("PowerEdge"))
 
 			// Test Dell-specific BIOS attributes
 			biosAttrs := mockServer.biosAttributes
@@ -78,18 +77,18 @@ var _ = Describe("Hardware Emulation Tests", func() {
 
 			// Test Redfish client integration
 			client := createRedfishClient(mockServer.GetURL(), "admin", "password123")
-			systemInfo, err := client.GetSystemInfo(ctx)
+			rfInfo, err := client.GetSystemInfo(ctx)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(systemInfo.Manufacturer).To(Equal("Dell Inc."))
+			Expect(rfInfo.Manufacturer).To(Equal("Dell Inc."))
 		})
 
 		It("should emulate HPE ProLiant server behavior", func() {
 			mockServer = NewMockRedfishServer(VendorHPE)
 			defer mockServer.Close()
 
-			systemInfo := mockServer.systemInfo
-			Expect(systemInfo.Manufacturer).To(Equal("HPE"))
-			Expect(systemInfo.Model).To(ContainSubstring("ProLiant"))
+			srvInfo := mockServer.systemInfo
+			Expect(srvInfo.Manufacturer).To(Equal("HPE"))
+			Expect(srvInfo.Model).To(ContainSubstring("ProLiant"))
 
 			// Test HPE-specific BIOS attributes
 			biosAttrs := mockServer.biosAttributes
@@ -101,9 +100,9 @@ var _ = Describe("Hardware Emulation Tests", func() {
 			mockServer = NewMockRedfishServer(VendorLenovo)
 			defer mockServer.Close()
 
-			systemInfo := mockServer.systemInfo
-			Expect(systemInfo.Manufacturer).To(Equal("Lenovo"))
-			Expect(systemInfo.Model).To(ContainSubstring("ThinkSystem"))
+			srvInfo := mockServer.systemInfo
+			Expect(srvInfo.Manufacturer).To(Equal("Lenovo"))
+			Expect(srvInfo.Model).To(ContainSubstring("ThinkSystem"))
 
 			// Test Lenovo-specific BIOS attributes
 			biosAttrs := mockServer.biosAttributes
@@ -115,9 +114,9 @@ var _ = Describe("Hardware Emulation Tests", func() {
 			mockServer = NewMockRedfishServer(VendorSupermicro)
 			defer mockServer.Close()
 
-			systemInfo := mockServer.systemInfo
-			Expect(systemInfo.Manufacturer).To(Equal("Supermicro"))
-			Expect(systemInfo.Model).To(ContainSubstring("X12"))
+			srvInfo := mockServer.systemInfo
+			Expect(srvInfo.Manufacturer).To(Equal("Supermicro"))
+			Expect(srvInfo.Model).To(ContainSubstring("X12"))
 
 			// Test Supermicro-specific BIOS attributes
 			biosAttrs := mockServer.biosAttributes
@@ -177,24 +176,24 @@ var _ = Describe("Hardware Emulation Tests", func() {
 				PowerFailures: true,
 			})
 
-            client := createRedfishClient(mockServer.GetURL(), "admin", "password123")
-            err := client.SetPowerState(ctx, redfish.OnPowerState)
+			client := createRedfishClient(mockServer.GetURL(), "admin", "password123")
+			err := client.SetPowerState(ctx, redfish.OnPowerState)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("500"))
 		})
 	})
 
 	Context("PhysicalHost Controller Integration", func() {
-        var (
-            _       *controllers.PhysicalHostReconciler
-            _       *infrastructurev1beta1.PhysicalHost
-            _       *corev1.Secret
-        )
+		var (
+			_ *controllers.PhysicalHostReconciler
+			_ *infrastructurev1beta1.PhysicalHost
+			_ *corev1.Secret
+		)
 
 		BeforeEach(func() {
 			mockServer = NewMockRedfishServer(VendorDell)
 
-            // Controller environment not used in these emulation tests
+			// Controller environment not used in these emulation tests
 		})
 
 		It("should successfully connect to emulated Dell server", func() {
@@ -213,13 +212,13 @@ var _ = Describe("Hardware Emulation Tests", func() {
 			client := createRedfishClient(mockServer.GetURL(), "admin", "password123")
 
 			// Test power operations
-            err := client.SetPowerState(ctx, redfish.OffPowerState)
+			err := client.SetPowerState(ctx, redfish.OffPowerState)
 			Expect(err).NotTo(HaveOccurred())
 
 			// Verify power state changed
-            ps, err := client.GetPowerState(ctx)
-            Expect(err).NotTo(HaveOccurred())
-            Expect(string(ps)).To(Equal("Off"))
+			ps, err := client.GetPowerState(ctx)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(string(ps)).To(Equal("Off"))
 		})
 
 		It("should handle boot source configuration on emulated server", func() {
@@ -264,7 +263,7 @@ var _ = Describe("Hardware Emulation Tests", func() {
 						_, err := client.GetSystemInfo(ctx)
 						Expect(err).NotTo(HaveOccurred())
 
-                        err = client.SetPowerState(ctx, redfish.OnPowerState)
+						err = client.SetPowerState(ctx, redfish.OnPowerState)
 						Expect(err).NotTo(HaveOccurred())
 
 						time.Sleep(10 * time.Millisecond) // Small delay between operations
@@ -294,10 +293,10 @@ var _ = Describe("Hardware Emulation Tests", func() {
 
 					// Alternate between power states
 					if i%2 == 0 {
-                        err := client.SetPowerState(ctx, redfish.OnPowerState)
+						err := client.SetPowerState(ctx, redfish.OnPowerState)
 						Expect(err).NotTo(HaveOccurred())
 					} else {
-                        err := client.SetPowerState(ctx, redfish.OffPowerState)
+						err := client.SetPowerState(ctx, redfish.OffPowerState)
 						Expect(err).NotTo(HaveOccurred())
 					}
 					done <- true
@@ -311,11 +310,11 @@ var _ = Describe("Hardware Emulation Tests", func() {
 
 			// Final state should be consistent
 			client := createRedfishClient(mockServer.GetURL(), "admin", "password123")
-            ps, err := client.GetPowerState(ctx)
+			ps, err := client.GetPowerState(ctx)
 			Expect(err).NotTo(HaveOccurred())
-            // Power state should be either On or Off, not in an inconsistent state
-            powerState := string(ps)
-            Expect(powerState).To(SatisfyAny(Equal("On"), Equal("Off")))
+			// Power state should be either On or Off, not in an inconsistent state
+			powerState := string(ps)
+			Expect(powerState).To(SatisfyAny(Equal("On"), Equal("Off")))
 		})
 	})
 
