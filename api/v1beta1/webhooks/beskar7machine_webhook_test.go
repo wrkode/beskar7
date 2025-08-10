@@ -1,22 +1,18 @@
 package webhooks
 
 import (
-	"context"
-	"fmt"
-	"strings"
-	"testing"
+    "context"
+    "fmt"
+    "strings"
 
-	. "github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+    . "github.com/onsi/ginkgo/v2"
+    . "github.com/onsi/gomega"
+    metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	infrav1beta1 "github.com/wrkode/beskar7/api/v1beta1"
+    infrav1beta1 "github.com/wrkode/beskar7/api/v1beta1"
 )
 
-func TestBeskar7MachineWebhook(t *testing.T) {
-	RegisterFailHandler(Fail)
-	RunSpecs(t, "Beskar7Machine Webhook Suite")
-}
+// Note: No RunSpecs here to avoid multiple Ginkgo suites in the same package.
 
 var _ = Describe("Beskar7Machine Webhook", func() {
 	var webhook *Beskar7MachineWebhook

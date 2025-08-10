@@ -63,10 +63,15 @@ func (webhook *PhysicalHostWebhook) ValidateCreate(ctx context.Context, obj runt
 
 	physicalHostWebhookLog.Info("Validating PhysicalHost creation", "name", host.Name, "namespace", host.Namespace)
 
-	warnings, err := webhook.validatePhysicalHost(host)
+    warnings, err := webhook.validatePhysicalHost(host)
 	if err != nil {
 		return warnings, err
 	}
+
+    // Warn if a ConsumerRef is set at creation time
+    if host.Spec.ConsumerRef != nil {
+        warnings = append(warnings, "ConsumerRef is set on creation. Ensure claim lifecycle is coordinated by the controller.")
+    }
 
 	// Additional security validation for creation
 	securityWarnings, secErr := webhook.validateSecurityRequirements(ctx, host)
@@ -91,13 +96,13 @@ func (webhook *PhysicalHostWebhook) ValidateUpdate(ctx context.Context, oldObj, 
 
 	physicalHostWebhookLog.Info("Validating PhysicalHost update", "name", newHost.Name, "namespace", newHost.Namespace)
 
-	warnings, err := webhook.validatePhysicalHost(newHost)
+    warnings, err := webhook.validatePhysicalHost(newHost)
 	if err != nil {
 		return warnings, err
 	}
 
-	// Additional validation for updates
-	updateWarnings, updateErr := webhook.validatePhysicalHostUpdate(oldHost, newHost)
+    // Additional validation for updates
+    updateWarnings, updateErr := webhook.validatePhysicalHostUpdate(oldHost, newHost)
 	warnings = append(warnings, updateWarnings...)
 	if updateErr != nil {
 		return warnings, updateErr
@@ -419,22 +424,31 @@ func (webhook *PhysicalHostWebhook) validatePhysicalHostUpdate(oldHost, newHost 
 	var warnings admission.Warnings
 	var allErrs field.ErrorList
 
-	// Prevent changes to critical fields when host is claimed
-	if oldHost.Spec.ConsumerRef != nil {
-		if oldHost.Spec.RedfishConnection.Address != newHost.Spec.RedfishConnection.Address {
-			allErrs = append(allErrs, field.Forbidden(
-				field.NewPath("spec", "redfishConnection", "address"),
-				"cannot change Redfish address while host is claimed",
-			))
-		}
+    // Address is immutable after creation regardless of claim state
+    if oldHost.Spec.RedfishConnection.Address != newHost.Spec.RedfishConnection.Address {
+        allErrs = append(allErrs, field.Forbidden(
+            field.NewPath("spec", "redfishConnection", "address"),
+            "address is immutable after creation",
+        ))
+    }
 
-		if oldHost.Spec.RedfishConnection.CredentialsSecretRef != newHost.Spec.RedfishConnection.CredentialsSecretRef {
-			allErrs = append(allErrs, field.Forbidden(
-				field.NewPath("spec", "redfishConnection", "credentialsSecretRef"),
-				"cannot change credentials while host is claimed",
-			))
-		}
-	}
+    // Prevent changes to credentials while host is claimed
+    if oldHost.Spec.ConsumerRef != nil &&
+        oldHost.Spec.RedfishConnection.CredentialsSecretRef != newHost.Spec.RedfishConnection.CredentialsSecretRef {
+        allErrs = append(allErrs, field.Forbidden(
+            field.NewPath("spec", "redfishConnection", "credentialsSecretRef"),
+            "cannot change credentials while host is claimed",
+        ))
+    }
+
+    // Forbid removing ConsumerRef while provisioning
+    if oldHost.Spec.ConsumerRef != nil && newHost.Spec.ConsumerRef == nil &&
+        strings.EqualFold(newHost.Status.State, infrav1beta1.StateProvisioning) {
+        allErrs = append(allErrs, field.Forbidden(
+            field.NewPath("spec", "consumerRef"),
+            "cannot remove consumerRef while host is provisioning",
+        ))
+    }
 
 	// Warn about security changes
 	oldInsecure := oldHost.Spec.RedfishConnection.InsecureSkipVerify != nil && *oldHost.Spec.RedfishConnection.InsecureSkipVerify
