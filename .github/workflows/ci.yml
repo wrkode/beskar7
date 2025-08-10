@@ -51,38 +51,11 @@ jobs:
 
   # Job 2: Security Scanning
   security:
-    name: Security Scanning
+    name: Security Scanning (disabled)
+    if: false # disabled temporarily for private repo limitations
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
-    
-    - name: Set up Go
-      uses: actions/setup-go@v5
-      with:
-        go-version: '1.24'
-        
-    - name: Run Gosec Security Scanner
-      uses: securego/gosec@v2.22.7
-      with:
-        args: '-no-fail -fmt sarif -out gosec.sarif ./...'
-        
-    - name: Upload SARIF file
-      uses: github/codeql-action/upload-sarif@v3
-      with:
-        sarif_file: gosec.sarif
-        
-    - name: Run Trivy vulnerability scanner
-      uses: aquasecurity/trivy-action@master
-      with:
-        scan-type: 'fs'
-        ignore-unfixed: true
-        format: 'sarif'
-        output: 'trivy-results.sarif'
-        
-    - name: Upload Trivy scan results to GitHub Security tab
-      uses: github/codeql-action/upload-sarif@v3
-      with:
-        sarif_file: 'trivy-results.sarif'
+    - run: echo "Security scanning is disabled for this repository."
 
   # Job 3: Unit Tests
   test:
@@ -328,7 +301,7 @@ jobs:
   ci-success:
     name: CI Success
     runs-on: ubuntu-latest
-    needs: [lint, security, test, integration-test, container, manifests, e2e-setup]
+    needs: [lint, test, integration-test, container, manifests, e2e-setup]
     if: always()
     steps:
     - name: Check all jobs status
