@@ -8,13 +8,13 @@ The first place to look for issues is the logs of the Beskar7 controller manager
 
 ```bash
 # List the controller manager pods
-kubectl get pods -n beskar7-system -l control-plane=controller-manager
+kubectl get pods -n beskar7-system -l control-plane=beskar7-controller-manager
 
 # View the logs
 kubectl logs -n beskar7-system -f <pod-name> -c manager
 ```
 
-Increase verbosity by editing the manager Deployment (`config/manager/manager.yaml` or via `kubectl edit deployment -n beskar7-system controller-manager`) and adding a `-v=X` argument (e.g., `-v=5`) to the manager container's args list, then restart the pod.
+Increase verbosity by editing the manager Deployment (`config/manager/manager.yaml` or via `kubectl edit deployment -n beskar7-system beskar7-controller-manager`) and adding a `-v=X` argument (e.g., `-v=5`) to the manager container's args list, then restart the pod.
 
 ## Webhook and Certificate Issues
 

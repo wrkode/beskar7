@@ -15,7 +15,7 @@ Beskar7 automatically detects hardware vendors based on the system manufacturer 
 | "Dell Inc." | Dell | BIOS `KernelArgs` attribute |
 | "HPE" | HPE | UEFI Target Boot Override |
 | "Lenovo" | Lenovo | UEFI with BIOS fallback |
-| "Supermicro" | Supermicro | UEFI with multiple fallbacks |
+| "Supermicro" | Supermicro | UEFI (BIOS attribute fallback may be required) |
 | Others | Generic | UEFI with fallback support |
 
 ## Supported Hardware
@@ -78,10 +78,10 @@ spec:
 **Automatically Handled:**
 - X12, X11, H12 series
 - Modern BMC implementations
-- UEFI method with multiple fallback mechanisms
+- UEFI target override (BIOS attribute override available via annotation)
 
 **What works automatically:**
-- RemoteConfig mode (with fallbacks)
+- RemoteConfig mode (force BIOS attribute via annotation if UEFI override fails)
 - PreBakedISO mode (recommended for older systems)
 - Virtual media mounting
 - Power management
@@ -234,7 +234,7 @@ If RemoteConfig isn't working:
 
 1. **Check logs:**
    ```bash
-   kubectl logs -n beskar7-system deployment/beskar7-controller-manager
+kubectl logs -n beskar7-system deployment/beskar7-controller-manager
    ```
 
 2. **Look for vendor-specific messages:**

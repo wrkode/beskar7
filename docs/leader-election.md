@@ -53,7 +53,7 @@ For development or small deployments:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: controller-manager
+  name: beskar7-controller-manager
 spec:
   replicas: 1
   template:
@@ -75,7 +75,7 @@ For production deployments with multiple replicas:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: controller-manager
+  name: beskar7-controller-manager
 spec:
   replicas: 3  # Multiple replicas for HA
   template:
@@ -101,7 +101,7 @@ For environments requiring faster failover:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: controller-manager
+  name: beskar7-controller-manager
 spec:
   replicas: 3
   template:
@@ -124,7 +124,7 @@ For environments with network latency or instability:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: controller-manager
+  name: beskar7-controller-manager
 spec:
   replicas: 3
   template:
@@ -234,7 +234,7 @@ Monitor logs for leader election events:
 
 ```bash
 # View leader election logs
-kubectl logs deployment/controller-manager -n beskar7-system | grep leader
+kubectl logs deployment/beskar7-controller-manager -n beskar7-system | grep leader
 
 # Common log patterns:
 # "successfully acquired lease" - became leader
@@ -260,7 +260,7 @@ kubectl get lease -n beskar7-system
 kubectl auth can-i create leases --as=system:serviceaccount:beskar7-system:controller-manager -n beskar7-system
 
 # Check controller logs
-kubectl logs deployment/controller-manager -n beskar7-system | grep "leader"
+kubectl logs deployment/beskar7-controller-manager -n beskar7-system | grep "leader"
 ```
 
 **Resolution:**
@@ -296,7 +296,7 @@ kubectl apply -f config/rbac/
 #### Network Issues
 ```bash
 # Test pod-to-pod connectivity
-kubectl exec deployment/controller-manager -n beskar7-system -- nslookup kubernetes.default
+kubectl exec deployment/beskar7-controller-manager -n beskar7-system -- nslookup kubernetes.default
 
 # Check network policies
 kubectl get networkpolicy -n beskar7-system
@@ -308,7 +308,7 @@ kubectl get networkpolicy -n beskar7-system
 kubectl top pod -n beskar7-system
 
 # Increase resources if needed
-kubectl patch deployment controller-manager -n beskar7-system \
+kubectl patch deployment beskar7-controller-manager -n beskar7-system \
   --patch '{"spec":{"template":{"spec":{"containers":[{"name":"manager","resources":{"limits":{"memory":"1Gi"}}}]}}}}'
 ```
 

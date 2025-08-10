@@ -105,17 +105,27 @@ The system automatically detects hosts stuck in transitional states:
 
 ### Configuration
 
-Recovery behavior can be configured via environment variables:
+Recovery behavior and reconciliation safety can be configured via command-line flags or environment variables. Flags take precedence; the flags accept values from env defaults shown below.
 
-```yaml
-env:
-  - name: RECONCILE_TIMEOUT
-    value: "30m"  # Maximum reconciliation time
-  - name: STUCK_STATE_TIMEOUT  
-    value: "15m"  # Time before considering state stuck
-  - name: MAX_RETRIES
-    value: "3"    # Maximum retry attempts
-```
+- Flags:
+  - `--reconcile-timeout` (default `2m`, env `RECONCILE_TIMEOUT`): Maximum reconciliation time per `PhysicalHost` reconcile loop.
+  - `--stuck-state-timeout` (default `15m`, env `STUCK_STATE_TIMEOUT`): Time before considering a host stuck in a transitional state.
+  - `--max-retries` (default `3`, env `MAX_RETRIES`): Maximum retries for guarded state transitions.
+
+- Example deployment arguments and env (see `config/manager/manager.yaml`):
+  ```yaml
+  args:
+    - --reconcile-timeout=$(RECONCILE_TIMEOUT)
+    - --stuck-state-timeout=$(STUCK_STATE_TIMEOUT)
+    - --max-retries=$(MAX_RETRIES)
+  env:
+    - name: RECONCILE_TIMEOUT
+      value: "2m"
+    - name: STUCK_STATE_TIMEOUT
+      value: "15m"
+    - name: MAX_RETRIES
+      value: "3"
+  ```
 
 ## Troubleshooting
 

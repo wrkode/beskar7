@@ -172,7 +172,7 @@ metadata:
 spec:
   selector:
     matchLabels:
-      control-plane: controller-manager
+      control-plane: beskar7-controller-manager
   endpoints:
   - port: metrics
     interval: 30s

@@ -234,7 +234,7 @@ Mode to use for provisioning the machine.
 
 **Valid Values:**
 - `RemoteConfig` - Boot generic ISO with configuration URL
-- `PreBakedISO` - Boot pre-configured ISO
+- `PreBakedISO` - Boot pre-configured ISO. Use this when the OS config is embedded into the ISO for `kairos`, `talos`, `flatcar`, or `LeapMicro`.
 - `PXE` - PXE boot (future)
 - `iPXE` - iPXE boot (future)
 

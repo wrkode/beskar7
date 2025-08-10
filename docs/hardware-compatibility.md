@@ -330,7 +330,7 @@ Beskar7 automatically detects hardware vendors based on the system manufacturer 
 - **Dell Inc.** → Uses BIOS attribute method with `KernelArgs` attribute
 - **HPE** → Uses UEFI target boot source override method
 - **Lenovo** → Uses UEFI method with fallback to BIOS attributes
-- **Supermicro** → Uses UEFI method with multiple fallback mechanisms
+- **Supermicro** → Uses UEFI target override; BIOS attribute override may be needed on some BMCs
 - **Others** → Uses generic UEFI method with fallback support
 
 Annotations override this automatic detection when specified.
@@ -342,7 +342,7 @@ Annotations override this automatic detection when specified.
 - **Dell:** ✅ BIOS attribute configuration automation (`KernelArgs` support)
 - **HPE:** ✅ `UefiTargetBootSourceOverride` optimization
 - **Lenovo:** ✅ XCC-specific boot parameter detection
-- **Supermicro:** ✅ Multi-mechanism fallback support
+- **Supermicro:** ✅ UEFI target override with BIOS attribute override available via annotation
 - **All Vendors:** ✅ Automatic vendor detection and method selection
 
 ### 🔄 Planned Enhancements

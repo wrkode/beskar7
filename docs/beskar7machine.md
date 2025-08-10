@@ -45,7 +45,7 @@ Yes
 #### provisioningMode
 - **provisioningMode** (string, optional, default: "RemoteConfig"): The mode to use for provisioning. Must be one of:
   - `RemoteConfig` - Boot generic ISO with configuration URL (requires configURL)
-  - `PreBakedISO` - Boot pre-configured ISO (configURL should not be set)
+  - `PreBakedISO` - Boot pre-configured ISO (configURL should not be set). Use this when the OS config is embedded into the ISO for `kairos`, `talos`, `flatcar`, or `LeapMicro`.
   - `PXE` - PXE boot (future implementation)
   - `iPXE` - iPXE boot (future implementation)
 

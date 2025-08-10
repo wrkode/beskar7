@@ -3,6 +3,7 @@ package redfish
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"net/url"
 	"strings"
 
@@ -74,6 +75,20 @@ func NewClient(ctx context.Context, address, username, password string, insecure
 		gofishClient: c,
 		apiEndpoint:  endpointURL, // Store the processed URL
 	}, nil
+}
+
+// NewClientWithHTTPClient creates a new Redfish client using a custom HTTP client.
+// Note: The underlying gofish library does not currently accept a custom http.Client.
+// This function preserves API compatibility for tests and callers that wish to provide
+// a client (e.g., to disable TLS verification). The provided httpClient is ignored,
+// and the 'insecure' parameter is used to control TLS verification instead.
+func NewClientWithHTTPClient(
+	ctx context.Context,
+	address, username, password string,
+	insecure bool,
+	_ *http.Client,
+) (Client, error) {
+	return NewClient(ctx, address, username, password, insecure)
 }
 
 // Close disconnects the client.
@@ -400,6 +415,64 @@ func (c *gofishClient) setBootParametersUEFI(ctx context.Context, params []strin
 	// UEFI Target method failed, log details and consider alternatives.
 	log.Error(uerr, "Failed to set boot settings via UefiTargetBootSourceOverride", "Settings", uefiBootSettings)
 	return fmt.Errorf("failed to set boot parameters using UefiTargetBootSourceOverride: %w", uerr)
+}
+
+// setBootParametersViaBootOptions attempts to set boot parameters using UEFI BootOptions/BootNext,
+// by locating a suitable BootOption (e.g., the virtual CD/DVD) and setting BootNext for a one-time boot.
+// Note: Kernel parameters are generally not supported via BootOptions; this is a fallback to select
+// a proper boot source when UefiTargetBootSourceOverride is not reliable.
+func (c *gofishClient) setBootParametersViaBootOptions(ctx context.Context) error {
+	log := logf.FromContext(ctx)
+	log.V(1).Info("Attempting to set boot via BootOptions/BootNext")
+
+	system, err := c.getSystemService(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get system for boot options: %w", err)
+	}
+
+	// Fetch available BootOptions
+	bootOptions, err := system.BootOptions()
+	if err != nil {
+		log.Error(err, "Failed to list BootOptions")
+		return fmt.Errorf("failed to list boot options: %w", err)
+	}
+	if len(bootOptions) == 0 {
+		return fmt.Errorf("no BootOptions available on system")
+	}
+
+	// Heuristic: prefer a CD/DVD or virtual media BootOption; fallback to first option.
+	var ref string
+	for _, bo := range bootOptions {
+		if bo == nil {
+			continue
+		}
+		// Many implementations encode media type in reference or description; be conservative
+		if strings.Contains(strings.ToLower(bo.BootOptionReference), "cd") ||
+			strings.Contains(strings.ToLower(bo.BootOptionReference), "dvd") ||
+			strings.Contains(strings.ToLower(bo.BootOptionReference), "virtual") {
+			ref = bo.BootOptionReference
+			break
+		}
+	}
+	if ref == "" {
+		// Fallback to first option
+		ref = bootOptions[0].BootOptionReference
+	}
+
+	// Set one-time boot using BootNext
+	current := system.Boot
+	current.BootSourceOverrideTarget = redfish.UefiBootNextBootSourceOverrideTarget
+	current.BootSourceOverrideEnabled = redfish.OnceBootSourceOverrideEnabled
+	current.BootNext = ref
+
+	log.Info("Applying boot via BootNext", "BootNext", ref)
+	if err := system.SetBoot(current); err != nil {
+		log.Error(err, "Failed to set BootNext via SetBoot")
+		return fmt.Errorf("failed to set BootNext via SetBoot: %w", err)
+	}
+
+	log.Info("Successfully set one-time boot via BootNext", "BootNext", ref)
+	return nil
 }
 
 // GetNetworkAddresses retrieves network interface addresses from the system.

@@ -144,7 +144,7 @@ metadata:
 spec:
   podSelector:
     matchLabels:
-      control-plane: controller-manager
+      control-plane: beskar7-controller-manager
   policyTypes:
   - Egress
   
@@ -157,21 +157,21 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: controller-manager
+  name: beskar7-controller-manager
   namespace: beskar7-system
   labels:
-    control-plane: controller-manager
+    control-plane: beskar7-controller-manager
 spec:
   selector:
     matchLabels:
-      control-plane: controller-manager
+      control-plane: beskar7-controller-manager
   replicas: 1  # Single replica for development
   template:
     metadata:
       annotations:
         kubectl.kubernetes.io/default-container: manager
       labels:
-        control-plane: controller-manager
+        control-plane: beskar7-controller-manager
     spec:
       # Relaxed security context for development
       securityContext:
@@ -197,7 +197,7 @@ spec:
         - --metrics-bind-address=:8080
         - --health-probe-bind-address=:8081
         - --v=2                                  # Verbose logging for development
-        image: ghcr.io/wrkode/beskar7/beskar7:v0.2.6
+        image: ghcr.io/wrkode/beskar7/beskar7:${VERSION}
         imagePullPolicy: IfNotPresent            # Use cached images in dev
         
         # Relaxed security context for debugging
@@ -327,5 +327,5 @@ roleRef:
   name: manager-role-dev  # Use development role
 subjects:
 - kind: ServiceAccount
-  name: controller-manager
+  name: beskar7-controller-manager
   namespace: beskar7-system 

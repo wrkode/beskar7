@@ -314,7 +314,12 @@ func (vbm *VendorSpecificBootManager) setBootParametersBootOptions(ctx context.C
 	log := logf.FromContext(ctx)
 	log.Info("Boot parameter setting via boot options not yet implemented", "params", params)
 
-	// TODO: Implement boot options mechanism
-	// This could be used for vendors that support modifying boot entries directly
-	return fmt.Errorf("boot parameter setting via boot options is not yet implemented")
+	// Boot options cannot carry kernel parameters; use as a fallback to ensure
+	// appropriate boot source (e.g., virtual media) is selected when UEFI target fails.
+	// Clear params since they are not supported here.
+	if len(params) > 0 {
+		log.V(1).Info("BootOptions does not support kernel params; ignoring provided params")
+	}
+	// Delegate to the client's BootOptions path
+	return vbm.client.setBootParametersViaBootOptions(ctx)
 }

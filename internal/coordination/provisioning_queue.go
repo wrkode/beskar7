@@ -73,6 +73,57 @@ func NewProvisioningQueue(maxConcurrent, maxQueueSize int) *ProvisioningQueue {
 	}
 }
 
+// AcquireBMCPermit blocks until it is safe to perform BMC operations for the
+// given host, enforcing global concurrency and per-BMC cooldown. It marks the
+// host as processing so other acquires will wait. Call ReleaseBMCPermit when
+// finished to free the slot and update cooldown.
+func (pq *ProvisioningQueue) AcquireBMCPermit(ctx context.Context, host *infrastructurev1beta1.PhysicalHost) error {
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+
+	bmcAddress := host.Spec.RedfishConnection.Address
+
+	for {
+		// Fast path: check under lock
+		pq.mu.Lock()
+		// If already processing this host, allow re-entrant access
+		if _, exists := pq.processing[host.Name]; exists {
+			pq.mu.Unlock()
+			return nil
+		}
+
+		// Check global concurrency
+		if len(pq.processing) < pq.maxConcurrentOps {
+			// Check BMC cooldown
+			last, found := pq.lastBMCOperation[bmcAddress]
+			if !found || time.Since(last) >= pq.bmcCooldownPeriod {
+				// Reserve slot for this host
+				pq.processing[host.Name] = &ProvisioningRequest{Host: host.DeepCopy()}
+				pq.mu.Unlock()
+				return nil
+			}
+		}
+		pq.mu.Unlock()
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+			continue
+		}
+	}
+}
+
+// ReleaseBMCPermit releases the previously acquired permit and updates the
+// BMC cooldown for the host's Redfish address.
+func (pq *ProvisioningQueue) ReleaseBMCPermit(host *infrastructurev1beta1.PhysicalHost) {
+	pq.mu.Lock()
+	defer pq.mu.Unlock()
+	delete(pq.processing, host.Name)
+	bmcAddress := host.Spec.RedfishConnection.Address
+	pq.lastBMCOperation[bmcAddress] = time.Now()
+}
+
 // Start starts the provisioning queue workers
 func (pq *ProvisioningQueue) Start(ctx context.Context, numWorkers int) {
 	logger := log.FromContext(ctx).WithValues("component", "ProvisioningQueue")

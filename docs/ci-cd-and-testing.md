@@ -128,7 +128,7 @@ failureConfig := FailureConfig{
 Run hardware emulation tests:
 
 ```bash
-# Run all emulation tests
+# Run all emulation tests (mock BMC, no real hardware)
 go test -v -tags=integration ./test/emulation/...
 
 # Run specific vendor tests
@@ -246,7 +246,7 @@ trivy image ghcr.io/wrkode/beskar7/beskar7:latest
    make docker-build
    
    # Test container locally
-   docker run --rm ghcr.io/wrkode/beskar7/beskar7:v0.2.6
+  docker run --rm ghcr.io/wrkode/beskar7/beskar7:${VERSION}
    ```
 
 ### **Pull Request Workflow**
@@ -383,6 +383,9 @@ Customize emulation behavior:
 | `REGISTRY` | Container registry | `ghcr.io` |
 | `IMAGE_NAME` | Image repository | `${{ github.repository }}` |
 | `GO_VERSION` | Go version for builds | `1.24` |
+| `RECONCILE_TIMEOUT` | Max reconciliation duration | `2m` |
+| `STUCK_STATE_TIMEOUT` | Stuck state detection timeout | `15m` |
+| `MAX_RETRIES` | Guarded state transition retries | `3` |
 | `KUBEBUILDER_VERSION` | Kubebuilder version | `latest` |
 
 ## 🎯 **Best Practices**

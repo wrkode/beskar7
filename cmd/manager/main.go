@@ -19,6 +19,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"os"
 	"time"
 
@@ -78,6 +79,10 @@ func main() {
 	var claimCoordinatorLeaseDuration time.Duration
 	var claimCoordinatorRenewDeadline time.Duration
 	var claimCoordinatorRetryPeriod time.Duration
+	// PhysicalHost controller tuning
+	var reconcileTimeout time.Duration
+	var stuckStateTimeout time.Duration
+	var maxRetries int
 
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
@@ -102,6 +107,10 @@ func main() {
 		"The duration claim coordinator clients should wait between attempting acquisition and renewal of leadership.")
 	flag.BoolVar(&enableSecurityMonitoring, "enable-security-monitoring", true,
 		"Enable security monitoring for TLS, RBAC, and credential validation.")
+	// Reconciliation tuning flags (can also be set via env)
+	flag.DurationVar(&reconcileTimeout, "reconcile-timeout", getEnvDuration("RECONCILE_TIMEOUT", 2*time.Minute), "Maximum reconciliation time for PhysicalHost controller")
+	flag.DurationVar(&stuckStateTimeout, "stuck-state-timeout", getEnvDuration("STUCK_STATE_TIMEOUT", 15*time.Minute), "Time before considering a PhysicalHost stuck in a state")
+	flag.IntVar(&maxRetries, "max-retries", getEnvInt("MAX_RETRIES", 3), "Maximum retries for guarded state transitions")
 	opts := zap.Options{
 		Development: true,
 	}
@@ -202,13 +211,21 @@ func main() {
 		50, // maxQueueSize: Queue up to 50 operations
 	)
 
-	if err = (&controllers.PhysicalHostReconciler{
-		Client:               mgr.GetClient(),
-		Scheme:               mgr.GetScheme(),
-		RedfishClientFactory: nil, // Use default
-		Log:                  ctrl.Log.WithName("controllers").WithName("PhysicalHost"),
-		ProvisioningQueue:    provisioningQueue,
-	}).SetupWithManager(mgr); err != nil {
+	// Initialize PhysicalHost reconciler with tuned values
+	phLogger := ctrl.Log.WithName("controllers").WithName("PhysicalHost")
+	phRecorder := mgr.GetEventRecorderFor("beskar7-physicalhost-controller")
+	phReconciler := controllers.NewPhysicalHostReconciler(
+		mgr.GetClient(),
+		mgr.GetScheme(),
+		nil, // default redfish client factory
+		phLogger,
+		phRecorder,
+		provisioningQueue,
+		reconcileTimeout,
+		stuckStateTimeout,
+		maxRetries,
+	)
+	if err = phReconciler.SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "PhysicalHost")
 		os.Exit(1)
 	}
@@ -286,6 +303,30 @@ func main() {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)
 	}
+}
+
+// getEnvDuration returns a duration read from env if present, otherwise the default.
+func getEnvDuration(envName string, def time.Duration) time.Duration {
+	if v, ok := os.LookupEnv(envName); ok && v != "" {
+		d, err := time.ParseDuration(v)
+		if err == nil {
+			return d
+		}
+		setupLog.Info("Invalid duration in env, using default", "env", envName, "value", v, "default", def)
+	}
+	return def
+}
+
+// getEnvInt returns an int read from env if present, otherwise the default.
+func getEnvInt(envName string, def int) int {
+	if v, ok := os.LookupEnv(envName); ok && v != "" {
+		var parsed int
+		if _, err := fmt.Sscanf(v, "%d", &parsed); err == nil {
+			return parsed
+		}
+		setupLog.Info("Invalid int in env, using default", "env", envName, "value", v, "default", def)
+	}
+	return def
 }
 
 // leaderElectionCoordinatorRunnable wraps the leader election coordinator to implement manager.Runnable

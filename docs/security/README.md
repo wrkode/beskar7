@@ -24,7 +24,7 @@ Security monitoring is enabled by default. To configure:
 kubectl apply -f config/default
 
 # Disable security monitoring
-kubectl patch deployment controller-manager -n beskar7-system \
+kubectl patch deployment beskar7-controller-manager -n beskar7-system \
   --patch '{"spec":{"template":{"spec":{"containers":[{"name":"manager","args":["--leader-elect","--enable-security-monitoring=false"]}]}}}}'
 ```
 
@@ -411,7 +411,7 @@ Enable detailed security logging:
 
 ```bash
 # Increase log level for security components
-kubectl patch deployment controller-manager -n beskar7-system \
+kubectl patch deployment beskar7-controller-manager -n beskar7-system \
   --patch '{"spec":{"template":{"spec":{"containers":[{"name":"manager","args":["--leader-elect","--v=2"]}]}}}}'
 ```
 

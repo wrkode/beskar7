@@ -191,7 +191,7 @@ kubectl get clusterrole manager-role -o jsonpath='{.rules[*].resources}' | grep 
 ### Security Monitoring
 ```bash
 # Check security monitoring status
-kubectl logs -n beskar7-system -l control-plane=controller-manager | grep "security"
+kubectl logs -n beskar7-system -l control-plane=beskar7-controller-manager | grep "security"
 
 # Check for security events
 kubectl get events -n beskar7-system --field-selector reason=RBACSecurityIssue

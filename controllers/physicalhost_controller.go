@@ -68,6 +68,45 @@ type PhysicalHostReconciler struct {
 	ProvisioningQueue *coordination.ProvisioningQueue
 }
 
+// NewPhysicalHostReconciler creates a fully initialized PhysicalHostReconciler.
+// It configures the state machine, transition guard, recovery manager, recorder,
+// and timing parameters so reconciliation can safely proceed in production.
+func NewPhysicalHostReconciler(
+	c client.Client,
+	scheme *runtime.Scheme,
+	redfishFactory internalredfish.RedfishClientFactory,
+	logger logr.Logger,
+	recorder record.EventRecorder,
+	queue *coordination.ProvisioningQueue,
+	reconcileTimeout time.Duration,
+	stuckStateTimeout time.Duration,
+	maxRetries int,
+) *PhysicalHostReconciler {
+	// Initialize state machinery components
+	smLogger := logger.WithName("state-machine")
+	guardLogger := logger.WithName("state-guard")
+	recoveryLogger := logger.WithName("state-recovery")
+
+	sm := statemachine.NewPhysicalHostStateMachine(smLogger)
+	guard := statemachine.NewStateTransitionGuard(c, guardLogger)
+	recovery := statemachine.NewStateRecoveryManager(c, recoveryLogger)
+
+	return &PhysicalHostReconciler{
+		Client:               c,
+		Log:                  logger,
+		Scheme:               scheme,
+		Recorder:             recorder,
+		RedfishClientFactory: redfishFactory,
+		stateMachine:         sm,
+		stateTransitionGuard: guard,
+		stateRecoveryManager: recovery,
+		reconcileTimeout:     reconcileTimeout,
+		stuckStateTimeout:    stuckStateTimeout,
+		maxRetries:           maxRetries,
+		ProvisioningQueue:    queue,
+	}
+}
+
 //+kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=physicalhosts,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=physicalhosts/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=physicalhosts/finalizers,verbs=update
@@ -274,6 +313,15 @@ func (r *PhysicalHostReconciler) reconcileNormal(ctx context.Context, logger log
 	// --- End Fetch Redfish Credentials ---
 
 	// --- Connect to Redfish ---
+	// Throttle BMC operations via ProvisioningQueue to avoid overloading BMCs
+	if r.ProvisioningQueue != nil {
+		if err := r.ProvisioningQueue.AcquireBMCPermit(ctx, physicalHost); err != nil {
+			logger.V(1).Info("ProvisioningQueue acquire failed", "error", err)
+			return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+		}
+		// Ensure release on exit of Redfish section
+		defer r.ProvisioningQueue.ReleaseBMCPermit(physicalHost)
+	}
 	clientFactory := r.RedfishClientFactory
 	if clientFactory == nil {
 		clientFactory = internalredfish.NewClient
@@ -617,6 +665,14 @@ func (r *PhysicalHostReconciler) reconcileDelete(ctx context.Context, physicalHo
 		conditions.MarkFalse(physicalHost, infrastructurev1beta1.HostProvisionedCondition, infrastructurev1beta1.MissingCredentialsReason, clusterv1.ConditionSeverityWarning, "Missing Redfish credentials, cannot perform deprovisioning operations.")
 		internalmetrics.RecordRedfishConnection(physicalHost.Namespace, internalmetrics.ProvisioningOutcomeFailed, internalmetrics.ErrorTypeConnection)
 	} else {
+		// Throttle BMC cleanup operations via ProvisioningQueue
+		if r.ProvisioningQueue != nil {
+			if err := r.ProvisioningQueue.AcquireBMCPermit(ctx, physicalHost); err != nil {
+				logger.Info("ProvisioningQueue acquire failed during delete; skipping cleanup", "error", err)
+			} else {
+				defer r.ProvisioningQueue.ReleaseBMCPermit(physicalHost)
+			}
+		}
 		// Use the factory to create the client
 		clientFactory := r.RedfishClientFactory
 		if clientFactory == nil {

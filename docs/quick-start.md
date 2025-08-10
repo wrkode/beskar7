@@ -86,7 +86,7 @@ kubectl get pods -n cert-manager
 4.  **Verify Deployment:**
     Check that the controller manager pod is running in the `beskar7-system` namespace:
     ```bash
-    kubectl get pods -n beskar7-system -l control-plane=controller-manager
+    kubectl get pods -n beskar7-system -l control-plane=beskar7-controller-manager
     ```
 
 ## Basic Usage

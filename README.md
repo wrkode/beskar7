@@ -9,13 +9,15 @@ Beskar7 now automatically detects and handles vendor-specific hardware quirks! *
 - **✅ Dell PowerEdge:** Automatic BIOS attribute handling (no more manual iDRAC configuration!)
 - **✅ HPE ProLiant:** UEFI Target Boot Override (excellent compatibility)
 - **✅ Lenovo ThinkSystem:** UEFI with intelligent BIOS fallback
-- **✅ Supermicro:** Multiple fallback mechanisms for reliability
+- **✅ Supermicro:** UEFI and BIOS-attribute methods (fallback behavior depends on BMC)
 
 **[Quick Start Guide →](docs/quick-start-vendor-support.md)** | **[Detailed Documentation →](docs/vendor-specific-support.md)**
 
 ## Current Status
 
 **Alpha:** This project is currently under active development. Key features are being implemented, and the APIs may change. Not yet suitable for production use.
+
+To prepare for real hardware testing, ensure you configure reconciliation timeouts via flags or env (see `docs/state-management.md`) and follow the testing instructions below.
 
 ## 📚 Documentation
 
@@ -83,7 +85,7 @@ kubectl get pods -n cert-manager
     # export CR_PAT=YOUR_GITHUB_PAT # Use a PAT with write:packages scope
     # echo $CR_PAT | docker login ghcr.io -u USERNAME --password-stdin
 
-    # Build and push the image (uses values from Makefile: ghcr.io/wrkode/beskar7/beskar7:v0.2.0)
+    # Build and push the image (uses values from Makefile: ghcr.io/wrkode/beskar7/beskar7:${VERSION})
     make docker-build docker-push 
     ```
     *(Note: If using a different registry/repo/tag, override Makefile variables: `make docker-push IMG=my-registry/my-repo:my-tag`)*
@@ -150,10 +152,10 @@ Each GitHub release will include a `beskar7-manifests-$(VERSION).yaml` file. Thi
 
 **Important:** You must install cert-manager and its CRDs before applying the Beskar7 manifest bundle. See the "Install cert-manager (Required)" section above.
 
-1.  **Download the release manifest** (e.g., `beskar7-manifests-v0.2.0.yaml`) from the [GitHub Releases page](https://github.com/wrkode/beskar7/releases).
+1.  **Download the release manifest** (e.g., `beskar7-manifests-${VERSION}.yaml`) from the [GitHub Releases page](https://github.com/wrkode/beskar7/releases).
 2.  **Apply the manifest to your cluster:**
     ```bash
-    kubectl apply -f beskar7-manifests-v0.2.0.yaml
+    kubectl apply -f beskar7-manifests-${VERSION}.yaml
     ```
     This will create the `beskar7-system` namespace and all required Beskar7 components.
 
@@ -316,14 +318,25 @@ Contributions are welcome! Please refer to the contribution guidelines (to be ad
 
 ## Running Tests
 
-Before running the tests, you need to download the required CRDs:
+Before running the tests, you need to download the required CRDs and set up envtest assets. Unit tests and controller tests run without real hardware; integration and emulation tests can be run with build tags.
 
 ```bash
-# Download test CRDs
+# Download test CRDs (once)
 ./hack/download-test-crds.sh
 
-# Run the tests
-export KUBEBUILDER_ASSETS=$(go run sigs.k8s.io/controller-runtime/tools/setup-envtest@latest use 1.31.x -p path) && go test ./controllers/... -v -ginkgo.v --timeout=10m
+# Set up envtest assets (Kubernetes API server binaries)
+export KUBEBUILDER_ASSETS=$(go run sigs.k8s.io/controller-runtime/tools/setup-envtest@latest use 1.31.x -p path)
+
+# Run unit and controller tests
+go test ./controllers/... -v -ginkgo.v --timeout=10m
+go test ./internal/... -v --timeout=10m
+
+# Run integration tests (envtest) — excludes emulation unless tagged
+go test -tags=integration ./test/integration/... -v --timeout=30m
+
+# Optional: Run hardware emulation tests (no real hardware required)
+# Note: The emulation tests use a mock Redfish server and skip TLS verification.
+go test -tags=integration ./test/emulation/... -v --timeout=30m
 ```
 
 The test setup is designed to be portable and work across different systems. All required CRDs are downloaded locally and referenced from the repository, ensuring consistent test behavior across different environments.

@@ -205,7 +205,7 @@ kubectl create secret generic bmc-credentials \
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: controller-manager
+  name: beskar7-controller-manager
   namespace: beskar7-system
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -231,7 +231,7 @@ roleRef:
   name: manager-role
 subjects:
 - kind: ServiceAccount
-  name: controller-manager
+  name: beskar7-controller-manager
   namespace: beskar7-system
 ```
 
@@ -267,7 +267,7 @@ metadata:
 spec:
   podSelector:
     matchLabels:
-      control-plane: controller-manager
+      control-plane: beskar7-controller-manager
   policyTypes:
   - Ingress
   - Egress

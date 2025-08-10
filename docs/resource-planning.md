@@ -338,7 +338,7 @@ spec:
   targetRef:
     apiVersion: apps/v1
     kind: Deployment
-    name: controller-manager
+    name: beskar7-controller-manager
   updatePolicy:
     updateMode: Auto
   resourcePolicy:
@@ -387,13 +387,13 @@ spec:
 
 ```bash
 # Check memory usage patterns
-kubectl top pod -l control-plane=controller-manager -n beskar7-system
+kubectl top pod -l control-plane=beskar7-controller-manager -n beskar7-system
 
 # Review resource events
 kubectl get events -n beskar7-system --field-selector reason=OOMKilling
 
 # Increase memory limits
-kubectl patch deployment controller-manager -n beskar7-system \
+kubectl patch deployment beskar7-controller-manager -n beskar7-system \
   --patch '{"spec":{"template":{"spec":{"containers":[{"name":"manager","resources":{"limits":{"memory":"2Gi"}}}]}}}}'
 ```
 
@@ -401,10 +401,10 @@ kubectl patch deployment controller-manager -n beskar7-system \
 
 ```bash
 # Check CPU throttling metrics
-kubectl exec -it deployment/controller-manager -n beskar7-system -- cat /sys/fs/cgroup/cpu/cpu.stat
+kubectl exec -it deployment/beskar7-controller-manager -n beskar7-system -- cat /sys/fs/cgroup/cpu/cpu.stat
 
 # Increase CPU limits
-kubectl patch deployment controller-manager -n beskar7-system \
+kubectl patch deployment beskar7-controller-manager -n beskar7-system \
   --patch '{"spec":{"template":{"spec":{"containers":[{"name":"manager","resources":{"limits":{"cpu":"2000m"}}}]}}}}'
 ```
 
@@ -412,13 +412,13 @@ kubectl patch deployment controller-manager -n beskar7-system \
 
 ```bash
 # Check ephemeral storage usage
-kubectl describe pod -l control-plane=controller-manager -n beskar7-system
+kubectl describe pod -l control-plane=beskar7-controller-manager -n beskar7-system
 
 # Clean up temporary files
-kubectl exec -it deployment/controller-manager -n beskar7-system -- du -sh /tmp/*
+kubectl exec -it deployment/beskar7-controller-manager -n beskar7-system -- du -sh /tmp/*
 
 # Increase storage limits
-kubectl patch deployment controller-manager -n beskar7-system \
+kubectl patch deployment beskar7-controller-manager -n beskar7-system \
   --patch '{"spec":{"template":{"spec":{"containers":[{"name":"manager","resources":{"limits":{"ephemeral-storage":"4Gi"}}}]}}}}'
 ```
 

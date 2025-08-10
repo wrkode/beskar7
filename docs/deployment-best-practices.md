@@ -194,7 +194,7 @@ replicaCount: 3
 
 image:
   repository: ghcr.io/wrkode/beskar7/beskar7
-  tag: "v0.2.6"
+  tag: "${VERSION}"
   pullPolicy: IfNotPresent
 
 resources:
@@ -303,10 +303,10 @@ patchesStrategicMerge:
 
 images:
 - name: ghcr.io/wrkode/beskar7/beskar7
-  newTag: v0.2.6
+  newTag: ${VERSION}
 
 replicas:
-- name: controller-manager
+- name: beskar7-controller-manager
   count: 3
 
 # Apply production configuration
@@ -341,7 +341,7 @@ metadata:
 spec:
   podSelector:
     matchLabels:
-      control-plane: controller-manager
+      control-plane: beskar7-controller-manager
   policyTypes:
   - Ingress
   - Egress
@@ -439,7 +439,7 @@ metadata:
 spec:
   selector:
     matchLabels:
-      control-plane: controller-manager
+      control-plane: beskar7-controller-manager
   endpoints:
   - port: metrics
     interval: 30s
@@ -599,7 +599,7 @@ helm upgrade beskar7 beskar7/beskar7 \
   --version NEW_VERSION
 
 # Verify upgrade
-kubectl rollout status deployment/controller-manager -n beskar7-system
+kubectl rollout status deployment/beskar7-controller-manager -n beskar7-system
 ```
 
 **Rollback Procedure:**
@@ -616,7 +616,7 @@ kubectl get pods -n beskar7-system
 **Horizontal Scaling:**
 ```bash
 # Scale controller replicas
-kubectl scale deployment controller-manager \
+kubectl scale deployment beskar7-controller-manager \
   --replicas=5 \
   -n beskar7-system
 
@@ -630,7 +630,7 @@ helm upgrade beskar7 beskar7/beskar7 \
 **Resource Scaling:**
 ```bash
 # Update resource limits
-kubectl patch deployment controller-manager \
+kubectl patch deployment beskar7-controller-manager \
   -n beskar7-system \
   -p '{"spec":{"template":{"spec":{"containers":[{"name":"manager","resources":{"requests":{"cpu":"1000m","memory":"1Gi"},"limits":{"cpu":"4000m","memory":"4Gi"}}}]}}}}'
 ```
@@ -641,7 +641,7 @@ kubectl patch deployment controller-manager \
 ```bash
 # Check controller status
 kubectl get pods -n beskar7-system
-kubectl logs -n beskar7-system -l control-plane=controller-manager
+kubectl logs -n beskar7-system -l control-plane=beskar7-controller-manager
 
 # Check webhook status
 kubectl get validatingwebhookconfiguration

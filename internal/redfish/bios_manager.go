@@ -102,15 +102,40 @@ func (bam *gofishBIOSAttributeManager) ScheduleBIOSSettingsApply(ctx context.Con
 	log := logf.FromContext(ctx)
 	log.Info("Scheduling BIOS settings to be applied on next boot")
 
-	// For most systems, the UpdateBiosAttributes call automatically schedules
-	// the settings to be applied on next boot. Some vendors may require additional
-	// steps, but this is the standard approach.
+	// Detect vendor to determine if explicit job creation is needed
+	sysInfo, err := bam.client.GetSystemInfo(ctx)
+	if err != nil {
+		// Non-fatal: log and assume default behavior
+		log.V(1).Info("Failed to get system info for BIOS scheduling; assuming default behavior", "error", err)
+		return nil
+	}
 
-	// Additional vendor-specific logic could be added here if needed:
-	// - Dell: Create configuration job via iDRAC
-	// - HPE: Settings typically applied automatically
-	// - Supermicro: May need explicit job creation
+	vendor := NewVendorDetector().DetectVendor(sysInfo)
+	switch vendor {
+	case VendorDell:
+		// Dell iDRAC supports ApplyTime via the Redfish settings object. Use OnReset apply time
+		// so changes apply on the next reset/power cycle.
+		system, err := bam.client.getSystemService(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to get system for BIOS job scheduling: %w", err)
+		}
+		bios, err := system.Bios()
+		if err != nil {
+			return fmt.Errorf("failed to get BIOS resource for job scheduling: %w", err)
+		}
+		// No attributes to update at this point; we rely on SetBIOSAttributes having been called just before.
+		// To be explicit, we can call UpdateBiosAttributesApplyAt with an empty map and OnReset apply time which
+		// will be a no-op for attributes but still set apply timing where supported.
+		if err := bios.UpdateBiosAttributesApplyAt(map[string]interface{}{}, "OnReset"); err != nil {
+			log.V(1).Info("ApplyTime setting not supported or failed; relying on implicit job", "error", err)
+		} else {
+			log.Info("Requested BIOS settings apply on next reset for Dell iDRAC")
+		}
+	default:
+		// Most vendors automatically schedule settings on next boot.
+		log.V(1).Info("Vendor does not require explicit BIOS job scheduling", "vendor", vendor)
+	}
 
-	log.Info("BIOS settings scheduled for application on next boot")
+	log.Info("BIOS settings scheduled (vendor-specific handling applied where needed)")
 	return nil
 }

@@ -317,7 +317,7 @@ kubectl create -f test-physicalhost.yaml --dry-run=server
 # Recreate webhook certificates
 kubectl delete secret beskar7-webhook-server-cert -n beskar7-system
 # Restart manager to regenerate certs
-kubectl rollout restart deployment/controller-manager -n beskar7-system
+kubectl rollout restart deployment/beskar7-controller-manager -n beskar7-system
 ```
 
 ### Container Security Issues
@@ -361,7 +361,7 @@ securityContext:
 **Diagnosis:**
 ```bash
 # Check resource usage
-kubectl top pod -l control-plane=controller-manager -n beskar7-system
+kubectl top pod -l control-plane=beskar7-controller-manager -n beskar7-system
 
 # Check resource limits
 kubectl get pod -l control-plane=controller-manager -n beskar7-system -o yaml | grep -A5 resources
@@ -589,7 +589,7 @@ Security features may impact performance:
 kubectl top pod -l control-plane=controller-manager -n beskar7-system
 
 # Monitor security scan duration
-kubectl logs deployment/controller-manager -n beskar7-system | grep "security scan"
+kubectl logs deployment/beskar7-controller-manager -n beskar7-system | grep "security scan"
 
 # Check metrics
 curl http://localhost:8080/metrics | grep beskar7_security
@@ -628,10 +628,10 @@ echo "=== Network Policies ==="
 kubectl get networkpolicy -n beskar7-system -o yaml
 
 echo "=== Controller Logs (last 100 lines) ==="
-kubectl logs deployment/controller-manager -n beskar7-system --tail=100
+kubectl logs deployment/beskar7-controller-manager -n beskar7-system --tail=100
 
 echo "=== Controller Status ==="
-kubectl get deployment controller-manager -n beskar7-system -o yaml
+kubectl get deployment beskar7-controller-manager -n beskar7-system -o yaml
 ```
 
 ### Contact Support

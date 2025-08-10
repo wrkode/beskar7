@@ -107,11 +107,11 @@ spec:
   replicas: 3  # Multiple replicas for HA
   selector:
     matchLabels:
-      control-plane: controller-manager
+      control-plane: beskar7-controller-manager
   template:
     metadata:
       labels:
-        control-plane: controller-manager
+        control-plane: beskar7-controller-manager
     spec:
       containers:
       - name: manager

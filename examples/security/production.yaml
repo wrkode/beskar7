@@ -173,7 +173,7 @@ metadata:
 spec:
   podSelector:
     matchLabels:
-      control-plane: controller-manager
+      control-plane: beskar7-controller-manager
   policyTypes:
   - Ingress
   - Egress
@@ -236,21 +236,21 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: controller-manager
+  name: beskar7-controller-manager
   namespace: beskar7-system
   labels:
-    control-plane: controller-manager
+    control-plane: beskar7-controller-manager
 spec:
   selector:
     matchLabels:
-      control-plane: controller-manager
+      control-plane: beskar7-controller-manager
   replicas: 2  # HA deployment for production
   template:
     metadata:
       annotations:
         kubectl.kubernetes.io/default-container: manager
       labels:
-        control-plane: controller-manager
+        control-plane: beskar7-controller-manager
     spec:
       # Enhanced security context
       securityContext:
@@ -286,7 +286,7 @@ spec:
         - --security-scan-interval=30m
         - --metrics-bind-address=:8080
         - --health-probe-bind-address=:8081
-        image: ghcr.io/wrkode/beskar7/beskar7:v0.2.6
+        image: ghcr.io/wrkode/beskar7/beskar7:${VERSION}
         imagePullPolicy: Always
         
         # Maximum security context
@@ -391,7 +391,7 @@ spec:
             podAffinityTerm:
               labelSelector:
                 matchLabels:
-                  control-plane: controller-manager
+                  control-plane: beskar7-controller-manager
               topologyKey: kubernetes.io/hostname
       
       tolerations:
@@ -409,7 +409,7 @@ metadata:
 spec:
   selector:
     matchLabels:
-      control-plane: controller-manager
+      control-plane: beskar7-controller-manager
   endpoints:
   - port: metrics
     interval: 30s

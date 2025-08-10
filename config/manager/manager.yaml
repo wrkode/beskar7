@@ -1,21 +1,21 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: controller-manager
+  name: beskar7-controller-manager
   namespace: beskar7-system
   labels:
     control-plane: controller-manager
 spec:
   selector:
     matchLabels:
-      control-plane: controller-manager
+      control-plane: beskar7-controller-manager
   replicas: 1
   template:
     metadata:
       annotations:
         kubectl.kubernetes.io/default-container: manager
       labels:
-        control-plane: controller-manager
+        control-plane: beskar7-controller-manager
     spec:
       securityContext:
         runAsNonRoot: true
@@ -41,6 +41,9 @@ spec:
         - --enable-security-monitoring=true
         - --metrics-bind-address=:8080
         - --health-probe-bind-address=:8081
+        - --reconcile-timeout=$(RECONCILE_TIMEOUT)
+        - --stuck-state-timeout=$(STUCK_STATE_TIMEOUT)
+        - --max-retries=$(MAX_RETRIES)
         image: ghcr.io/wrkode/beskar7/beskar7:v0.2.6
         imagePullPolicy: Always
         name: manager
@@ -58,6 +61,12 @@ spec:
         env:
         - name: GODEBUG
           value: "netdns=go"
+        - name: RECONCILE_TIMEOUT
+          value: "2m"
+        - name: STUCK_STATE_TIMEOUT
+          value: "15m"
+        - name: MAX_RETRIES
+          value: "3"
         - name: GOMAXPROCS
           valueFrom:
             resourceFieldRef:
