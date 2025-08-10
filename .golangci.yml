@@ -28,6 +28,7 @@ linters-settings:
         # don't include the "operation" and "assign"
         checks: argument,case,condition,return
   govet:
+    # Deprecated in newer golangci-lint; keep for backward compatibility, but CI warns. Shadow linter is enabled via govet default.
     check-shadowing: true
     settings:
       printf:
@@ -128,6 +129,12 @@ issues:
     - path: zz_generated
       linters:
         - lll
+
+    # Allow TLS InsecureSkipVerify in test emulation server code
+    - path: test/
+      text: G402
+      linters:
+        - gosec
 
     # Allow embedding in webhooks
     - path: webhooks/

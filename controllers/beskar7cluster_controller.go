@@ -43,8 +43,10 @@ import (
 )
 
 const (
-	// Beskar7ClusterFinalizer allows Beskar7ClusterReconciler to clean up resources associated with Beskar7Cluster before removing it from the apiserver.
+	// Beskar7ClusterFinalizer allows Beskar7ClusterReconciler to clean up resources associated
+	// with Beskar7Cluster before removing it from the apiserver.
 	Beskar7ClusterFinalizer = "beskar7cluster.infrastructure.cluster.x-k8s.io"
+	zoneLabelKey            = "topology.kubernetes.io/zone"
 )
 
 // Beskar7ClusterReconciler reconciles a Beskar7Cluster object
@@ -212,7 +214,7 @@ func (r *Beskar7ClusterReconciler) reconcileFailureDomains(ctx context.Context, 
 	newFailureDomains := make(clusterv1.FailureDomains)
 
 	// Look for zone labels on PhysicalHosts
-	zoneLabel := "topology.kubernetes.io/zone"
+	zoneLabel := zoneLabelKey
 	for _, ph := range phList.Items {
 		if zone, exists := ph.Labels[zoneLabel]; exists && zone != "" {
 			newFailureDomains[zone] = clusterv1.FailureDomainSpec{

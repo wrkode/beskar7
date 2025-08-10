@@ -63,15 +63,15 @@ func (webhook *PhysicalHostWebhook) ValidateCreate(ctx context.Context, obj runt
 
 	physicalHostWebhookLog.Info("Validating PhysicalHost creation", "name", host.Name, "namespace", host.Namespace)
 
-    warnings, err := webhook.validatePhysicalHost(host)
+	warnings, err := webhook.validatePhysicalHost(host)
 	if err != nil {
 		return warnings, err
 	}
 
-    // Warn if a ConsumerRef is set at creation time
-    if host.Spec.ConsumerRef != nil {
-        warnings = append(warnings, "ConsumerRef is set on creation. Ensure claim lifecycle is coordinated by the controller.")
-    }
+	// Warn if a ConsumerRef is set at creation time
+	if host.Spec.ConsumerRef != nil {
+		warnings = append(warnings, "ConsumerRef is set on creation. Ensure claim lifecycle is coordinated by the controller.")
+	}
 
 	// Additional security validation for creation
 	securityWarnings, secErr := webhook.validateSecurityRequirements(ctx, host)
@@ -96,13 +96,13 @@ func (webhook *PhysicalHostWebhook) ValidateUpdate(ctx context.Context, oldObj, 
 
 	physicalHostWebhookLog.Info("Validating PhysicalHost update", "name", newHost.Name, "namespace", newHost.Namespace)
 
-    warnings, err := webhook.validatePhysicalHost(newHost)
+	warnings, err := webhook.validatePhysicalHost(newHost)
 	if err != nil {
 		return warnings, err
 	}
 
-    // Additional validation for updates
-    updateWarnings, updateErr := webhook.validatePhysicalHostUpdate(oldHost, newHost)
+	// Additional validation for updates
+	updateWarnings, updateErr := webhook.validatePhysicalHostUpdate(oldHost, newHost)
 	warnings = append(warnings, updateWarnings...)
 	if updateErr != nil {
 		return warnings, updateErr
@@ -127,19 +127,19 @@ func (webhook *PhysicalHostWebhook) ValidateDelete(ctx context.Context, obj runt
 
 	physicalHostWebhookLog.Info("Validating PhysicalHost deletion", "name", host.Name, "namespace", host.Namespace)
 
-    // Prevent deletion if host is claimed by a machine
-    if host.Spec.ConsumerRef != nil {
-        return admission.Warnings{
-            "PhysicalHost is currently claimed by a consumer. Ensure the consumer is properly cleaned up before deletion.",
-        }, nil
-    }
+	// Prevent deletion if host is claimed by a machine
+	if host.Spec.ConsumerRef != nil {
+		return admission.Warnings{
+			"PhysicalHost is currently claimed by a consumer. Ensure the consumer is properly cleaned up before deletion.",
+		}, nil
+	}
 
-    // Warn if host is currently provisioning
-    if strings.EqualFold(host.Status.State, infrav1beta1.StateProvisioning) {
-        return admission.Warnings{
-            "PhysicalHost is currently provisioning; deletion may interrupt ongoing operations.",
-        }, nil
-    }
+	// Warn if host is currently provisioning
+	if strings.EqualFold(host.Status.State, infrav1beta1.StateProvisioning) {
+		return admission.Warnings{
+			"PhysicalHost is currently provisioning; deletion may interrupt ongoing operations.",
+		}, nil
+	}
 
 	return nil, nil
 }
@@ -251,18 +251,18 @@ func (webhook *PhysicalHostWebhook) validateCredentialSecret(ctx context.Context
 	var allErrs field.ErrorList
 
 	secretName := host.Spec.RedfishConnection.CredentialsSecretRef
-    // If no client is set (unit-test or dry-run), return a warning and skip strict validation
-    if webhook.Client == nil {
-        warnings = append(warnings, fmt.Sprintf("Credential secret '%s' cannot be validated in this context.", secretName))
-        return warnings, allErrs
-    }
+	// If no client is set (unit-test or dry-run), return a warning and skip strict validation
+	if webhook.Client == nil {
+		warnings = append(warnings, fmt.Sprintf("Credential secret '%s' cannot be validated in this context.", secretName))
+		return warnings, allErrs
+	}
 
-    secret := &corev1.Secret{}
+	secret := &corev1.Secret{}
 
-    err := webhook.Client.Get(ctx, client.ObjectKey{
-        Namespace: host.Namespace,
-        Name:      secretName,
-    }, secret)
+	err := webhook.Client.Get(ctx, client.ObjectKey{
+		Namespace: host.Namespace,
+		Name:      secretName,
+	}, secret)
 
 	if err != nil {
 		// Secret doesn't exist - this will be handled at runtime
@@ -424,31 +424,31 @@ func (webhook *PhysicalHostWebhook) validatePhysicalHostUpdate(oldHost, newHost 
 	var warnings admission.Warnings
 	var allErrs field.ErrorList
 
-    // Address is immutable after creation regardless of claim state
-    if oldHost.Spec.RedfishConnection.Address != newHost.Spec.RedfishConnection.Address {
-        allErrs = append(allErrs, field.Forbidden(
-            field.NewPath("spec", "redfishConnection", "address"),
-            "address is immutable after creation",
-        ))
-    }
+	// Address is immutable after creation regardless of claim state
+	if oldHost.Spec.RedfishConnection.Address != newHost.Spec.RedfishConnection.Address {
+		allErrs = append(allErrs, field.Forbidden(
+			field.NewPath("spec", "redfishConnection", "address"),
+			"address is immutable after creation",
+		))
+	}
 
-    // Prevent changes to credentials while host is claimed
-    if oldHost.Spec.ConsumerRef != nil &&
-        oldHost.Spec.RedfishConnection.CredentialsSecretRef != newHost.Spec.RedfishConnection.CredentialsSecretRef {
-        allErrs = append(allErrs, field.Forbidden(
-            field.NewPath("spec", "redfishConnection", "credentialsSecretRef"),
-            "cannot change credentials while host is claimed",
-        ))
-    }
+	// Prevent changes to credentials while host is claimed
+	if oldHost.Spec.ConsumerRef != nil &&
+		oldHost.Spec.RedfishConnection.CredentialsSecretRef != newHost.Spec.RedfishConnection.CredentialsSecretRef {
+		allErrs = append(allErrs, field.Forbidden(
+			field.NewPath("spec", "redfishConnection", "credentialsSecretRef"),
+			"cannot change credentials while host is claimed",
+		))
+	}
 
-    // Forbid removing ConsumerRef while provisioning
-    if oldHost.Spec.ConsumerRef != nil && newHost.Spec.ConsumerRef == nil &&
-        strings.EqualFold(newHost.Status.State, infrav1beta1.StateProvisioning) {
-        allErrs = append(allErrs, field.Forbidden(
-            field.NewPath("spec", "consumerRef"),
-            "cannot remove consumerRef while host is provisioning",
-        ))
-    }
+	// Forbid removing ConsumerRef while provisioning
+	if oldHost.Spec.ConsumerRef != nil && newHost.Spec.ConsumerRef == nil &&
+		strings.EqualFold(newHost.Status.State, infrav1beta1.StateProvisioning) {
+		allErrs = append(allErrs, field.Forbidden(
+			field.NewPath("spec", "consumerRef"),
+			"cannot remove consumerRef while host is provisioning",
+		))
+	}
 
 	// Warn about security changes
 	oldInsecure := oldHost.Spec.RedfishConnection.InsecureSkipVerify != nil && *oldHost.Spec.RedfishConnection.InsecureSkipVerify

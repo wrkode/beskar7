@@ -400,7 +400,7 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 		It("should set Infra Ready=False when host is Provisioning", func() {
 			// Create a PhysicalHost claimed by our machine and in Provisioning state
 			hostName := "provisioning-host"
-			imageUrl := "http://example.com/prov-test.iso"
+			imageURL := "http://example.com/prov-test.iso"
 			host = &infrastructurev1beta1.PhysicalHost{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      hostName,
@@ -417,7 +417,7 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 						Name:       b7machine.Name,
 						Namespace:  b7machine.Namespace,
 					},
-					BootISOSource: &imageUrl,
+					BootISOSource: &imageURL,
 				},
 			}
 			Expect(k8sClient.Create(ctx, host)).To(Succeed())
@@ -440,7 +440,7 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 			// Set ProviderID on Beskar7Machine to link it to the host
 			providerID := providerID(host.Namespace, host.Name)
 			b7machine.Spec.ProviderID = &providerID
-			b7machine.Spec.ImageURL = imageUrl
+			b7machine.Spec.ImageURL = imageURL
 
 			// Create the Beskar7Machine
 			Expect(k8sClient.Create(ctx, b7machine)).To(Succeed())
@@ -490,7 +490,7 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 		It("should set Infra Ready=True and ProviderID when host is Provisioned", func() {
 			// Create a PhysicalHost claimed by our machine and in Provisioned state
 			hostName := "provisioned-host"
-			imageUrl := "http://example.com/ready-test.iso"
+			imageURL := "http://example.com/ready-test.iso"
 			host = &infrastructurev1beta1.PhysicalHost{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      hostName,
@@ -507,7 +507,7 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 						Name:       b7machine.Name,
 						Namespace:  b7machine.Namespace,
 					},
-					BootISOSource: &imageUrl,
+					BootISOSource: &imageURL,
 				},
 			}
 			Expect(k8sClient.Create(ctx, host)).To(Succeed())
@@ -528,7 +528,7 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 			}
 
 			// Create the Beskar7Machine
-			b7machine.Spec.ImageURL = imageUrl
+			b7machine.Spec.ImageURL = imageURL
 			Expect(k8sClient.Create(ctx, b7machine)).To(Succeed())
 
 			// Initialize the reconciler with mock client
@@ -576,7 +576,7 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 		It("should set Infra Ready=False and Phase=Failed when host is Error", func() {
 			// Create a PhysicalHost claimed by our machine and in Error state
 			hostName := "error-host"
-			imageUrl := "http://example.com/error-test.iso"
+			imageURL := "http://example.com/error-test.iso"
 			host = &infrastructurev1beta1.PhysicalHost{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      hostName,
@@ -593,7 +593,7 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 						Name:       b7machine.Name,
 						Namespace:  b7machine.Namespace,
 					},
-					BootISOSource: &imageUrl,
+					BootISOSource: &imageURL,
 				},
 			}
 			Expect(k8sClient.Create(ctx, host)).To(Succeed())
@@ -611,7 +611,7 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 			// Set ProviderID on Beskar7Machine to link it to the host
 			providerID := providerID(host.Namespace, host.Name)
 			b7machine.Spec.ProviderID = &providerID
-			b7machine.Spec.ImageURL = imageUrl
+			b7machine.Spec.ImageURL = imageURL
 
 			// Create the Beskar7Machine
 			Expect(k8sClient.Create(ctx, b7machine)).To(Succeed())
@@ -667,7 +667,7 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 		It("should release the PhysicalHost when deleted", func() {
 			// Create a PhysicalHost claimed by our machine
 			hostName := "to-be-released-host"
-			imageUrl := "http://example.com/release-test.iso"
+			imageURL := "http://example.com/release-test.iso"
 			host = &infrastructurev1beta1.PhysicalHost{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      hostName,
@@ -684,7 +684,7 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 						Name:       b7machine.Name,
 						Namespace:  b7machine.Namespace,
 					},
-					BootISOSource: &imageUrl,
+					BootISOSource: &imageURL,
 				},
 				Status: infrastructurev1beta1.PhysicalHostStatus{
 					State: infrastructurev1beta1.StateProvisioned, // Start as if it was provisioned
@@ -709,7 +709,7 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 			// Set ProviderID on Beskar7Machine to link it
 			providerID := providerID(host.Namespace, host.Name)
 			b7machine.Spec.ProviderID = &providerID
-			b7machine.Spec.ImageURL = imageUrl // Ensure matching URL
+			b7machine.Spec.ImageURL = imageURL // Ensure matching URL
 
 			// Create the Beskar7Machine
 			Expect(k8sClient.Create(ctx, b7machine)).To(Succeed())

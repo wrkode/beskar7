@@ -63,6 +63,7 @@ var _ = Describe("Hardware Emulation Tests", func() {
 		It("should emulate Dell PowerEdge server behavior", func() {
 			// Create Dell server emulation
 			mockServer = NewMockRedfishServer(VendorDell)
+			mockServer.DisableAuth()
 			defer mockServer.Close()
 
 			// Test vendor-specific information from mock server
@@ -84,6 +85,7 @@ var _ = Describe("Hardware Emulation Tests", func() {
 
 		It("should emulate HPE ProLiant server behavior", func() {
 			mockServer = NewMockRedfishServer(VendorHPE)
+			mockServer.DisableAuth()
 			defer mockServer.Close()
 
 			srvInfo := mockServer.systemInfo
@@ -98,6 +100,7 @@ var _ = Describe("Hardware Emulation Tests", func() {
 
 		It("should emulate Lenovo ThinkSystem server behavior", func() {
 			mockServer = NewMockRedfishServer(VendorLenovo)
+			mockServer.DisableAuth()
 			defer mockServer.Close()
 
 			srvInfo := mockServer.systemInfo
@@ -112,6 +115,7 @@ var _ = Describe("Hardware Emulation Tests", func() {
 
 		It("should emulate Supermicro server behavior", func() {
 			mockServer = NewMockRedfishServer(VendorSupermicro)
+			mockServer.DisableAuth()
 			defer mockServer.Close()
 
 			srvInfo := mockServer.systemInfo
@@ -128,6 +132,7 @@ var _ = Describe("Hardware Emulation Tests", func() {
 	Context("Failure Scenario Testing", func() {
 		BeforeEach(func() {
 			mockServer = NewMockRedfishServer(VendorGeneric)
+			mockServer.DisableAuth()
 		})
 
 		It("should handle network connectivity failures", func() {
@@ -143,13 +148,21 @@ var _ = Describe("Hardware Emulation Tests", func() {
 		})
 
 		It("should handle authentication failures", func() {
-			// Enable auth failure simulation
+			// Re-enable auth and force auth failures
+			mockServer.authEnabled = true
 			mockServer.SetFailureMode(FailureConfig{
 				AuthFailures: true,
 			})
 
-			client := createRedfishClient(mockServer.GetURL(), "admin", "password123")
-			_, err := client.GetSystemInfo(ctx)
+			// Create client directly and assert creation error due to 401
+			_, err := internalredfish.NewClientWithHTTPClient(
+				ctx,
+				mockServer.GetURL(),
+				"admin",
+				"password123",
+				true,
+				&http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}},
+			)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("401"))
 		})
@@ -192,6 +205,7 @@ var _ = Describe("Hardware Emulation Tests", func() {
 
 		BeforeEach(func() {
 			mockServer = NewMockRedfishServer(VendorDell)
+			mockServer.DisableAuth()
 
 			// Controller environment not used in these emulation tests
 		})
@@ -247,6 +261,7 @@ var _ = Describe("Hardware Emulation Tests", func() {
 	Context("Stress Testing and Concurrent Operations", func() {
 		BeforeEach(func() {
 			mockServer = NewMockRedfishServer(VendorGeneric)
+			mockServer.DisableAuth()
 		})
 
 		It("should handle multiple concurrent connections", func() {
@@ -256,6 +271,7 @@ var _ = Describe("Hardware Emulation Tests", func() {
 			for i := 0; i < numClients; i++ {
 				go func(clientID int) {
 					defer GinkgoRecover()
+					_ = clientID
 					client := createRedfishClient(mockServer.GetURL(), "admin", "password123")
 
 					// Each client performs several operations
@@ -321,6 +337,7 @@ var _ = Describe("Hardware Emulation Tests", func() {
 	Context("Vendor-Specific Behavior Testing", func() {
 		It("should test Dell BIOS attribute handling", func() {
 			mockServer = NewMockRedfishServer(VendorDell)
+			mockServer.DisableAuth()
 			defer mockServer.Close()
 
 			client := createRedfishClient(mockServer.GetURL(), "admin", "password123")
@@ -338,6 +355,7 @@ var _ = Describe("Hardware Emulation Tests", func() {
 
 		It("should test HPE UEFI boot override behavior", func() {
 			mockServer = NewMockRedfishServer(VendorHPE)
+			mockServer.DisableAuth()
 			defer mockServer.Close()
 
 			client := createRedfishClient(mockServer.GetURL(), "admin", "password123")

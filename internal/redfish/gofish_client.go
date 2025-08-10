@@ -22,17 +22,17 @@ var log = logf.Log.WithName("redfish-client")
 
 // NewClient creates a new Redfish client.
 func NewClient(ctx context.Context, address, username, password string, insecure bool) (Client, error) {
-	log := logf.Log.WithName("redfish-client")
-	log.Info("Creating new Redfish client", "rawAddress", address, "username", username, "insecure", insecure)
+	logger := logf.Log.WithName("redfish-client")
+	logger.Info("Creating new Redfish client", "rawAddress", address, "username", username, "insecure", insecure)
 
 	// Parse and validate the address URL
 	parsedURL, err := url.Parse(address)
 	if err != nil {
-		log.Error(err, "Failed to parse provided Redfish address", "rawAddress", address)
+		logger.Error(err, "Failed to parse provided Redfish address", "rawAddress", address)
 		// If parsing fails, try adding https and parse again
 		parsedURL, err = url.Parse("https://" + address)
 		if err != nil {
-			log.Error(err, "Failed to parse Redfish address even after adding https scheme", "address", address)
+			logger.Error(err, "Failed to parse Redfish address even after adding https scheme", "address", address)
 			return nil, fmt.Errorf("invalid Redfish address format: %s: %w", address, err)
 		}
 	}
@@ -40,7 +40,7 @@ func NewClient(ctx context.Context, address, username, password string, insecure
 	// Ensure scheme is present
 	if parsedURL.Scheme == "" {
 		parsedURL.Scheme = "https" // Default to https
-		log.Info("Defaulted address scheme to https", "processedAddress", parsedURL.String())
+		logger.Info("Defaulted address scheme to https", "processedAddress", parsedURL.String())
 	}
 
 	// Use the validated and cleaned URL string
@@ -56,7 +56,7 @@ func NewClient(ctx context.Context, address, username, password string, insecure
 	}
 
 	// Log the final config before connecting
-	log.Info("Attempting gofish.ConnectContext with config",
+	logger.Info("Attempting gofish.ConnectContext with config",
 		"Endpoint", config.Endpoint,
 		"Username", config.Username,
 		"PasswordProvided", (config.Password != ""),
@@ -65,11 +65,11 @@ func NewClient(ctx context.Context, address, username, password string, insecure
 
 	c, err := gofish.ConnectContext(ctx, config) // gofish uses the config fields internally
 	if err != nil {
-		log.Error(err, "Failed to connect to Redfish endpoint", "address", endpointURL) // Log the processed URL
+		logger.Error(err, "Failed to connect to Redfish endpoint", "address", endpointURL) // Log the processed URL
 		return nil, fmt.Errorf("failed to connect to Redfish endpoint %s: %w", endpointURL, err)
 	}
 
-	log.Info("Successfully connected to Redfish endpoint", "address", endpointURL)
+	logger.Info("Successfully connected to Redfish endpoint", "address", endpointURL)
 
 	return &gofishClient{
 		gofishClient: c,
@@ -104,7 +104,7 @@ func (c *gofishClient) Close(ctx context.Context) {
 // Helper function to avoid repetition.
 func (c *gofishClient) getSystemService(ctx context.Context) (*redfish.ComputerSystem, error) {
 	if c.gofishClient == nil {
-		return nil, fmt.Errorf("Redfish client is not connected")
+		return nil, fmt.Errorf("redfish client is not connected")
 	}
 	service := c.gofishClient.Service
 	systems, err := service.Systems()

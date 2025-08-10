@@ -304,7 +304,7 @@ func (lec *LeaderElectionClaimCoordinator) processClaimsAsLeader(ctx context.Con
 	for {
 		select {
 		case <-ctx.Done():
-			logger.Info("Context cancelled, stopping claim processing")
+			logger.Info("Context canceled, stopping claim processing")
 			return
 		case <-lec.leadershipLostCh:
 			logger.Info("Leadership lost, stopping claim processing")

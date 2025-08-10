@@ -2,6 +2,7 @@ package redfish
 
 import (
 	"context"
+	"net"
 
 	"github.com/stmcginnis/gofish/common"
 	"github.com/stmcginnis/gofish/redfish"
@@ -107,37 +108,20 @@ func ConvertToMachineAddresses(networkAddresses []NetworkAddress) []clusterv1.Ma
 
 // isPrivateIPv4 checks if an IPv4 address is in a private range (RFC 1918).
 func isPrivateIPv4(ip string) bool {
-	// Common private IPv4 ranges:
-	// 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16
-	// Also consider loopback (127.0.0.0/8) and link-local (169.254.0.0/16) as internal
-	if len(ip) >= 3 && ip[:3] == "10." {
-		return true
+	parsed := net.ParseIP(ip)
+	if parsed == nil {
+		return false
 	}
-	if len(ip) >= 8 && ip[:8] == "192.168." {
-		return true
+	privateCIDRs := []string{
+		"10.0.0.0/8",
+		"172.16.0.0/12",
+		"192.168.0.0/16",
+		"127.0.0.0/8",    // loopback
+		"169.254.0.0/16", // link-local
 	}
-	if len(ip) >= 4 && ip[:4] == "127." {
-		return true
-	}
-	if len(ip) >= 7 && ip[:7] == "169.254" {
-		return true
-	}
-	// Handle 172.16.0.0/12 range (172.16.x.x to 172.31.x.x)
-	if len(ip) >= 7 && ip[:4] == "172." {
-		// Extract the second octet to check if it's in range 16-31
-		if len(ip) > 7 {
-			secondOctet := ""
-			for i := 4; i < len(ip); i++ {
-				if ip[i] == '.' {
-					break
-				}
-				secondOctet += string(ip[i])
-			}
-			// Simple range check for second octet (16-31)
-			if secondOctet == "16" || secondOctet == "17" || secondOctet == "18" || secondOctet == "19" ||
-				secondOctet == "20" || secondOctet == "21" || secondOctet == "22" || secondOctet == "23" ||
-				secondOctet == "24" || secondOctet == "25" || secondOctet == "26" || secondOctet == "27" ||
-				secondOctet == "28" || secondOctet == "29" || secondOctet == "30" || secondOctet == "31" {
+	for _, cidr := range privateCIDRs {
+		if _, n, err := net.ParseCIDR(cidr); err == nil {
+			if n.Contains(parsed) {
 				return true
 			}
 		}
@@ -147,28 +131,22 @@ func isPrivateIPv4(ip string) bool {
 
 // isPrivateIPv6 checks if an IPv6 address is in a private range.
 func isPrivateIPv6(ip string) bool {
-	// Common private IPv6 ranges:
-	// fc00::/7 (Unique Local Addresses), fe80::/10 (Link-local), ::1/128 (loopback)
-	if len(ip) >= 2 {
-		prefix := ip[:2]
-		// ULA starts with fc or fd
-		if prefix == "fc" || prefix == "fd" {
-			return true
+	parsed := net.ParseIP(ip)
+	if parsed == nil {
+		return false
+	}
+	privateCIDRs := []string{
+		"fc00::/7",  // Unique Local Address (ULA)
+		"fe80::/10", // Link-local
+		"::1/128",   // loopback
+	}
+	for _, cidr := range privateCIDRs {
+		if _, n, err := net.ParseCIDR(cidr); err == nil {
+			if n.Contains(parsed) {
+				return true
+			}
 		}
-		// Link-local starts with fe8, fe9, fea, feb
-		if len(ip) >= 3 && (ip[:3] == "fe8" || ip[:3] == "fe9" || ip[:3] == "fea" || ip[:3] == "feb") {
-			return true
-		}
 	}
-	// Loopback
-	if ip == "::1" {
-		return true
-	}
-	// For other IPv6 addresses, classify as external if they appear to be global unicast
-	// Global unicast typically starts with 2 or 3
-	if len(ip) >= 1 && (ip[0] == '2' || ip[0] == '3') {
-		return false // External/public
-	}
-	// Default to internal for safety/unknown ranges
-	return true
+	// Treat other IPv6 addresses as external (public) by default
+	return false
 }

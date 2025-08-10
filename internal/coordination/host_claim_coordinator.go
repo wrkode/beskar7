@@ -247,11 +247,14 @@ func (c *HostClaimCoordinator) selectHostDeterministic(hosts []*infrastructurev1
 	hashStr := hex.EncodeToString(hash[:])
 
 	// Convert first 8 characters of hash to index
+	// Parse first 8 hex chars safely to avoid G115 int/uint overflows
 	var hashValue uint64
 	for _, char := range hashStr[:8] {
+		// nolint:gosec // safe: value range limited to a single hex digit
 		hashValue = hashValue*16 + uint64(hexCharToInt(char))
 	}
-
+	// modulus fits into int domain due to len(hosts)
+	// nolint:gosec // safe: modulo len(hosts) ensures result fits into int range
 	selectedIndex := int(hashValue % uint64(len(hosts)))
 	return hosts[selectedIndex]
 }

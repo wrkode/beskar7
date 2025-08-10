@@ -204,7 +204,7 @@ func (pq *ProvisioningQueue) worker(ctx context.Context, workerID int) {
 	for {
 		select {
 		case <-ctx.Done():
-			logger.Info("Worker context cancelled")
+			logger.Info("Worker context canceled")
 			return
 		case <-pq.stopCh:
 			logger.Info("Worker stop signal received")
@@ -300,7 +300,7 @@ func (pq *ProvisioningQueue) processRequest(ctx context.Context, request *Provis
 	case request.ResultCh <- result:
 		logger.Info("Sent provisioning result", "success", result.Success, "duration", result.Duration)
 	case <-request.Context.Done():
-		logger.Info("Request context cancelled before result could be sent")
+		logger.Info("Request context canceled before result could be sent")
 	default:
 		logger.Error(nil, "Failed to send result - channel blocked")
 	}

@@ -1,14 +1,14 @@
 package webhooks
 
 import (
-    "context"
+	"context"
 
-    . "github.com/onsi/ginkgo/v2"
-    . "github.com/onsi/gomega"
-    corev1 "k8s.io/api/core/v1"
-    metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-    infrav1beta1 "github.com/wrkode/beskar7/api/v1beta1"
+	infrav1beta1 "github.com/wrkode/beskar7/api/v1beta1"
 )
 
 // Note: No RunSpecs here to avoid multiple Ginkgo suites in the same package.
@@ -17,10 +17,10 @@ var _ = Describe("PhysicalHost Webhook", func() {
 	var webhook *PhysicalHostWebhook
 	var ctx context.Context
 
-    BeforeEach(func() {
-        webhook = &PhysicalHostWebhook{}
-        ctx = context.Background()
-    })
+	BeforeEach(func() {
+		webhook = &PhysicalHostWebhook{}
+		ctx = context.Background()
+	})
 
 	Describe("ValidateCreate", func() {
 		It("should accept valid PhysicalHost", func() {
@@ -37,12 +37,12 @@ var _ = Describe("PhysicalHost Webhook", func() {
 				},
 			}
 
-            warnings, err := webhook.ValidateCreate(ctx, host)
-            Expect(err).NotTo(HaveOccurred())
-            // Without a client, we expect a secret validation warning and a TLS verification warning
-            Expect(warnings).To(HaveLen(2))
-            Expect(string(warnings[0]) + string(warnings[1])).To(ContainSubstring("Credential secret 'bmc-credentials' cannot be validated"))
-            Expect(string(warnings[0]) + string(warnings[1])).To(ContainSubstring("TLS certificate verification is enabled"))
+			warnings, err := webhook.ValidateCreate(ctx, host)
+			Expect(err).NotTo(HaveOccurred())
+			// Without a client, we expect a secret validation warning and a TLS verification warning
+			Expect(warnings).To(HaveLen(2))
+			Expect(string(warnings[0]) + string(warnings[1])).To(ContainSubstring("Credential secret 'bmc-credentials' cannot be validated"))
+			Expect(string(warnings[0]) + string(warnings[1])).To(ContainSubstring("TLS certificate verification is enabled"))
 		})
 
 		It("should reject PhysicalHost with missing address", func() {
@@ -116,12 +116,12 @@ var _ = Describe("PhysicalHost Webhook", func() {
 				},
 			}
 
-            warnings, err := webhook.ValidateCreate(ctx, host)
-            Expect(err).NotTo(HaveOccurred())
-            // In dev-like address (example.com), insecureSkipVerify yields a warning; plus secret validation warning
-            Expect(warnings).To(HaveLen(2))
-            Expect(string(warnings[0]) + string(warnings[1])).To(ContainSubstring("insecureSkipVerify is enabled"))
-            Expect(string(warnings[0]) + string(warnings[1])).To(ContainSubstring("Credential secret 'bmc-credentials' cannot be validated"))
+			warnings, err := webhook.ValidateCreate(ctx, host)
+			Expect(err).NotTo(HaveOccurred())
+			// In dev-like address (example.com), insecureSkipVerify yields a warning; plus secret validation warning
+			Expect(warnings).To(HaveLen(2))
+			Expect(string(warnings[0]) + string(warnings[1])).To(ContainSubstring("insecureSkipVerify is enabled"))
+			Expect(string(warnings[0]) + string(warnings[1])).To(ContainSubstring("Credential secret 'bmc-credentials' cannot be validated"))
 		})
 
 		It("should warn about ConsumerRef on create", func() {
@@ -142,14 +142,14 @@ var _ = Describe("PhysicalHost Webhook", func() {
 				},
 			}
 
-            warnings, err := webhook.ValidateCreate(ctx, host)
-            Expect(err).NotTo(HaveOccurred())
-            // Expect ConsumerRef creation warning, TLS verification warning, and secret validation warning
-            Expect(warnings).To(HaveLen(3))
-            combined := string(warnings[0]) + string(warnings[1]) + string(warnings[2])
-            Expect(combined).To(ContainSubstring("ConsumerRef is set on creation"))
-            Expect(combined).To(ContainSubstring("TLS certificate verification is enabled"))
-            Expect(combined).To(ContainSubstring("Credential secret 'bmc-credentials' cannot be validated"))
+			warnings, err := webhook.ValidateCreate(ctx, host)
+			Expect(err).NotTo(HaveOccurred())
+			// Expect ConsumerRef creation warning, TLS verification warning, and secret validation warning
+			Expect(warnings).To(HaveLen(3))
+			combined := string(warnings[0]) + string(warnings[1]) + string(warnings[2])
+			Expect(combined).To(ContainSubstring("ConsumerRef is set on creation"))
+			Expect(combined).To(ContainSubstring("TLS certificate verification is enabled"))
+			Expect(combined).To(ContainSubstring("Credential secret 'bmc-credentials' cannot be validated"))
 		})
 
 		It("should reject BootISOSource without ConsumerRef", func() {

@@ -51,6 +51,16 @@ const (
 
 	// ProviderIDPrefix is the prefix used for ProviderID
 	ProviderIDPrefix = "b7://"
+
+	// Provisioning modes
+	provisioningModeRemoteConfig = "RemoteConfig"
+	provisioningModePreBakedISO  = "PreBakedISO"
+
+	// Supported OS families
+	osFamilyKairos    = "kairos"
+	osFamilyTalos     = "talos"
+	osFamilyFlatcar   = "flatcar"
+	osFamilyLeapMicro = "LeapMicro"
 )
 
 // Beskar7MachineReconciler reconciles a Beskar7Machine object
@@ -91,6 +101,16 @@ func (r *Beskar7MachineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 			internalmetrics.RecordError("beskar7machine", req.Namespace, errorType)
 		}
 	}()
+
+	// Shared constants for provisioning modes and OS families
+	const (
+		provisioningModeRemoteConfig = "RemoteConfig"
+		provisioningModePreBakedISO  = "PreBakedISO"
+		osFamilyKairos               = "kairos"
+		osFamilyTalos                = "talos"
+		osFamilyFlatcar              = "flatcar"
+		osFamilyLeapMicro            = "LeapMicro"
+	)
 
 	// Fetch the Beskar7Machine instance.
 	b7machine := &infrastructurev1beta1.Beskar7Machine{}
@@ -413,11 +433,20 @@ func (r *Beskar7MachineReconciler) findAndClaimHostWithCoordination(ctx context.
 func (r *Beskar7MachineReconciler) configureHostBootParameters(ctx context.Context, logger logr.Logger, host *infrastructurev1beta1.PhysicalHost, b7machine *infrastructurev1beta1.Beskar7Machine) error {
 	// Determine provisioning mode and configure boot on the BMC
 	provisioningMode := b7machine.Spec.ProvisioningMode
+	const (
+		provisioningModeRemoteConfig = "RemoteConfig"
+		provisioningModePreBakedISO  = "PreBakedISO"
+		osFamilyKairos               = "kairos"
+		osFamilyTalos                = "talos"
+		osFamilyFlatcar              = "flatcar"
+		osFamilyLeapMicro            = "LeapMicro"
+	)
+
 	if provisioningMode == "" {
 		if b7machine.Spec.ConfigURL != "" {
-			provisioningMode = "RemoteConfig"
+			provisioningMode = provisioningModeRemoteConfig
 		} else {
-			provisioningMode = "PreBakedISO"
+			provisioningMode = provisioningModePreBakedISO
 		}
 		logger.Info("ProvisioningMode defaulted", "Mode", provisioningMode)
 	}
@@ -431,7 +460,7 @@ func (r *Beskar7MachineReconciler) configureHostBootParameters(ctx context.Conte
 	defer rfClient.Close(ctx)
 
 	switch provisioningMode {
-	case "RemoteConfig":
+	case provisioningModeRemoteConfig:
 		logger.Info("Configuring boot for RemoteConfig mode")
 		if b7machine.Spec.ConfigURL == "" {
 			err := errors.New("ConfigURL must be set when ProvisioningMode is RemoteConfig")
@@ -441,13 +470,13 @@ func (r *Beskar7MachineReconciler) configureHostBootParameters(ctx context.Conte
 
 		var kernelParams []string
 		switch b7machine.Spec.OSFamily {
-		case "kairos":
+		case osFamilyKairos:
 			kernelParams = []string{fmt.Sprintf("config_url=%s", b7machine.Spec.ConfigURL)}
-		case "talos":
+		case osFamilyTalos:
 			kernelParams = []string{fmt.Sprintf("talos.config=%s", b7machine.Spec.ConfigURL)}
-		case "flatcar":
+		case osFamilyFlatcar:
 			kernelParams = []string{fmt.Sprintf("flatcar.ignition.config.url=%s", b7machine.Spec.ConfigURL)}
-		case "LeapMicro":
+		case osFamilyLeapMicro:
 			kernelParams = []string{fmt.Sprintf("combustion.path=%s", b7machine.Spec.ConfigURL)}
 		default:
 			err := errors.Errorf("unsupported OSFamily for RemoteConfig: %s", b7machine.Spec.OSFamily)
@@ -465,7 +494,7 @@ func (r *Beskar7MachineReconciler) configureHostBootParameters(ctx context.Conte
 			return err
 		}
 
-	case "PreBakedISO":
+	case provisioningModePreBakedISO:
 		logger.Info("Configuring boot for PreBakedISO mode")
 		if err := rfClient.SetBootParameters(ctx, nil); err != nil { // Clear any existing boot params
 			logger.Error(err, "Failed to clear boot parameters for PreBakedISO")
@@ -614,9 +643,9 @@ func (r *Beskar7MachineReconciler) findAndClaimHostOriginal(ctx context.Context,
 		provisioningMode := b7machine.Spec.ProvisioningMode
 		if provisioningMode == "" {
 			if b7machine.Spec.ConfigURL != "" {
-				provisioningMode = "RemoteConfig"
+				provisioningMode = provisioningModeRemoteConfig
 			} else {
-				provisioningMode = "PreBakedISO"
+				provisioningMode = provisioningModePreBakedISO
 			}
 			logger.Info("ProvisioningMode defaulted", "Mode", provisioningMode)
 		}
@@ -632,7 +661,7 @@ func (r *Beskar7MachineReconciler) findAndClaimHostOriginal(ctx context.Context,
 		defer rfClient.Close(ctx)
 
 		switch provisioningMode {
-		case "RemoteConfig":
+		case provisioningModeRemoteConfig:
 			logger.Info("Configuring boot for RemoteConfig mode")
 			if b7machine.Spec.ConfigURL == "" {
 				err := errors.New("ConfigURL must be set when ProvisioningMode is RemoteConfig")
@@ -642,13 +671,13 @@ func (r *Beskar7MachineReconciler) findAndClaimHostOriginal(ctx context.Context,
 
 			var kernelParams []string
 			switch b7machine.Spec.OSFamily {
-			case "kairos":
+			case osFamilyKairos:
 				kernelParams = []string{fmt.Sprintf("config_url=%s", b7machine.Spec.ConfigURL)}
-			case "talos":
+			case osFamilyTalos:
 				kernelParams = []string{fmt.Sprintf("talos.config=%s", b7machine.Spec.ConfigURL)}
-			case "flatcar":
+			case osFamilyFlatcar:
 				kernelParams = []string{fmt.Sprintf("flatcar.ignition.config.url=%s", b7machine.Spec.ConfigURL)}
-			case "LeapMicro":
+			case osFamilyLeapMicro:
 				kernelParams = []string{fmt.Sprintf("combustion.path=%s", b7machine.Spec.ConfigURL)}
 			default:
 				err := errors.Errorf("unsupported OSFamily for RemoteConfig: %s", b7machine.Spec.OSFamily)
@@ -666,7 +695,7 @@ func (r *Beskar7MachineReconciler) findAndClaimHostOriginal(ctx context.Context,
 				return nil, ctrl.Result{}, err // Requeue
 			}
 
-		case "PreBakedISO":
+		case provisioningModePreBakedISO:
 			logger.Info("Configuring boot for PreBakedISO mode")
 			if err := rfClient.SetBootParameters(ctx, nil); err != nil { // Clear any existing boot params
 				logger.Error(err, "Failed to clear boot parameters for PreBakedISO")

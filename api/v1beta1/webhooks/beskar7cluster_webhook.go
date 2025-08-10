@@ -163,7 +163,7 @@ func (webhook *Beskar7ClusterWebhook) validatePort(port int32, fieldPath *field.
 
 func (webhook *Beskar7ClusterWebhook) isValidHostname(hostname string) bool {
 	// Basic hostname validation
-	if len(hostname) == 0 || len(hostname) > 253 {
+	if hostname == "" || len(hostname) > 253 {
 		return false
 	}
 
@@ -175,17 +175,25 @@ func (webhook *Beskar7ClusterWebhook) isValidHostname(hostname string) bool {
 	// Check each label in the hostname
 	labels := strings.Split(hostname, ".")
 	for _, label := range labels {
-		if len(label) == 0 || len(label) > 63 {
+		if !webhook.isValidHostnameLabel(label) {
 			return false
-		}
-		// Check for valid characters (alphanumeric and hyphens, but not starting/ending with hyphen)
-		for i, r := range label {
-			if (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') && (r < '0' || r > '9') && (r != '-' || i == 0 || i == len(label)-1) {
-				return false
-			}
 		}
 	}
 
+	return true
+}
+
+// isValidHostnameLabel validates a single hostname label
+func (webhook *Beskar7ClusterWebhook) isValidHostnameLabel(label string) bool {
+	if label == "" || len(label) > 63 {
+		return false
+	}
+	// Check for valid characters (alphanumeric and hyphens, but not starting/ending with hyphen)
+	for i, r := range label {
+		if (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') && (r < '0' || r > '9') && (r != '-' || i == 0 || i == len(label)-1) {
+			return false
+		}
+	}
 	return true
 }
 

@@ -15,6 +15,12 @@ import (
 	infrav1beta1 "github.com/wrkode/beskar7/api/v1beta1"
 )
 
+// Provisioning mode constants for validation/defaulting in this package
+const (
+	provisioningModeRemoteConfig = "RemoteConfig"
+	provisioningModePreBakedISO  = "PreBakedISO"
+)
+
 // Beskar7MachineWebhook implements a validating and defaulting webhook for Beskar7Machine.
 type Beskar7MachineWebhook struct{}
 
@@ -99,7 +105,8 @@ func (webhook *Beskar7MachineWebhook) validateMachine(machine *infrav1beta1.Besk
 	}
 
 	// Cross-field validation: ConfigURL is required for RemoteConfig mode
-	if machine.Spec.ProvisioningMode == "RemoteConfig" && machine.Spec.ConfigURL == "" {
+
+	if machine.Spec.ProvisioningMode == provisioningModeRemoteConfig && machine.Spec.ConfigURL == "" {
 		allErrs = append(allErrs, field.Required(
 			field.NewPath("spec", "configURL"),
 			"configURL is required when provisioningMode is RemoteConfig",
@@ -107,7 +114,7 @@ func (webhook *Beskar7MachineWebhook) validateMachine(machine *infrav1beta1.Besk
 	}
 
 	// ConfigURL should not be set for PreBakedISO mode
-	if machine.Spec.ProvisioningMode == "PreBakedISO" && machine.Spec.ConfigURL != "" {
+	if machine.Spec.ProvisioningMode == provisioningModePreBakedISO && machine.Spec.ConfigURL != "" {
 		allErrs = append(allErrs, field.Forbidden(
 			field.NewPath("spec", "configURL"),
 			"configURL should not be set when provisioningMode is PreBakedISO",
@@ -128,7 +135,7 @@ func (webhook *Beskar7MachineWebhook) validateMachine(machine *infrav1beta1.Besk
 func (webhook *Beskar7MachineWebhook) defaultMachine(machine *infrav1beta1.Beskar7Machine) error {
 	// Set default provisioning mode if not specified
 	if machine.Spec.ProvisioningMode == "" {
-		machine.Spec.ProvisioningMode = "RemoteConfig"
+		machine.Spec.ProvisioningMode = provisioningModeRemoteConfig
 	}
 
 	return nil

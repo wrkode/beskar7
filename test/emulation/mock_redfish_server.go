@@ -291,8 +291,8 @@ func (mrs *MockRedfishServer) handleRequest(w http.ResponseWriter, r *http.Reque
 		time.Sleep(5 * time.Second)
 	}
 
-	// Simulate network errors
-	if mrs.failures.NetworkErrors {
+	// Simulate network errors for non-root requests so client can still connect
+	if mrs.failures.NetworkErrors && r.URL.Path != "/redfish/v1/" {
 		http.Error(w, "Network Error", http.StatusInternalServerError)
 		return
 	}
@@ -316,17 +316,28 @@ func (mrs *MockRedfishServer) handleRequest(w http.ResponseWriter, r *http.Reque
 		mrs.handleSystemsCollection(w, r)
 	case strings.HasPrefix(r.URL.Path, "/redfish/v1/Systems/") && r.Method == http.MethodGet:
 		mrs.handleSystemGet(w, r)
+	case r.URL.Path == "/redfish/v1/Systems/1" && (r.Method == http.MethodPatch || r.Method == http.MethodPost):
+		// Accept Boot Set requests
+		w.WriteHeader(http.StatusNoContent)
 	case strings.HasPrefix(r.URL.Path, "/redfish/v1/Systems/") && strings.HasSuffix(r.URL.Path, "/Actions/ComputerSystem.Reset") && r.Method == http.MethodPost:
 		mrs.handleSystemReset(w, r)
-    case strings.HasPrefix(r.URL.Path, "/redfish/v1/Managers"):
-        // Minimal Manager handlers could be added here if needed in future
-        w.WriteHeader(http.StatusNotFound)
-    case strings.Contains(r.URL.Path, "VirtualMedia"):
-        // Basic virtual media endpoints are handled via SetBootSourceISO in client tests
-        w.WriteHeader(http.StatusNotFound)
-    case strings.Contains(r.URL.Path, "Bios"):
-        // BIOS attribute GET/PATCH can be added if tests require deeper emulation
-        w.WriteHeader(http.StatusNotFound)
+	case r.URL.Path == "/redfish/v1/Managers" && r.Method == http.MethodGet:
+		mrs.handleManagersCollection(w, r)
+	case strings.HasPrefix(r.URL.Path, "/redfish/v1/Managers/") && strings.HasSuffix(r.URL.Path, "/VirtualMedia") && r.Method == http.MethodGet:
+		mrs.handleManagerVirtualMediaCollection(w, r)
+	case strings.HasPrefix(r.URL.Path, "/redfish/v1/Managers/") && strings.Contains(r.URL.Path, "/VirtualMedia/") && strings.Contains(r.URL.Path, "/Actions/"):
+		// Accept any VirtualMedia actions
+		w.WriteHeader(http.StatusNoContent)
+	case strings.HasPrefix(r.URL.Path, "/redfish/v1/Managers/") && strings.Contains(r.URL.Path, "/VirtualMedia/") && r.Method == http.MethodGet:
+		mrs.handleVirtualMediaGet(w, r)
+	case strings.HasPrefix(r.URL.Path, "/redfish/v1/Managers/") && r.Method == http.MethodGet:
+		mrs.handleManagerGet(w, r)
+	case strings.Contains(r.URL.Path, "VirtualMedia"):
+		// Basic virtual media endpoints are handled via SetBootSourceISO in client tests
+		w.WriteHeader(http.StatusNotFound)
+	case strings.Contains(r.URL.Path, "Bios"):
+		// BIOS attribute GET/PATCH can be added if tests require deeper emulation
+		w.WriteHeader(http.StatusNotFound)
 	default:
 		http.NotFound(w, r)
 	}
@@ -387,7 +398,11 @@ func (mrs *MockRedfishServer) handleServiceRoot(w http.ResponseWriter, r *http.R
 		},
 	}
 
-	json.NewEncoder(w).Encode(response)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		// best-effort in tests: respond with 500 if encoding fails
+		http.Error(w, "encode error", http.StatusInternalServerError)
+		return
+	}
 }
 
 // handleSystemsCollection handles /redfish/v1/Systems
@@ -402,7 +417,89 @@ func (mrs *MockRedfishServer) handleSystemsCollection(w http.ResponseWriter, r *
 		},
 	}
 
-	json.NewEncoder(w).Encode(response)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		http.Error(w, "encode error", http.StatusInternalServerError)
+		return
+	}
+}
+
+// handleManagersCollection handles /redfish/v1/Managers
+func (mrs *MockRedfishServer) handleManagersCollection(w http.ResponseWriter, r *http.Request) {
+	response := map[string]interface{}{
+		"@odata.type":         "#ManagerCollection.ManagerCollection",
+		"@odata.id":           "/redfish/v1/Managers",
+		"Name":                "Manager Collection",
+		"Members@odata.count": 1,
+		"Members": []map[string]string{
+			{"@odata.id": "/redfish/v1/Managers/1"},
+		},
+	}
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		http.Error(w, "encode error", http.StatusInternalServerError)
+		return
+	}
+}
+
+// handleManagerGet handles GET /redfish/v1/Managers/1
+func (mrs *MockRedfishServer) handleManagerGet(w http.ResponseWriter, r *http.Request) {
+	response := map[string]interface{}{
+		"@odata.type": "#Manager.v1_9_0.Manager",
+		"@odata.id":   "/redfish/v1/Managers/1",
+		"Id":          "1",
+		"Name":        "BMCManager",
+		"Actions": map[string]interface{}{
+			"#Manager.Reset": map[string]string{
+				"target": "/redfish/v1/Managers/1/Actions/Manager.Reset",
+			},
+		},
+		"VirtualMedia": map[string]string{
+			"@odata.id": "/redfish/v1/Managers/1/VirtualMedia",
+		},
+	}
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		http.Error(w, "encode error", http.StatusInternalServerError)
+		return
+	}
+}
+
+// handleManagerVirtualMediaCollection handles GET /redfish/v1/Managers/1/VirtualMedia
+func (mrs *MockRedfishServer) handleManagerVirtualMediaCollection(w http.ResponseWriter, r *http.Request) {
+	response := map[string]interface{}{
+		"@odata.type":         "#VirtualMediaCollection.VirtualMediaCollection",
+		"@odata.id":           "/redfish/v1/Managers/1/VirtualMedia",
+		"Name":                "Virtual Media Collection",
+		"Members@odata.count": 1,
+		"Members": []map[string]string{
+			{"@odata.id": "/redfish/v1/Managers/1/VirtualMedia/1"},
+		},
+	}
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		http.Error(w, "encode error", http.StatusInternalServerError)
+		return
+	}
+}
+
+// handleVirtualMediaGet handles GET /redfish/v1/Managers/1/VirtualMedia/1
+func (mrs *MockRedfishServer) handleVirtualMediaGet(w http.ResponseWriter, r *http.Request) {
+	response := map[string]interface{}{
+		"@odata.type":    "#VirtualMedia.v1_5_0.VirtualMedia",
+		"@odata.id":      "/redfish/v1/Managers/1/VirtualMedia/1",
+		"Id":             "1",
+		"Name":           "Virtual CD",
+		"MediaTypes":     []string{"CD", "DVD"},
+		"Image":          "",
+		"Inserted":       false,
+		"WriteProtected": true,
+		"ConnectedVia":   "URI",
+		"Actions": map[string]map[string]string{
+			"#VirtualMedia.InsertMedia": {"target": "/redfish/v1/Managers/1/VirtualMedia/1/Actions/VirtualMedia.InsertMedia"},
+			"#VirtualMedia.EjectMedia":  {"target": "/redfish/v1/Managers/1/VirtualMedia/1/Actions/VirtualMedia.EjectMedia"},
+		},
+	}
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		http.Error(w, "encode error", http.StatusInternalServerError)
+		return
+	}
 }
 
 // handleSystemGet handles GET /redfish/v1/Systems/1
@@ -445,7 +542,10 @@ func (mrs *MockRedfishServer) handleSystemGet(w http.ResponseWriter, r *http.Req
 		},
 	}
 
-	json.NewEncoder(w).Encode(response)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		http.Error(w, "encode error", http.StatusInternalServerError)
+		return
+	}
 }
 
 // handleSystemReset handles system power actions
