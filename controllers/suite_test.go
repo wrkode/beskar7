@@ -68,7 +68,8 @@ var _ = BeforeSuite(func() {
 	By("bootstrapping test environment")
     testEnv = &envtest.Environment{
         CRDDirectoryPaths: []string{
-            filepath.Join("..", "config", "crd", "bases"), // Local CRDs
+            filepath.Join("..", "config", "crd", "bases"),           // Beskar7 CRDs
+            filepath.Join("..", "config", "test-external-crds"),      // Minimal external CRDs (e.g., CAPI Cluster/Machine)
         },
         ErrorIfCRDPathMissing: true,
     }
