@@ -34,6 +34,7 @@ import (
 	infrastructurev1beta1 "github.com/wrkode/beskar7/api/v1beta1"
 	"github.com/wrkode/beskar7/controllers"
 	internalredfish "github.com/wrkode/beskar7/internal/redfish"
+    "github.com/stmcginnis/gofish/redfish"
 )
 
 func TestHardwareEmulation(t *testing.T) {
@@ -176,57 +177,24 @@ var _ = Describe("Hardware Emulation Tests", func() {
 				PowerFailures: true,
 			})
 
-			client := createRedfishClient(mockServer.GetURL(), "admin", "password123")
-			err := client.SetPowerState(ctx, internalredfish.PowerStateOn)
+            client := createRedfishClient(mockServer.GetURL(), "admin", "password123")
+            err := client.SetPowerState(ctx, redfish.OnPowerState)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("500"))
 		})
 	})
 
 	Context("PhysicalHost Controller Integration", func() {
-		var (
-			reconciler   *controllers.PhysicalHostReconciler
-			physicalHost *infrastructurev1beta1.PhysicalHost
-			secret       *corev1.Secret
-		)
+        var (
+            _       *controllers.PhysicalHostReconciler
+            _       *infrastructurev1beta1.PhysicalHost
+            _       *corev1.Secret
+        )
 
 		BeforeEach(func() {
 			mockServer = NewMockRedfishServer(VendorDell)
 
-			// Create credentials secret
-			secret = &corev1.Secret{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-credentials",
-					Namespace: namespace,
-				},
-				StringData: map[string]string{
-					"username": "admin",
-					"password": "password123",
-				},
-			}
-
-			// Create PhysicalHost resource
-			physicalHost = &infrastructurev1beta1.PhysicalHost{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-host-emulated",
-					Namespace: namespace,
-				},
-				Spec: infrastructurev1beta1.PhysicalHostSpec{
-					RedfishConnection: infrastructurev1beta1.RedfishConnection{
-						Address:              mockServer.GetURL(),
-						CredentialsSecretRef: secret.Name,
-						InsecureSkipVerify:   &[]bool{true}[0], // Skip TLS verification for test server
-					},
-				},
-			}
-
-			// Create reconciler with custom client factory
-			reconciler = &controllers.PhysicalHostReconciler{
-				// Client and Scheme would be set by test environment
-				RedfishClientFactory: func(ctx context.Context, address, username, password string, insecure bool) (internalredfish.Client, error) {
-					return createRedfishClient(address, username, password), nil
-				},
-			}
+            // Controller environment not used in these emulation tests
 		})
 
 		It("should successfully connect to emulated Dell server", func() {
@@ -245,7 +213,7 @@ var _ = Describe("Hardware Emulation Tests", func() {
 			client := createRedfishClient(mockServer.GetURL(), "admin", "password123")
 
 			// Test power operations
-			err := client.SetPowerState(ctx, internalredfish.PowerStateOff)
+            err := client.SetPowerState(ctx, redfish.OffPowerState)
 			Expect(err).NotTo(HaveOccurred())
 
 			// Verify power state changed
@@ -343,12 +311,11 @@ var _ = Describe("Hardware Emulation Tests", func() {
 
 			// Final state should be consistent
 			client := createRedfishClient(mockServer.GetURL(), "admin", "password123")
-			systemInfo, err := client.GetSystemInfo(ctx)
+            ps, err := client.GetPowerState(ctx)
 			Expect(err).NotTo(HaveOccurred())
-
-			// Power state should be either On or Off, not in an inconsistent state
-			powerState := string(systemInfo.PowerState)
-			Expect(powerState).To(SatisfyAny(Equal("On"), Equal("Off")))
+            // Power state should be either On or Off, not in an inconsistent state
+            powerState := string(ps)
+            Expect(powerState).To(SatisfyAny(Equal("On"), Equal("Off")))
 		})
 	})
 

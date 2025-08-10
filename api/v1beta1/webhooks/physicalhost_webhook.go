@@ -122,12 +122,19 @@ func (webhook *PhysicalHostWebhook) ValidateDelete(ctx context.Context, obj runt
 
 	physicalHostWebhookLog.Info("Validating PhysicalHost deletion", "name", host.Name, "namespace", host.Namespace)
 
-	// Prevent deletion if host is claimed by a machine
-	if host.Spec.ConsumerRef != nil {
-		return admission.Warnings{
-			"PhysicalHost is claimed by a consumer. Ensure the consumer is properly cleaned up before deletion.",
-		}, nil
-	}
+    // Prevent deletion if host is claimed by a machine
+    if host.Spec.ConsumerRef != nil {
+        return admission.Warnings{
+            "PhysicalHost is currently claimed by a consumer. Ensure the consumer is properly cleaned up before deletion.",
+        }, nil
+    }
+
+    // Warn if host is currently provisioning
+    if strings.EqualFold(host.Status.State, infrav1beta1.StateProvisioning) {
+        return admission.Warnings{
+            "PhysicalHost is currently provisioning; deletion may interrupt ongoing operations.",
+        }, nil
+    }
 
 	return nil, nil
 }

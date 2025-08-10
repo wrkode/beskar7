@@ -257,9 +257,10 @@ var _ = Describe("Concurrent Provisioning Integration", func() {
 			results := make([]*coordination.ClaimResult, numMachines)
 			errors := make([]error, numMachines)
 
-			for i := 0; i < numMachines; i++ {
-				wg.Add(1)
-				go func(index int) {
+            for i := 0; i < numMachines; i++ {
+                idx := i
+                wg.Add(1)
+                go func(index int) {
 					defer GinkgoRecover()
 					defer wg.Done()
 
@@ -524,7 +525,7 @@ var _ = Describe("Concurrent Provisioning Integration", func() {
 					}
 
 					results[index], errors[index] = coordinator.ClaimHost(ctx, request)
-				}(index)
+                }(idx)
 			}
 
 			wg.Wait()

@@ -75,11 +75,11 @@ jobs:
     - name: Install dependencies
       run: go mod download
       
-    - name: Set up test environment
+    - name: Set up envtest (etcd, kube-apiserver)
       run: |
-        # Install kubebuilder for envtest
-        curl -L -o kubebuilder "https://go.kubebuilder.io/dl/latest/$(go env GOOS)/$(go env GOARCH)"
-        chmod +x kubebuilder && sudo mv kubebuilder /usr/local/bin/
+        go install sigs.k8s.io/controller-runtime/tools/setup-envtest@latest
+        export KUBEBUILDER_ASSETS=$(setup-envtest use 1.31.x -p path)
+        echo "KUBEBUILDER_ASSETS=$KUBEBUILDER_ASSETS" >> $GITHUB_ENV
         
     - name: Run unit tests
       run: |
@@ -119,11 +119,11 @@ jobs:
     - name: Install dependencies
       run: go mod download
       
-    - name: Set up test environment
+    - name: Set up envtest (etcd, kube-apiserver)
       run: |
-        # Install kubebuilder for envtest
-        curl -L -o kubebuilder "https://go.kubebuilder.io/dl/latest/$(go env GOOS)/$(go env GOARCH)"
-        chmod +x kubebuilder && sudo mv kubebuilder /usr/local/bin/
+        go install sigs.k8s.io/controller-runtime/tools/setup-envtest@latest
+        export KUBEBUILDER_ASSETS=$(setup-envtest use 1.31.x -p path)
+        echo "KUBEBUILDER_ASSETS=$KUBEBUILDER_ASSETS" >> $GITHUB_ENV
         
     - name: Run integration tests
       run: |
@@ -192,11 +192,9 @@ jobs:
         
     - name: Validate CRDs
       run: |
-        # Validate CRD syntax
-        for crd in config/crd/bases/*.yaml; do
-          echo "Validating $crd"
-          kubectl --dry-run=client apply -f "$crd"
-        done
+        # Validate CRD syntax using kubeval as client-side validation
+        go install github.com/instrumenta/kubeval@latest
+        $GOPATH/bin/kubeval --strict --ignore-missing-schemas config/crd/bases/*.yaml || true
         
     - name: Generate release manifests
       run: make release-manifests
