@@ -365,10 +365,16 @@ jobs:
           echo "PhysicalHost status:"
           kubectl get physicalhost test-host -o yaml
           
-          # Cleanup
+          # Cleanup with timeout
           echo "Cleaning up test resources..."
-          kubectl delete physicalhost test-host
-          kubectl delete secret test-credentials
+          echo "Deleting PhysicalHost (with 60s timeout)..."
+          timeout 60s kubectl delete physicalhost test-host --wait=true || {
+            echo "PhysicalHost deletion timed out or failed, checking status..."
+            kubectl get physicalhost test-host -o yaml || echo "PhysicalHost already deleted"
+            kubectl describe physicalhost test-host || echo "PhysicalHost already deleted"
+          }
+          echo "Deleting test secret..."
+          kubectl delete secret test-credentials --wait=true || echo "Secret deletion failed or already deleted"
         else
           echo "Failed to create PhysicalHost - webhook error detected"
           echo "Checking webhook status..."

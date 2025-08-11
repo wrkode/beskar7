@@ -730,7 +730,12 @@ func (r *PhysicalHostReconciler) reconcileDelete(ctx context.Context, physicalHo
 	// Cleanup finished (or skipped), remove the finalizer
 	logger.Info("Removing finalizer")
 	if controllerutil.RemoveFinalizer(physicalHost, PhysicalHostFinalizer) {
-		logger.Info("Finalizer flag set for removal by controllerutil")
+		logger.Info("Finalizer removed from object, saving changes")
+		if err := r.Update(ctx, physicalHost); err != nil {
+			logger.Error(err, "Failed to remove finalizer from PhysicalHost")
+			return ctrl.Result{}, err
+		}
+		logger.Info("Successfully removed finalizer")
 	}
 	return ctrl.Result{}, nil
 }
