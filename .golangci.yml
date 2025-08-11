@@ -1,8 +1,4 @@
-version: 2
-
 linters-settings:
-  gci:
-    local-prefixes: github.com/wrkode/beskar7
   goconst:
     min-len: 2
     min-occurrences: 2
@@ -13,47 +9,25 @@ linters-settings:
       - opinionated
       - performance
       - style
-    disabled-checks:
-      - dupImport # https://github.com/go-critic/go-critic/issues/845
-      - ifElseChain
-      - octalLiteral
-      - paramTypeCombine
-      - whyNoLint
-      - wrapperFunc
   gocyclo:
     min-complexity: 15
-  goimports:
-    local-prefixes: github.com/wrkode/beskar7
-  mnd:
+  gomnd:
     settings:
       mnd:
-        # don't include the "operation" and "assign"
         checks: argument,case,condition,return
   govet:
-    # Deprecated in newer golangci-lint; keep for backward compatibility, but CI warns. Shadow linter is enabled via govet default.
     check-shadowing: true
-    settings:
-      printf:
-        funcs:
-          - (github.com/go-logr/logr.Logger).Infof
-          - (github.com/go-logr/logr.Logger).Warnf
-          - (github.com/go-logr/logr.Logger).Errorf
-          - (github.com/go-logr/logr.Logger).Fatalf
   lll:
     line-length: 140
-  maligned:
-    suggest-new: true
   misspell:
     locale: US
   nolintlint:
-    allow-leading-space: true # don't require machine-readable nolint directives (i.e. with no leading space)
-    allow-unused: false # report any unused nolint directives
-    require-explanation: false # don't require an explanation for nolint directives
-    require-specific: false # don't require nolint directives to be specific about which linter is being skipped
+    allow-leading-space: true
+    allow-unused: false
+    require-explanation: false
+    require-specific: false
 
 linters:
-  # please, do not use `enable-all`: it's deprecated and will be removed soon.
-  # inverted configuration with `enable-all` and `disable` is not scalable during updates of golangci-lint
   disable-all: true
   enable:
     - bodyclose
@@ -61,15 +35,18 @@ linters:
     - dogsled
     - dupl
     - errcheck
-    - copyloopvar
+    - exportloopref
     - funlen
     - gochecknoinits
     - goconst
     - gocritic
     - gocyclo
-    - mnd
+    - gofmt
+    - goimports
+    - gomnd
     - goprintffuncname
     - gosec
+    - gosimple
     - govet
     - ineffassign
     - lll
@@ -78,95 +55,82 @@ linters:
     - nolintlint
     - rowserrcheck
     - staticcheck
+    - stylecheck
+    - typecheck
     - unconvert
     - unparam
     - unused
     - whitespace
 
-  # don't enable:
-  # - asciicheck
-  # - gochecknoglobals
-  # - gocognit
-  # - godot
-  # - godox
-  # - goerr113
-  # - interfacer (deprecated)
-  # - maligned (deprecated)
-  # - prealloc
-  # - testpackage
-  # - wsl
+run:
+  concurrency: 4
+  timeout: 5m
+  issues-exit-code: 1
+  tests: true
+  build-tags:
+    - integration
+  skip-dirs:
+    - vendor
+    - bin
+  skip-dirs-use-default: true
+  skip-files:
+    - ".*\\.pb\\.go$"
+    - ".*_generated\\.go$"
+    - "zz_generated\\..*\\.go$"
 
 issues:
-  # Excluding configuration per-path, per-linter, per-text and per-source
   exclude-rules:
     - path: _test\.go
       linters:
-        - mnd
+        - gomnd
         - funlen
         - goconst
         - gocyclo
         - dupl
 
-    # Disable depguard for all files (CI currently flags legitimate imports)
     - path: .*
       linters:
         - depguard
 
-    # https://github.com/go-critic/go-critic/issues/926
     - linters:
         - gocritic
       text: "unnecessaryDefer:"
 
-    # Allow embedding of kubebuilder markers
     - path: api/
       linters:
         - lll
 
-    # Allow long lines in generated code
     - path: zz_generated
       linters:
         - lll
 
-    # Allow TLS InsecureSkipVerify in test emulation server code
     - path: test/
       text: G402
       linters:
         - gosec
 
-    # Allow embedding in webhooks
     - path: webhooks/
       linters:
         - lll
 
-    # Ignore certain gosec rules for test files
     - path: _test\.go
-      text: G404 # Use of weak random number generator
+      text: G404
       linters:
         - gosec
 
-    # Ignore certain gosec rules for mock/test utilities
     - path: test/
-      text: G404 # Use of weak random number generator
+      text: G404
       linters:
         - gosec
 
-    # Allow TLS skip verify in test code
-    - path: test/
-      text: G402 # TLS InsecureSkipVerify
-      linters:
-        - gosec
-
-    # Allow variable shadowing in certain contexts
     - text: "shadow: declaration of \"err\" shadows declaration"
       linters:
         - govet
 
-    # Allow long functions in generated code
     - path: zz_generated
       linters:
         - funlen
 
-    # Allow longer functions in specific security files (to be refactored later)
     - path: internal/security/monitor\.go
       linters:
         - funlen
@@ -177,112 +141,13 @@ issues:
       linters:
         - funlen
 
-  # Exclude from the default list
   exclude:
-    # errcheck: Almost all programs ignore errors on these functions and in most cases it's ok
     - Error return value of .((os\.)?std(out|err)\..*|.*Close|.*Flush|os\.Remove(All)?|.*print.*|os\.(Un)?Setenv). is not checked
-
-    # govet: Common false positives
     - (possible misuse of unsafe.Pointer|should have signature)
-
-    # staticcheck: Developers tend to write in C-style with an explicit 'break' in a 'switch', so it's ok to ignore
     - ineffective break statement. Did you mean to break out of the outer loop
-
-    # gosec: Too many false-positives on 'unsafe' usage
     - G103
-
-    # gosec: Too many false-positives for parametrized shell calls
     - G204
-
-    # gosec: Duplicated errcheck checks
     - G104
 
-  # The default value is false. If set to true exclude and exclude-rules
-  # regular expressions become case sensitive.
-  exclude-case-sensitive: false
-
-  # The list of ids of default excludes to include or disable. By default it's empty.
-  include:
-    - EXC0002 # disable excluding of issues about comments from golint
-
-  # Maximum issues count per one linter. Set to 0 to disable. Default is 50.
   max-issues-per-linter: 0
-
-  # Maximum count of issues with the same text. Set to 0 to disable. Default is 3.
   max-same-issues: 0
-
-  # Show only new issues: if there are unstaged changes or untracked files,
-  # only those changes are analyzed, else only changes in HEAD~ are analyzed.
-  # It's a super-useful option for integration of golangci-lint into existing
-  # large codebase. It's not practical to fix all existing issues at the moment
-  # of integration: much better don't allow issues in new code.
-  # Default is false.
-  new: false
-
-  # Show only new issues created after git revision `REV`
-  new-from-rev: ""
-
-  # Show only new issues created in git patch with set file path.
-  new-from-patch: ""
-
-  # Fix found issues (if it's supported by the linter)
-  fix: false
-
-run:
-  # default concurrency is a available CPU number
-  concurrency: 4
-
-  # timeout for analysis, e.g. 30s, 5m, default is 1m
-  timeout: 5m
-
-  # exit code when at least one issue was found, default is 1
-  issues-exit-code: 1
-
-  # include test files or not, default is true
-  tests: true
-
-  # list of build tags, all linters use it. Default is empty list.
-  build-tags:
-    - integration
-
-  # which dirs to skip: issues from them won't be reported;
-  # can use regexp here: generated.*, regexp is applied on full path;
-  # default value is empty list, but default dirs are skipped independently
-  # from this option's value (see skip-dirs-use-default).
-  skip-dirs:
-    - vendor
-    - bin
-
-  # default is true. Enables skipping of directories:
-  #   vendor$, third_party$, testdata$, examples$, Godeps$, builtin$
-  skip-dirs-use-default: true
-
-  # which files to skip: they will be analyzed, but issues from them
-  # won't be reported. Default value is empty list, but there is
-  # no need to include all autogenerated files, we confidently recognize
-  # autogenerated files. If it's not please let us know.
-  skip-files:
-    - ".*\\.pb\\.go$"
-    - ".*_generated\\.go$"
-    - "zz_generated\\..*\\.go$"
-
-  # by default isn't set. If set we pass it to "go list -mod={option}". From "go help modules":
-  # If invoked with -mod=readonly, the go command is disallowed from the implicit
-  # automatic updating of go.mod described above. Instead, it fails when any changes
-  # to go.mod are needed. This setting is most useful to check that go.mod does
-  # not need updates, such as in a continuous integration and testing system.
-  # If invoked with -mod=vendor, the go command assumes that the vendor
-  # directory holds the correct copies of dependencies and ignores
-  # the dependency descriptions in go.mod.
-  modules-download-mode: readonly
-
-  # Allow multiple parallel golangci-lint instances running.
-  # If false (default) - golangci-lint acquires file lock on start.
-  allow-parallel-runners: false
-
-# golangci.com configuration
-# https://github.com/golangci/golangci/wiki/Configuration
-service:
-  golangci-lint-version: 1.54.x # use the fixed version to not introduce new linters unexpectedly
-  prepare:
-    - echo "here I can run custom commands, but no preparation needed for this repo" 
