@@ -247,10 +247,33 @@ jobs:
       run: |
         kubectl wait --for=condition=Available --timeout=300s deployment/controller-manager -n beskar7-system
         
+    - name: Wait for webhook certificates and readiness
+      run: |
+        # Wait for cert-manager to generate webhook certificates
+        echo "Waiting for webhook certificate..."
+        kubectl wait --for=condition=Ready --timeout=300s certificate/beskar7-serving-cert -n beskar7-system
+        
+        # Wait for webhook service endpoints to be ready
+        echo "Waiting for controller pods to be ready..."
+        kubectl wait --for=condition=Ready --timeout=120s pod -l app.kubernetes.io/name=beskar7 -n beskar7-system
+        
+        # Verify webhook service has endpoints
+        echo "Checking webhook service endpoints..."
+        kubectl get endpoints beskar7-webhook-service -n beskar7-system
+        
+        # Give webhook server additional time to start listening
+        echo "Allowing webhook server startup time..."
+        sleep 15
+        
+        # Test webhook connectivity (optional)
+        echo "Testing webhook readiness..."
+        kubectl get validatingwebhookconfiguration beskar7-validating-webhook-configuration -o yaml | grep -A5 "name: validation.physicalhost"
+        
     - name: Test basic functionality
       run: |
-        # Create a test PhysicalHost to verify CRDs are working
-        cat <<EOF | kubectl apply -f -
+        # Create a test PhysicalHost to verify CRDs and webhooks are working
+        echo "Creating test secret..."
+        kubectl apply -f - <<EOF
         apiVersion: v1
         kind: Secret
         metadata:
@@ -259,7 +282,10 @@ jobs:
         stringData:
           username: testuser
           password: testpass
-        ---
+        EOF
+        
+        echo "Creating test PhysicalHost..."
+        if kubectl apply -f - <<EOF
         apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
         kind: PhysicalHost
         metadata:
@@ -270,14 +296,25 @@ jobs:
             address: "https://test.example.com"
             credentialsSecretRef: "test-credentials"
         EOF
-        
-        # Wait for the PhysicalHost to be processed
-        sleep 10
-        kubectl get physicalhost test-host -o yaml
-        
-        # Cleanup
-        kubectl delete physicalhost test-host
-        kubectl delete secret test-credentials
+        then
+          echo "PhysicalHost created successfully - webhooks are working!"
+          
+          # Wait for the PhysicalHost to be processed
+          sleep 10
+          echo "PhysicalHost status:"
+          kubectl get physicalhost test-host -o yaml
+          
+          # Cleanup
+          echo "Cleaning up test resources..."
+          kubectl delete physicalhost test-host
+          kubectl delete secret test-credentials
+        else
+          echo "Failed to create PhysicalHost - webhook error detected"
+          echo "Checking webhook status..."
+          kubectl get pods -n beskar7-system
+          kubectl logs -n beskar7-system -l app.kubernetes.io/name=beskar7 --tail=50
+          exit 1
+        fi
 
   # Job 8: Performance Benchmarks
   benchmark:
