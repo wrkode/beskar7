@@ -31,6 +31,8 @@ func (webhook *PhysicalHostWebhook) SetupWebhookWithManager(mgr ctrl.Manager) er
 	webhook.Client = mgr.GetClient()
 	return ctrl.NewWebhookManagedBy(mgr).
 		For(&infrav1beta1.PhysicalHost{}).
+		WithValidator(webhook).
+		WithDefaulter(webhook).
 		Complete()
 }
 
