@@ -228,61 +228,55 @@ jobs:
             tail -n +2 changelog-section.md >> release-notes.md
           else
             echo "No changelog entry found for $VERSION, using generic content"
-            cat >> release-notes.md << 'EOF'
-## 🚀 What's New
-
-This release includes improvements and bug fixes for the Beskar7 Kubernetes operator.
-EOF
+            echo "## 🚀 What's New" >> release-notes.md
+            echo "" >> release-notes.md
+            echo "This release includes improvements and bug fixes for the Beskar7 Kubernetes operator." >> release-notes.md
           fi
         else
           echo "CHANGELOG.md not found, using generic content"
-          cat >> release-notes.md << 'EOF'
-## 🚀 What's New
-
-This release includes improvements and bug fixes for the Beskar7 Kubernetes operator.
-EOF
+          echo "## 🚀 What's New" >> release-notes.md
+          echo "" >> release-notes.md
+          echo "This release includes improvements and bug fixes for the Beskar7 Kubernetes operator." >> release-notes.md
         fi
         
         # Add common installation and info sections
-        cat >> release-notes.md << EOF
-
-## 📦 Installation
-
-### Using Kubectl
-\`\`\`bash
-kubectl apply -f https://github.com/wrkode/beskar7/releases/download/$VERSION/beskar7-manifests-$VERSION.yaml
-\`\`\`
-
-### Using Helm
-\`\`\`bash
-helm repo add beskar7 https://wrkode.github.io/beskar7
-helm install beskar7 beskar7/beskar7 --version ${VERSION#v}
-\`\`\`
-
-## 📋 Prerequisites
-
-- Kubernetes 1.19+
-- cert-manager (required)
-- Cluster API v1.4.0+
-
-## 🔒 Security
-
-This release includes security scanning and vulnerability assessment. See the attached vulnerability report for details.
-
-## 🐳 Container Images
-
-\`\`\`
-ghcr.io/wrkode/beskar7/beskar7:$VERSION
-\`\`\`
-
-Available for:
-- linux/amd64
-- linux/arm64
-
-## 🔐 Verification
-
-All release artifacts are signed and include SBOMs for supply chain security.
-EOF
+        echo "" >> release-notes.md
+        echo "## 📦 Installation" >> release-notes.md
+        echo "" >> release-notes.md
+        echo "### Using Kubectl" >> release-notes.md
+        echo "\`\`\`bash" >> release-notes.md
+        echo "kubectl apply -f https://github.com/wrkode/beskar7/releases/download/$VERSION/beskar7-manifests-$VERSION.yaml" >> release-notes.md
+        echo "\`\`\`" >> release-notes.md
+        echo "" >> release-notes.md
+        echo "### Using Helm" >> release-notes.md
+        echo "\`\`\`bash" >> release-notes.md
+        echo "helm repo add beskar7 https://wrkode.github.io/beskar7" >> release-notes.md
+        echo "helm install beskar7 beskar7/beskar7 --version ${VERSION#v}" >> release-notes.md
+        echo "\`\`\`" >> release-notes.md
+        echo "" >> release-notes.md
+        echo "## 📋 Prerequisites" >> release-notes.md
+        echo "" >> release-notes.md
+        echo "- Kubernetes 1.19+" >> release-notes.md
+        echo "- cert-manager (required)" >> release-notes.md
+        echo "- Cluster API v1.4.0+" >> release-notes.md
+        echo "" >> release-notes.md
+        echo "## 🔒 Security" >> release-notes.md
+        echo "" >> release-notes.md
+        echo "This release includes security scanning and vulnerability assessment. See the attached vulnerability report for details." >> release-notes.md
+        echo "" >> release-notes.md
+        echo "## 🐳 Container Images" >> release-notes.md
+        echo "" >> release-notes.md
+        echo "\`\`\`" >> release-notes.md
+        echo "ghcr.io/wrkode/beskar7/beskar7:$VERSION" >> release-notes.md
+        echo "\`\`\`" >> release-notes.md
+        echo "" >> release-notes.md
+        echo "Available for:" >> release-notes.md
+        echo "- linux/amd64" >> release-notes.md
+        echo "- linux/arm64" >> release-notes.md
+        echo "" >> release-notes.md
+        echo "## 🔐 Verification" >> release-notes.md
+        echo "" >> release-notes.md
+        echo "All release artifacts are signed and include SBOMs for supply chain security." >> release-notes.md
         
     - name: Create Release
       uses: softprops/action-gh-release@v2
