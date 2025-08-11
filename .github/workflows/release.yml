@@ -213,15 +213,38 @@ jobs:
         VERSION=${{ github.ref_name }}
         echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
         
+        # Start with the header
+        echo "# Beskar7 $VERSION" > release-notes.md
+        echo "" >> release-notes.md
+        
         # Extract release notes from CHANGELOG.md if available
         if [ -f CHANGELOG.md ]; then
+          echo "Extracting release notes from CHANGELOG.md for $VERSION"
           # Extract release notes for this version from CHANGELOG
           sed -n "/## \[$VERSION\]/,/## \[/p" CHANGELOG.md | sed '$d' > changelog-section.md
           if [ -s changelog-section.md ]; then
-            cat > release-notes.md << EOF
-# Beskar7 $VERSION
+            echo "Found changelog entry for $VERSION"
+            # Add the changelog content (skip the version header line)
+            tail -n +2 changelog-section.md >> release-notes.md
+          else
+            echo "No changelog entry found for $VERSION, using generic content"
+            cat >> release-notes.md << 'EOF'
+## 🚀 What's New
 
-$(cat changelog-section.md | tail -n +2)
+This release includes improvements and bug fixes for the Beskar7 Kubernetes operator.
+EOF
+          fi
+        else
+          echo "CHANGELOG.md not found, using generic content"
+          cat >> release-notes.md << 'EOF'
+## 🚀 What's New
+
+This release includes improvements and bug fixes for the Beskar7 Kubernetes operator.
+EOF
+        fi
+        
+        # Add common installation and info sections
+        cat >> release-notes.md << EOF
 
 ## 📦 Installation
 
@@ -260,108 +283,6 @@ Available for:
 
 All release artifacts are signed and include SBOMs for supply chain security.
 EOF
-          else
-            echo "No changelog entry found for $VERSION, using generic template"
-            # Generate generic release notes
-            cat > release-notes.md << EOF
-        # Beskar7 $VERSION
-        
-        ## 🚀 What's New
-        
-        This release includes improvements and bug fixes for the Beskar7 Kubernetes operator.
-        
-        ## 📦 Installation
-        
-        ### Using Kubectl
-        \`\`\`bash
-        kubectl apply -f https://github.com/wrkode/beskar7/releases/download/$VERSION/beskar7-manifests-$VERSION.yaml
-        \`\`\`
-        
-        ### Using Helm
-        \`\`\`bash
-        helm repo add beskar7 https://wrkode.github.io/beskar7
-        helm install beskar7 beskar7/beskar7 --version ${VERSION#v}
-        \`\`\`
-        
-        ## 📋 Prerequisites
-        
-        - Kubernetes 1.19+
-        - cert-manager (required)
-        - Cluster API v1.4.0+
-        
-        ## 🔒 Security
-        
-        This release includes security scanning and vulnerability assessment. See the attached vulnerability report for details.
-        
-        ## 📄 Documentation
-        
-        - [Getting Started](https://github.com/wrkode/beskar7/blob/main/docs/README.md)
-        - [Hardware Compatibility](https://github.com/wrkode/beskar7/blob/main/docs/hardware-compatibility.md)
-        - [API Reference](https://github.com/wrkode/beskar7/blob/main/docs/api-reference.md)
-        
-        ## 🐳 Container Images
-        
-        \`\`\`
-        ghcr.io/wrkode/beskar7/beskar7:$VERSION
-        \`\`\`
-        
-        Available for:
-        - linux/amd64
-        - linux/arm64
-        
-        ## 🔐 Verification
-        
-        All release artifacts are signed and include SBOMs for supply chain security.
-EOF
-          fi
-        else
-          echo "CHANGELOG.md not found, using generic template"
-          # Generate generic release notes  
-          cat > release-notes.md << EOF
-# Beskar7 $VERSION
-
-## 🚀 What's New
-
-This release includes improvements and bug fixes for the Beskar7 Kubernetes operator.
-
-## 📦 Installation
-
-### Using Kubectl
-\`\`\`bash
-kubectl apply -f https://github.com/wrkode/beskar7/releases/download/$VERSION/beskar7-manifests-$VERSION.yaml
-\`\`\`
-
-### Using Helm
-\`\`\`bash
-helm repo add beskar7 https://wrkode.github.io/beskar7
-helm install beskar7 beskar7/beskar7 --version ${VERSION#v}
-\`\`\`
-
-## 📋 Prerequisites
-
-- Kubernetes 1.19+
-- cert-manager (required)  
-- Cluster API v1.4.0+
-
-## 🔒 Security
-
-This release includes security scanning and vulnerability assessment. See the attached vulnerability report for details.
-
-## 🐳 Container Images
-
-\`\`\`
-ghcr.io/wrkode/beskar7/beskar7:$VERSION
-\`\`\`
-
-Available for:
-- linux/amd64
-- linux/arm64
-
-## 🔐 Verification
-
-All release artifacts are signed and include SBOMs for supply chain security.
-EOF
-        fi
         
     - name: Create Release
       uses: softprops/action-gh-release@v2
