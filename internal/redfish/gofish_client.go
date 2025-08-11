@@ -192,20 +192,20 @@ func (c *gofishClient) findFirstVirtualMedia(ctx context.Context) (*redfish.Virt
 	if c.gofishClient == nil {
 		return nil, fmt.Errorf("redfish client is not connected")
 	}
-	log := logf.FromContext(ctx)
+	logger := logf.FromContext(ctx)
 
 	// Helper function to search virtual media within a specific manager
 	searchManagerVM := func(mgr *redfish.Manager) (*redfish.VirtualMedia, error) {
 		virtualMedia, err := mgr.VirtualMedia()
 		if err != nil {
-			log.Error(err, "Failed to retrieve virtual media collection", "manager", mgr.ID)
+			logger.Error(err, "Failed to retrieve virtual media collection", "manager", mgr.ID)
 			// Don't return error, just skip this manager
 			return nil, nil
 		}
 		for _, vm := range virtualMedia {
 			for _, mediaType := range vm.MediaTypes {
 				if mediaType == redfish.CDMediaType || mediaType == redfish.DVDMediaType {
-					log.Info("Found suitable virtual media device via manager", "vmID", vm.ID, "managerID", mgr.ID)
+					logger.Info("Found suitable virtual media device via manager", "vmID", vm.ID, "managerID", mgr.ID)
 					return vm, nil
 				}
 			}
@@ -214,22 +214,22 @@ func (c *gofishClient) findFirstVirtualMedia(ctx context.Context) (*redfish.Virt
 	}
 
 	// Attempt 1: Via System.ManagedBy
-	log.V(1).Info("Attempting to find manager via System.ManagedBy")
+	logger.V(1).Info("Attempting to find manager via System.ManagedBy")
 	system, err := c.getSystemService(ctx)
 	if err != nil {
-		log.Error(err, "Failed to get system when searching for virtual media manager")
+		logger.Error(err, "Failed to get system when searching for virtual media manager")
 		// Fallback to searching all managers if getting system fails
 	} else {
 		mgrLinks, err := system.ManagedBy()
 		if err != nil {
-			log.Error(err, "Failed to get ManagedBy links from system", "systemID", system.ID)
+			logger.Error(err, "Failed to get ManagedBy links from system", "systemID", system.ID)
 		} else if len(mgrLinks) == 0 {
-			log.Info("System reported no ManagedBy links", "systemID", system.ID)
+			logger.Info("System reported no ManagedBy links", "systemID", system.ID)
 		} else {
 			for _, link := range mgrLinks {
 				mgr, err := redfish.GetManager(c.gofishClient, link.ODataID)
 				if err != nil {
-					log.Error(err, "Failed to get manager from ManagedBy link", "link", link.ODataID)
+					logger.Error(err, "Failed to get manager from ManagedBy link", "link", link.ODataID)
 					continue
 				}
 				vm, _ := searchManagerVM(mgr) // Error already logged in helper
@@ -241,14 +241,14 @@ func (c *gofishClient) findFirstVirtualMedia(ctx context.Context) (*redfish.Virt
 	}
 
 	// Attempt 2: Via ServiceRoot.Managers
-	log.Info("Falling back to searching all managers from service root for virtual media")
+	logger.Info("Falling back to searching all managers from service root for virtual media")
 	managers, err := c.gofishClient.Service.Managers()
 	if err != nil {
-		log.Error(err, "Failed to retrieve managers from service root")
+		logger.Error(err, "Failed to retrieve managers from service root")
 		return nil, fmt.Errorf("failed to get managers from service root: %w", err)
 	}
 	if len(managers) == 0 {
-		log.Error(nil, "No managers found at service root")
+		logger.Error(nil, "No managers found at service root")
 		return nil, fmt.Errorf("no managers found at service root")
 	}
 
@@ -259,7 +259,7 @@ func (c *gofishClient) findFirstVirtualMedia(ctx context.Context) (*redfish.Virt
 		}
 	}
 
-	log.Error(nil, "No suitable virtual media device (CD/DVD) found after checking all managers.")
+	logger.Error(nil, "No suitable virtual media device (CD/DVD) found after checking all managers.")
 	return nil, fmt.Errorf("no suitable virtual media (CD/DVD) found")
 }
 

@@ -1449,8 +1449,7 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 		It("should fail for RemoteConfig mode with missing ConfigURL", func() {
 			Skip("TODO: Fix ConfigURL validation logic - test expects error but controller doesn't reach validation step")
 			// Setup mock Redfish client for this test
-			var configErrorMockClient *MockRedfishClient
-			configErrorMockClient = &MockRedfishClient{
+			configErrorMockClient := &MockRedfishClient{
 				GetSystemInfoFunc: func(ctx context.Context) (*internalredfish.SystemInfo, error) {
 					return &internalredfish.SystemInfo{
 						Manufacturer: "Test",
