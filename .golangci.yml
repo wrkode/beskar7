@@ -16,7 +16,7 @@ linters-settings:
       mnd:
         checks: argument,case,condition,return
   govet:
-    check-shadowing: true
+    # check-shadowing: true  # Deprecated, use shadow linter instead
   lll:
     line-length: 200
   misspell:
@@ -38,7 +38,7 @@ linters:
     - dogsled
     # - dupl  # Can be overly strict
     - errcheck
-    - exportloopref
+    # - exportloopref  # Deprecated in v1.64.8, replaced by copyloopvar
     # - funlen  # Will use relaxed settings
     # - gochecknoinits  # init functions are sometimes necessary
     - goconst
@@ -57,6 +57,7 @@ linters:
     - nakedret
     # - nolintlint  # Can be overly strict about nolint formatting
     - rowserrcheck
+    - shadow  # Replaces deprecated govet.check-shadowing
     - staticcheck
     - stylecheck
     - typecheck
@@ -72,16 +73,19 @@ run:
   tests: true
   build-tags:
     - integration
-  skip-dirs:
+
+
+issues:
+  # Moved from run section (deprecated options)
+  exclude-dirs:
     - vendor
     - bin
-  skip-dirs-use-default: true
-  skip-files:
+  exclude-dirs-use-default: true
+  exclude-files:
     - ".*\\.pb\\.go$"
     - ".*_generated\\.go$"
     - "zz_generated\\..*\\.go$"
-
-issues:
+  
   exclude-rules:
     - path: _test\.go
       linters:
@@ -113,7 +117,7 @@ issues:
     # Allow variable shadowing in certain contexts (common pattern)
     - text: "shadow: declaration of \"err\" shadows declaration"
       linters:
-        - govet
+        - shadow
 
   exclude:
     - Error return value of .((os\.)?std(out|err)\..*|.*Close|.*Flush|os\.Remove(All)?|.*print.*|os\.(Un)?Setenv). is not checked
@@ -128,5 +132,7 @@ issues:
     - "unnecessary leading newline"  # Minor formatting
     - "directive .* should be written without leading space"  # nolint formatting
 
-  max-issues-per-linter: 0
-  max-same-issues: 0
+  max-issues-per-linter: 0  # No limit
+  max-same-issues: 0        # No limit
+  new: false                # Check all issues, not just new ones
+  fix: false                # Don't try to auto-fix
