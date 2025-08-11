@@ -16,7 +16,7 @@ linters-settings:
       mnd:
         checks: argument,case,condition,return
   govet:
-    # check-shadowing: true  # Deprecated, use shadow linter instead
+    check-shadowing: true  # Keep for v1.64.8 compatibility
   lll:
     line-length: 200
   misspell:
@@ -57,7 +57,6 @@ linters:
     - nakedret
     # - nolintlint  # Can be overly strict about nolint formatting
     - rowserrcheck
-    - shadow  # Replaces deprecated govet.check-shadowing
     - staticcheck
     - stylecheck
     - typecheck
@@ -117,7 +116,7 @@ issues:
     # Allow variable shadowing in certain contexts (common pattern)
     - text: "shadow: declaration of \"err\" shadows declaration"
       linters:
-        - shadow
+        - govet
 
   exclude:
     - Error return value of .((os\.)?std(out|err)\..*|.*Close|.*Flush|os\.Remove(All)?|.*print.*|os\.(Un)?Setenv). is not checked
