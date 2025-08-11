@@ -150,11 +150,12 @@ jobs:
       uses: docker/build-push-action@v5
       with:
         context: .
-        platforms: linux/amd64,linux/arm64
+        platforms: linux/amd64  # Single platform for CI scanning
         push: false
         tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:test
         cache-from: type=gha
         cache-to: type=gha,mode=max
+        load: true  # Load the image to local Docker daemon for scanning
         
     - name: Run container security scan
       uses: aquasecurity/trivy-action@master
@@ -244,7 +245,7 @@ jobs:
         
     - name: Wait for controller deployment
       run: |
-        kubectl wait --for=condition=Available --timeout=300s deployment/beskar7-controller-manager -n beskar7-system
+        kubectl wait --for=condition=Available --timeout=300s deployment/controller-manager -n beskar7-system
         
     - name: Test basic functionality
       run: |
