@@ -9,7 +9,7 @@ namespace: beskar7-system
 # Labels to add to all resources and selectors.
 commonLabels:
   app.kubernetes.io/name: beskar7
-  app.kubernetes.io/version: ${VERSION}
+  app.kubernetes.io/version: v0.2.6
 
 bases:
 - ../crd
@@ -41,4 +41,16 @@ patchesStrategicMerge:
 images:
 - name: controller
   newName: ghcr.io/wrkode/beskar7/beskar7
-  newTag: ${VERSION}
+  newTag: v0.2.6
+
+# Replace VERSION placeholder with actual version
+replacements:
+- source:
+    kind: Namespace
+    name: beskar7-system
+    fieldPath: metadata.labels.[app.kubernetes.io/version]
+  targets:
+  - select:
+      kind: "*"
+    fieldPaths:
+    - metadata.labels.[app.kubernetes.io/version]

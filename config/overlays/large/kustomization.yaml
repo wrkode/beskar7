@@ -18,10 +18,10 @@ labels:
 - includeSelectors: true
   pairs:
     app.kubernetes.io/name: beskar7
-    app.kubernetes.io/version: ${VERSION}
+    app.kubernetes.io/version: v0.2.6
     deployment-size: large
 
 images:
 - name: controller
   newName: ghcr.io/wrkode/beskar7/beskar7
-  newTag: ${VERSION}
+  newTag: v0.2.6

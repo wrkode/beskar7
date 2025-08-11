@@ -3,7 +3,7 @@ kind: Namespace
 metadata:
   labels:
     app.kubernetes.io/name: beskar7
-    app.kubernetes.io/version: ${VERSION}
+    app.kubernetes.io/version: v0.2.6
     control-plane: controller-manager
   name: beskar7-system
 ---
@@ -15,7 +15,7 @@ metadata:
     controller-gen.kubebuilder.io/version: v0.18.0
   labels:
     app.kubernetes.io/name: beskar7
-    app.kubernetes.io/version: ${VERSION}
+    app.kubernetes.io/version: v0.2.6
     cluster.x-k8s.io/contract: v1beta1
     cluster.x-k8s.io/provider: beskar7
   name: beskar7clusters.infrastructure.cluster.x-k8s.io
@@ -146,7 +146,7 @@ metadata:
     controller-gen.kubebuilder.io/version: v0.18.0
   labels:
     app.kubernetes.io/name: beskar7
-    app.kubernetes.io/version: ${VERSION}
+    app.kubernetes.io/version: v0.2.6
     cluster.x-k8s.io/contract: v1beta1
     cluster.x-k8s.io/provider: beskar7
   name: beskar7machines.infrastructure.cluster.x-k8s.io
@@ -290,7 +290,7 @@ metadata:
     controller-gen.kubebuilder.io/version: v0.18.0
   labels:
     app.kubernetes.io/name: beskar7
-    app.kubernetes.io/version: ${VERSION}
+    app.kubernetes.io/version: v0.2.6
     cluster.x-k8s.io/contract: v1beta1
     cluster.x-k8s.io/provider: beskar7
   name: beskar7machinetemplates.infrastructure.cluster.x-k8s.io
@@ -365,7 +365,7 @@ metadata:
     controller-gen.kubebuilder.io/version: v0.18.0
   labels:
     app.kubernetes.io/name: beskar7
-    app.kubernetes.io/version: ${VERSION}
+    app.kubernetes.io/version: v0.2.6
     cluster.x-k8s.io/contract: v1beta1
     cluster.x-k8s.io/provider: beskar7
   name: physicalhosts.infrastructure.cluster.x-k8s.io
@@ -543,7 +543,7 @@ kind: ServiceAccount
 metadata:
   labels:
     app.kubernetes.io/name: beskar7
-    app.kubernetes.io/version: ${VERSION}
+    app.kubernetes.io/version: v0.2.6
   name: controller-manager
   namespace: beskar7-system
 ---
@@ -552,7 +552,7 @@ kind: Role
 metadata:
   labels:
     app.kubernetes.io/name: beskar7
-    app.kubernetes.io/version: ${VERSION}
+    app.kubernetes.io/version: v0.2.6
   name: manager-role
   namespace: beskar7-system
 rules:
@@ -587,7 +587,7 @@ kind: ClusterRole
 metadata:
   labels:
     app.kubernetes.io/name: beskar7
-    app.kubernetes.io/version: ${VERSION}
+    app.kubernetes.io/version: v0.2.6
   name: manager-role
 rules:
 - apiGroups:
@@ -712,7 +712,7 @@ kind: ClusterRoleBinding
 metadata:
   labels:
     app.kubernetes.io/name: beskar7
-    app.kubernetes.io/version: ${VERSION}
+    app.kubernetes.io/version: v0.2.6
   name: manager-rolebinding
 roleRef:
   apiGroup: rbac.authorization.k8s.io
@@ -821,7 +821,7 @@ metadata:
   labels:
     app.kubernetes.io/component: security
     app.kubernetes.io/name: beskar7
-    app.kubernetes.io/version: ${VERSION}
+    app.kubernetes.io/version: v0.2.6
   name: beskar7-security-policy
   namespace: beskar7-system
 ---
@@ -830,7 +830,7 @@ kind: Service
 metadata:
   labels:
     app.kubernetes.io/name: beskar7
-    app.kubernetes.io/version: ${VERSION}
+    app.kubernetes.io/version: v0.2.6
     cluster.x-k8s.io/provider: beskar7
   name: beskar7-webhook-service
   namespace: beskar7-system
@@ -841,7 +841,7 @@ spec:
     targetPort: 9443
   selector:
     app.kubernetes.io/name: beskar7
-    app.kubernetes.io/version: ${VERSION}
+    app.kubernetes.io/version: v0.2.6
     control-plane: controller-manager
 ---
 apiVersion: apps/v1
@@ -849,7 +849,7 @@ kind: Deployment
 metadata:
   labels:
     app.kubernetes.io/name: beskar7
-    app.kubernetes.io/version: ${VERSION}
+    app.kubernetes.io/version: v0.2.6
     control-plane: controller-manager
   name: controller-manager
   namespace: beskar7-system
@@ -858,7 +858,7 @@ spec:
   selector:
     matchLabels:
       app.kubernetes.io/name: beskar7
-      app.kubernetes.io/version: ${VERSION}
+      app.kubernetes.io/version: v0.2.6
       control-plane: controller-manager
   template:
     metadata:
@@ -866,7 +866,7 @@ spec:
         kubectl.kubernetes.io/default-container: manager
       labels:
         app.kubernetes.io/name: beskar7
-        app.kubernetes.io/version: ${VERSION}
+        app.kubernetes.io/version: v0.2.6
         control-plane: controller-manager
     spec:
       automountServiceAccountToken: true
@@ -1005,7 +1005,7 @@ kind: Certificate
 metadata:
   labels:
     app.kubernetes.io/name: beskar7
-    app.kubernetes.io/version: ${VERSION}
+    app.kubernetes.io/version: v0.2.6
   name: beskar7-serving-cert
   namespace: beskar7-system
 spec:
@@ -1027,7 +1027,7 @@ kind: ClusterIssuer
 metadata:
   labels:
     app.kubernetes.io/name: beskar7
-    app.kubernetes.io/version: ${VERSION}
+    app.kubernetes.io/version: v0.2.6
   name: beskar7-selfsigned-issuer
   namespace: beskar7-system
 spec:
@@ -1039,7 +1039,7 @@ metadata:
   labels:
     app.kubernetes.io/component: security
     app.kubernetes.io/name: beskar7
-    app.kubernetes.io/version: ${VERSION}
+    app.kubernetes.io/version: v0.2.6
   name: beskar7-allow-monitoring
   namespace: beskar7-system
 spec:
@@ -1058,13 +1058,13 @@ spec:
         matchLabels:
           app.kubernetes.io/component: security
           app.kubernetes.io/name: beskar7
-          app.kubernetes.io/version: ${VERSION}
+          app.kubernetes.io/version: v0.2.6
     - podSelector:
         matchLabels:
           app: prometheus
           app.kubernetes.io/component: security
           app.kubernetes.io/name: beskar7
-          app.kubernetes.io/version: ${VERSION}
+          app.kubernetes.io/version: v0.2.6
     ports:
     - port: 8080
       protocol: TCP
@@ -1072,7 +1072,7 @@ spec:
     matchLabels:
       app.kubernetes.io/component: security
       app.kubernetes.io/name: beskar7
-      app.kubernetes.io/version: ${VERSION}
+      app.kubernetes.io/version: v0.2.6
       control-plane: controller-manager
   policyTypes:
   - Ingress
@@ -1083,7 +1083,7 @@ metadata:
   labels:
     app.kubernetes.io/component: security
     app.kubernetes.io/name: beskar7
-    app.kubernetes.io/version: ${VERSION}
+    app.kubernetes.io/version: v0.2.6
   name: beskar7-allow-namespace-communication
   namespace: beskar7-system
 spec:
@@ -1108,7 +1108,7 @@ metadata:
   labels:
     app.kubernetes.io/component: security
     app.kubernetes.io/name: beskar7
-    app.kubernetes.io/version: ${VERSION}
+    app.kubernetes.io/version: v0.2.6
   name: beskar7-deny-all-default
   namespace: beskar7-system
 spec:
@@ -1123,7 +1123,7 @@ metadata:
   labels:
     app.kubernetes.io/component: security
     app.kubernetes.io/name: beskar7
-    app.kubernetes.io/version: ${VERSION}
+    app.kubernetes.io/version: v0.2.6
   name: beskar7-manager-network-policy
   namespace: beskar7-system
 spec:
@@ -1143,7 +1143,7 @@ spec:
         matchLabels:
           app.kubernetes.io/component: security
           app.kubernetes.io/name: beskar7
-          app.kubernetes.io/version: ${VERSION}
+          app.kubernetes.io/version: v0.2.6
           component: kube-apiserver
   - ports:
     - port: 443
@@ -1175,7 +1175,7 @@ spec:
         matchLabels:
           app.kubernetes.io/component: security
           app.kubernetes.io/name: beskar7
-          app.kubernetes.io/version: ${VERSION}
+          app.kubernetes.io/version: v0.2.6
           component: kube-apiserver
     ports:
     - port: 9443
@@ -1195,7 +1195,7 @@ spec:
     matchLabels:
       app.kubernetes.io/component: security
       app.kubernetes.io/name: beskar7
-      app.kubernetes.io/version: ${VERSION}
+      app.kubernetes.io/version: v0.2.6
       control-plane: controller-manager
   policyTypes:
   - Ingress
@@ -1207,7 +1207,7 @@ metadata:
   labels:
     app.kubernetes.io/component: security
     app.kubernetes.io/name: beskar7
-    app.kubernetes.io/version: ${VERSION}
+    app.kubernetes.io/version: v0.2.6
   name: beskar7-security-monitoring
   namespace: beskar7-system
 spec:
@@ -1227,7 +1227,7 @@ spec:
         matchLabels:
           app.kubernetes.io/component: security
           app.kubernetes.io/name: beskar7
-          app.kubernetes.io/version: ${VERSION}
+          app.kubernetes.io/version: v0.2.6
           component: kube-apiserver
   - ports:
     - port: 443
@@ -1251,13 +1251,13 @@ spec:
         matchLabels:
           app.kubernetes.io/component: security
           app.kubernetes.io/name: beskar7
-          app.kubernetes.io/version: ${VERSION}
+          app.kubernetes.io/version: v0.2.6
           component: kube-apiserver
   podSelector:
     matchLabels:
       app.kubernetes.io/component: security
       app.kubernetes.io/name: beskar7
-      app.kubernetes.io/version: ${VERSION}
+      app.kubernetes.io/version: v0.2.6
   policyTypes:
   - Ingress
   - Egress
@@ -1269,7 +1269,7 @@ metadata:
     cert-manager.io/inject-ca-from: beskar7-system/beskar7-serving-cert
   labels:
     app.kubernetes.io/name: beskar7
-    app.kubernetes.io/version: ${VERSION}
+    app.kubernetes.io/version: v0.2.6
   name: beskar7-mutating-webhook-configuration
 webhooks:
 - admissionReviewVersions:
@@ -1363,7 +1363,7 @@ metadata:
     cert-manager.io/inject-ca-from: beskar7-system/beskar7-serving-cert
   labels:
     app.kubernetes.io/name: beskar7
-    app.kubernetes.io/version: ${VERSION}
+    app.kubernetes.io/version: v0.2.6
   name: beskar7-validating-webhook-configuration
 webhooks:
 - admissionReviewVersions:

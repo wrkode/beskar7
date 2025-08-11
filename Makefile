@@ -86,7 +86,16 @@ undeploy:
 # Generate a single manifest file for a release
 release-manifests:
 	$(MAKE) manifests # Ensure CRDs and RBAC are up-to-date
+	# Update kustomization.yaml files with current VERSION before building
+	sed -i.bak 's/app\.kubernetes\.io\/version: v[0-9]\+\.[0-9]\+\.[0-9]\+/app.kubernetes.io\/version: $(VERSION)/g' config/default/kustomization.yaml
+	sed -i.bak 's/newTag: v[0-9]\+\.[0-9]\+\.[0-9]\+/newTag: $(VERSION)/g' config/default/kustomization.yaml
+	# Update overlay files too
+	find config/overlays -name "kustomization.yaml" -exec sed -i.bak 's/app\.kubernetes\.io\/version: v[0-9]\+\.[0-9]\+\.[0-9]\+/app.kubernetes.io\/version: $(VERSION)/g' {} \;
+	find config/overlays -name "kustomization.yaml" -exec sed -i.bak 's/newTag: v[0-9]\+\.[0-9]\+\.[0-9]\+/newTag: $(VERSION)/g' {} \;
 	$(KUSTOMIZE) build config/default > beskar7-manifests-$(VERSION).yaml
+	# Restore original kustomization.yaml files
+	mv config/default/kustomization.yaml.bak config/default/kustomization.yaml
+	find config/overlays -name "kustomization.yaml.bak" -exec sh -c 'mv "$$1" "$${1%.bak}"' _ {} \;
 	@echo "Release manifests generated: beskar7-manifests-$(VERSION).yaml"
 
 .PHONY: build generate manifests test docker-build docker-push deploy install-controller-gen install uninstall undeploy rbac crd release-manifests 
