@@ -121,10 +121,33 @@ jobs:
         go mod download
         make install-controller-gen
         
+    - name: Install kustomize
+      run: |
+        curl -s "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash
+        sudo mv kustomize /usr/local/bin/
+        
     - name: Generate release manifests
       run: |
         export VERSION=${{ github.ref_name }}
+        echo "Generating manifests for version: $VERSION"
         make release-manifests
+        
+    - name: Verify manifest generation
+      run: |
+        VERSION=${{ github.ref_name }}
+        if [ ! -f "beskar7-manifests-$VERSION.yaml" ]; then
+          echo "❌ Manifest file not generated: beskar7-manifests-$VERSION.yaml"
+          exit 1
+        fi
+        echo "✅ Manifest file generated successfully: beskar7-manifests-$VERSION.yaml"
+        echo "File size: $(stat -c%s "beskar7-manifests-$VERSION.yaml") bytes"
+        echo "Checking for version placeholders..."
+        if grep -q '${VERSION}' "beskar7-manifests-$VERSION.yaml"; then
+          echo "❌ Found unresolved version placeholders in manifest:"
+          grep '${VERSION}' "beskar7-manifests-$VERSION.yaml"
+          exit 1
+        fi
+        echo "✅ No version placeholders found"
         
     - name: Generate checksums
       run: |
@@ -190,8 +213,57 @@ jobs:
         VERSION=${{ github.ref_name }}
         echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
         
-        # Generate release notes
-        cat > release-notes.md << EOF
+        # Extract release notes from CHANGELOG.md if available
+        if [ -f CHANGELOG.md ]; then
+          # Extract release notes for this version from CHANGELOG
+          sed -n "/## \[$VERSION\]/,/## \[/p" CHANGELOG.md | sed '$d' > changelog-section.md
+          if [ -s changelog-section.md ]; then
+            cat > release-notes.md << EOF
+# Beskar7 $VERSION
+
+$(cat changelog-section.md | tail -n +2)
+
+## 📦 Installation
+
+### Using Kubectl
+\`\`\`bash
+kubectl apply -f https://github.com/wrkode/beskar7/releases/download/$VERSION/beskar7-manifests-$VERSION.yaml
+\`\`\`
+
+### Using Helm
+\`\`\`bash
+helm repo add beskar7 https://wrkode.github.io/beskar7
+helm install beskar7 beskar7/beskar7 --version ${VERSION#v}
+\`\`\`
+
+## 📋 Prerequisites
+
+- Kubernetes 1.19+
+- cert-manager (required)
+- Cluster API v1.4.0+
+
+## 🔒 Security
+
+This release includes security scanning and vulnerability assessment. See the attached vulnerability report for details.
+
+## 🐳 Container Images
+
+\`\`\`
+ghcr.io/wrkode/beskar7/beskar7:$VERSION
+\`\`\`
+
+Available for:
+- linux/amd64
+- linux/arm64
+
+## 🔐 Verification
+
+All release artifacts are signed and include SBOMs for supply chain security.
+EOF
+          else
+            echo "No changelog entry found for $VERSION, using generic template"
+            # Generate generic release notes
+            cat > release-notes.md << EOF
         # Beskar7 $VERSION
         
         ## 🚀 What's New
@@ -240,7 +312,56 @@ jobs:
         ## 🔐 Verification
         
         All release artifacts are signed and include SBOMs for supply chain security.
-        EOF
+EOF
+          fi
+        else
+          echo "CHANGELOG.md not found, using generic template"
+          # Generate generic release notes  
+          cat > release-notes.md << EOF
+# Beskar7 $VERSION
+
+## 🚀 What's New
+
+This release includes improvements and bug fixes for the Beskar7 Kubernetes operator.
+
+## 📦 Installation
+
+### Using Kubectl
+\`\`\`bash
+kubectl apply -f https://github.com/wrkode/beskar7/releases/download/$VERSION/beskar7-manifests-$VERSION.yaml
+\`\`\`
+
+### Using Helm
+\`\`\`bash
+helm repo add beskar7 https://wrkode.github.io/beskar7
+helm install beskar7 beskar7/beskar7 --version ${VERSION#v}
+\`\`\`
+
+## 📋 Prerequisites
+
+- Kubernetes 1.19+
+- cert-manager (required)  
+- Cluster API v1.4.0+
+
+## 🔒 Security
+
+This release includes security scanning and vulnerability assessment. See the attached vulnerability report for details.
+
+## 🐳 Container Images
+
+\`\`\`
+ghcr.io/wrkode/beskar7/beskar7:$VERSION
+\`\`\`
+
+Available for:
+- linux/amd64
+- linux/arm64
+
+## 🔐 Verification
+
+All release artifacts are signed and include SBOMs for supply chain security.
+EOF
+        fi
         
     - name: Create Release
       uses: softprops/action-gh-release@v2
