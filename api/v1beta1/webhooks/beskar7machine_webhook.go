@@ -21,6 +21,14 @@ const (
 	provisioningModePreBakedISO  = "PreBakedISO"
 )
 
+// URL scheme constants
+const (
+	SchemeHTTP  = "http"
+	SchemeHTTPS = "https"
+	SchemeFTP   = "ftp"
+	SchemeFile  = "file"
+)
+
 // Beskar7MachineWebhook implements a validating and defaulting webhook for Beskar7Machine.
 type Beskar7MachineWebhook struct{}
 
@@ -158,21 +166,21 @@ func (webhook *Beskar7MachineWebhook) validateImageURL(imageURL string) field.Er
 
 	// Validate scheme
 	validSchemes := map[string]bool{
-		"http":  true,
-		"https": true,
-		"ftp":   true,
-		"file":  true,
+		SchemeHTTP:  true,
+		SchemeHTTPS: true,
+		SchemeFTP:   true,
+		SchemeFile:  true,
 	}
 	if !validSchemes[parsedURL.Scheme] {
 		allErrs = append(allErrs, field.NotSupported(
 			fieldPath,
 			parsedURL.Scheme,
-			[]string{"http", "https", "ftp", "file"},
+			[]string{SchemeHTTP, SchemeHTTPS, SchemeFTP, SchemeFile},
 		))
 	}
 
 	// Validate host for network schemes
-	if (parsedURL.Scheme == "http" || parsedURL.Scheme == "https" || parsedURL.Scheme == "ftp") && parsedURL.Host == "" {
+	if (parsedURL.Scheme == SchemeHTTP || parsedURL.Scheme == SchemeHTTPS || parsedURL.Scheme == SchemeFTP) && parsedURL.Host == "" {
 		allErrs = append(allErrs, field.Invalid(
 			fieldPath,
 			imageURL,
@@ -209,20 +217,20 @@ func (webhook *Beskar7MachineWebhook) validateConfigURL(configURL string) field.
 
 	// Validate scheme
 	validSchemes := map[string]bool{
-		"http":  true,
-		"https": true,
-		"file":  true,
+		SchemeHTTP:  true,
+		SchemeHTTPS: true,
+		SchemeFile:  true,
 	}
 	if !validSchemes[parsedURL.Scheme] {
 		allErrs = append(allErrs, field.NotSupported(
 			fieldPath,
 			parsedURL.Scheme,
-			[]string{"http", "https", "file"},
+			[]string{SchemeHTTP, SchemeHTTPS, SchemeFile},
 		))
 	}
 
 	// Validate host for network schemes
-	if (parsedURL.Scheme == "http" || parsedURL.Scheme == "https") && parsedURL.Host == "" {
+	if (parsedURL.Scheme == SchemeHTTP || parsedURL.Scheme == SchemeHTTPS) && parsedURL.Host == "" {
 		allErrs = append(allErrs, field.Invalid(
 			fieldPath,
 			configURL,

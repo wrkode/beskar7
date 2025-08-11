@@ -16,6 +16,14 @@ import (
 	infrastructurev1beta1 "github.com/wrkode/beskar7/api/v1beta1"
 )
 
+// Security severity constants
+const (
+	SeverityCritical = "CRITICAL"
+	SeverityHigh     = "HIGH"
+	SeverityMedium   = "MEDIUM"
+	SeverityLow      = "LOW"
+)
+
 // SecurityMonitor monitors security configurations and reports issues
 type SecurityMonitor struct {
 	client.Client
@@ -114,9 +122,7 @@ func (m *SecurityMonitor) StartMonitoring(ctx context.Context) error {
 	defer ticker.Stop()
 
 	// Run initial scan
-	if err := m.runSecurityScan(ctx); err != nil {
-		logger.Error(err, "Failed to run initial security scan")
-	}
+	m.runSecurityScan(ctx)
 
 	for {
 		select {
@@ -124,15 +130,13 @@ func (m *SecurityMonitor) StartMonitoring(ctx context.Context) error {
 			logger.Info("Security monitoring stopped")
 			return ctx.Err()
 		case <-ticker.C:
-			if err := m.runSecurityScan(ctx); err != nil {
-				logger.Error(err, "Failed to run security scan")
-			}
+			m.runSecurityScan(ctx)
 		}
 	}
 }
 
 // runSecurityScan performs a comprehensive security scan
-func (m *SecurityMonitor) runSecurityScan(ctx context.Context) error {
+func (m *SecurityMonitor) runSecurityScan(ctx context.Context) {
 	logger := log.FromContext(ctx).WithName("security-scan")
 	logger.Info("Running security scan")
 
@@ -176,7 +180,7 @@ func (m *SecurityMonitor) runSecurityScan(ctx context.Context) error {
 		"medium", report.MediumIssues,
 		"low", report.LowIssues)
 
-	return nil
+	// Scan completed
 }
 
 // scanPhysicalHostsTLS scans PhysicalHosts for TLS security issues
@@ -216,9 +220,9 @@ func (m *SecurityMonitor) scanPhysicalHostsTLS(ctx context.Context, report *Secu
 				}
 
 				for _, error := range result.Errors {
-					severity := "HIGH"
+					severity := SeverityHigh
 					if result.IsSelfSigned {
-						severity = "MEDIUM"
+						severity = SeverityMedium
 					}
 					report.TLSFindings = append(report.TLSFindings, TLSSecurityFinding{
 						Severity:    severity,
@@ -312,7 +316,7 @@ func (m *SecurityMonitor) scanSecrets(ctx context.Context, report *SecurityRepor
 		// Check for very old secrets (>1 year)
 		if age > 365*24*time.Hour {
 			report.SecretFindings = append(report.SecretFindings, SecretSecurityFinding{
-				Severity:    "HIGH",
+				Severity:    SeverityHigh,
 				Type:        "VeryOldCredentials",
 				Resource:    fmt.Sprintf("Secret/%s", secret.Name),
 				Description: "Credential secret is older than 1 year",
@@ -325,7 +329,7 @@ func (m *SecurityMonitor) scanSecrets(ctx context.Context, report *SecurityRepor
 		// Check for missing required fields
 		if _, hasUsername := secret.Data["username"]; !hasUsername {
 			report.SecretFindings = append(report.SecretFindings, SecretSecurityFinding{
-				Severity:    "HIGH",
+				Severity:    SeverityHigh,
 				Type:        "MissingUsername",
 				Resource:    fmt.Sprintf("Secret/%s", secret.Name),
 				Description: "Credential secret missing username field",
@@ -336,7 +340,7 @@ func (m *SecurityMonitor) scanSecrets(ctx context.Context, report *SecurityRepor
 
 		if _, hasPassword := secret.Data["password"]; !hasPassword {
 			report.SecretFindings = append(report.SecretFindings, SecretSecurityFinding{
-				Severity:    "HIGH",
+				Severity:    SeverityHigh,
 				Type:        "MissingPassword",
 				Resource:    fmt.Sprintf("Secret/%s", secret.Name),
 				Description: "Credential secret missing password field",
@@ -366,7 +370,7 @@ func (m *SecurityMonitor) generateRecommendations(report *SecurityReport) {
 
 	if hasInsecureSkipVerify {
 		report.Recommendations = append(report.Recommendations, SecurityRecommendation{
-			Priority:    "HIGH",
+			Priority:    SeverityHigh,
 			Title:       "Disable insecureSkipVerify",
 			Description: "Multiple PhysicalHosts have TLS certificate verification disabled",
 			Action:      "Configure proper TLS certificates or implement a custom CA bundle",
@@ -377,7 +381,7 @@ func (m *SecurityMonitor) generateRecommendations(report *SecurityReport) {
 
 	if hasTLSErrors {
 		report.Recommendations = append(report.Recommendations, SecurityRecommendation{
-			Priority:    "HIGH",
+			Priority:    SeverityHigh,
 			Title:       "Fix TLS Certificate Issues",
 			Description: "TLS certificate validation errors found",
 			Action:      "Review and fix certificate configuration for BMC endpoints",
@@ -397,7 +401,7 @@ func (m *SecurityMonitor) generateRecommendations(report *SecurityReport) {
 
 	if hasOverlyBroad {
 		report.Recommendations = append(report.Recommendations, SecurityRecommendation{
-			Priority:    "CRITICAL",
+			Priority:    SeverityCritical,
 			Title:       "Reduce RBAC Permissions",
 			Description: "Overly broad RBAC permissions detected",
 			Action:      "Apply principle of least privilege to RBAC configurations",
@@ -430,10 +434,10 @@ func (m *SecurityMonitor) generateRecommendations(report *SecurityReport) {
 // calculateTotals calculates the total number of issues by severity
 func (m *SecurityMonitor) calculateTotals(report *SecurityReport) {
 	severityCounts := map[string]int{
-		"CRITICAL": 0,
-		"HIGH":     0,
-		"MEDIUM":   0,
-		"LOW":      0,
+		SeverityCritical: 0,
+		SeverityHigh:     0,
+		SeverityMedium:   0,
+		SeverityLow:      0,
 	}
 
 	// Count TLS findings
@@ -456,10 +460,10 @@ func (m *SecurityMonitor) calculateTotals(report *SecurityReport) {
 		severityCounts[finding.Severity]++
 	}
 
-	report.CriticalIssues = severityCounts["CRITICAL"]
-	report.HighIssues = severityCounts["HIGH"]
-	report.MediumIssues = severityCounts["MEDIUM"]
-	report.LowIssues = severityCounts["LOW"]
+	report.CriticalIssues = severityCounts[SeverityCritical]
+	report.HighIssues = severityCounts[SeverityHigh]
+	report.MediumIssues = severityCounts[SeverityMedium]
+	report.LowIssues = severityCounts[SeverityLow]
 	report.TotalIssues = report.CriticalIssues + report.HighIssues + report.MediumIssues + report.LowIssues
 }
 
@@ -469,19 +473,19 @@ func (m *SecurityMonitor) reportFindings(ctx context.Context, report *SecurityRe
 
 	// Create events for critical and high severity issues
 	for _, finding := range report.TLSFindings {
-		if finding.Severity == "CRITICAL" || finding.Severity == "HIGH" {
+		if finding.Severity == SeverityCritical || finding.Severity == SeverityHigh {
 			m.createSecurityEvent(ctx, "TLSSecurityIssue", finding.Severity, finding.Resource, finding.Description)
 		}
 	}
 
 	for _, finding := range report.RBACFindings {
-		if finding.Severity == "CRITICAL" || finding.Severity == "HIGH" {
+		if finding.Severity == SeverityCritical || finding.Severity == SeverityHigh {
 			m.createSecurityEvent(ctx, "RBACSecurityIssue", finding.Severity, finding.Resource, finding.Description)
 		}
 	}
 
 	for _, finding := range report.SecretFindings {
-		if finding.Severity == "CRITICAL" || finding.Severity == "HIGH" {
+		if finding.Severity == SeverityCritical || finding.Severity == SeverityHigh {
 			m.createSecurityEvent(ctx, "SecretSecurityIssue", finding.Severity, finding.Resource, finding.Description)
 		}
 	}

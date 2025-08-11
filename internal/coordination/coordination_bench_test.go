@@ -175,7 +175,7 @@ func BenchmarkContextOperations(b *testing.B) {
 		// Simulate some work with context
 		select {
 		case <-ctx.Done():
-			// Context cancelled
+			// Context canceled
 		default:
 			// Normal operation
 		}

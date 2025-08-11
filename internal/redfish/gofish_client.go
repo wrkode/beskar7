@@ -12,6 +12,9 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 )
 
+// Common EFI boot loader path
+const DefaultEFIBootLoaderPath = "\\EFI\\BOOT\\BOOTX64.EFI"
+
 // goFishClient implements the Client interface using the gofish library.
 type gofishClient struct {
 	gofishClient *gofish.APIClient
@@ -187,7 +190,7 @@ func (c *gofishClient) SetPowerState(ctx context.Context, state redfish.PowerSta
 // to searching all managers from the service root.
 func (c *gofishClient) findFirstVirtualMedia(ctx context.Context) (*redfish.VirtualMedia, error) {
 	if c.gofishClient == nil {
-		return nil, fmt.Errorf("Redfish client is not connected")
+		return nil, fmt.Errorf("redfish client is not connected")
 	}
 	log := logf.FromContext(ctx)
 
@@ -396,7 +399,7 @@ func (c *gofishClient) setBootParametersUEFI(ctx context.Context, params []strin
 		}
 	} else {
 		// Default EFI bootloader path. This is a guess and might need to be configurable.
-		efiBootloaderPath := "\\EFI\\BOOT\\BOOTX64.EFI"
+		efiBootloaderPath := DefaultEFIBootLoaderPath
 		fullBootString := efiBootloaderPath + " " + strings.Join(params, " ")
 		uefiBootSettings = redfish.Boot{
 			BootSourceOverrideTarget:     redfish.UefiTargetBootSourceOverrideTarget,

@@ -74,7 +74,7 @@ func (v *TLSValidator) ValidateTLSEndpoint(ctx context.Context, endpoint string)
 	// Configure TLS
 	tlsConfig := &tls.Config{
 		ServerName:         host,
-		InsecureSkipVerify: true, // We handle verification manually
+		InsecureSkipVerify: true, // We handle verification manually  // nolint:gosec // G402: This is intentional for manual certificate validation
 		RootCAs:            v.CustomCAs,
 	}
 

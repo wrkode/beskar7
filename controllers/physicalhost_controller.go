@@ -695,9 +695,8 @@ func (r *PhysicalHostReconciler) reconcileDelete(ctx context.Context, physicalHo
 				conditions.MarkFalse(physicalHost, infrastructurev1beta1.HostProvisionedCondition, infrastructurev1beta1.EjectMediaFailedReason, clusterv1.ConditionSeverityWarning, "Failed to eject virtual media: %v", err)
 				// Log error but continue cleanup
 				internalmetrics.RecordVirtualMediaOperation(physicalHost.Namespace, internalmetrics.ProvisioningOutcomeFailed, internalmetrics.ErrorTypeVirtualMedia)
-			} else {
-				// Optionally, mark a positive condition or clear the EjectMediaFailedReason if it was previously set.
 			}
+			// Successfully ejected virtual media or no media was present
 
 			// Power Off the host
 			logger.Info("Attempting to power off host during delete")

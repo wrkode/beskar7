@@ -52,6 +52,9 @@ const (
 	// ProviderIDPrefix is the prefix used for ProviderID
 	ProviderIDPrefix = "b7://"
 
+	// API version constant
+	InfrastructureAPIVersion = "infrastructure.cluster.x-k8s.io/v1beta1"
+
 	// Provisioning modes
 	provisioningModeRemoteConfig = "RemoteConfig"
 	provisioningModePreBakedISO  = "PreBakedISO"
@@ -101,16 +104,6 @@ func (r *Beskar7MachineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 			internalmetrics.RecordError("beskar7machine", req.Namespace, errorType)
 		}
 	}()
-
-	// Shared constants for provisioning modes and OS families
-	const (
-		provisioningModeRemoteConfig = "RemoteConfig"
-		provisioningModePreBakedISO  = "PreBakedISO"
-		osFamilyKairos               = "kairos"
-		osFamilyTalos                = "talos"
-		osFamilyFlatcar              = "flatcar"
-		osFamilyLeapMicro            = "LeapMicro"
-	)
 
 	// Fetch the Beskar7Machine instance.
 	b7machine := &infrastructurev1beta1.Beskar7Machine{}
@@ -433,14 +426,6 @@ func (r *Beskar7MachineReconciler) findAndClaimHostWithCoordination(ctx context.
 func (r *Beskar7MachineReconciler) configureHostBootParameters(ctx context.Context, logger logr.Logger, host *infrastructurev1beta1.PhysicalHost, b7machine *infrastructurev1beta1.Beskar7Machine) error {
 	// Determine provisioning mode and configure boot on the BMC
 	provisioningMode := b7machine.Spec.ProvisioningMode
-	const (
-		provisioningModeRemoteConfig = "RemoteConfig"
-		provisioningModePreBakedISO  = "PreBakedISO"
-		osFamilyKairos               = "kairos"
-		osFamilyTalos                = "talos"
-		osFamilyFlatcar              = "flatcar"
-		osFamilyLeapMicro            = "LeapMicro"
-	)
 
 	if provisioningMode == "" {
 		if b7machine.Spec.ConfigURL != "" {
@@ -748,7 +733,7 @@ func (r *Beskar7MachineReconciler) PhysicalHostToBeskar7Machine(ctx context.Cont
 	if physicalHost.Spec.ConsumerRef != nil {
 		// The ConsumerRef should point to a Beskar7Machine
 		if physicalHost.Spec.ConsumerRef.Kind == "Beskar7Machine" &&
-			physicalHost.Spec.ConsumerRef.APIVersion == "infrastructure.cluster.x-k8s.io/v1beta1" {
+			physicalHost.Spec.ConsumerRef.APIVersion == InfrastructureAPIVersion {
 			requests = append(requests, reconcile.Request{
 				NamespacedName: types.NamespacedName{
 					Namespace: physicalHost.Spec.ConsumerRef.Namespace,

@@ -17,6 +17,9 @@ import (
 	internalmetrics "github.com/wrkode/beskar7/internal/metrics"
 )
 
+// Default system namespace
+const DefaultSystemNamespace = "beskar7-system"
+
 // LeaderElectionClaimCoordinator provides leader election-based coordination for host claims
 type LeaderElectionClaimCoordinator struct {
 	client.Client
@@ -81,7 +84,7 @@ func NewLeaderElectionClaimCoordinator(client client.Client, kubernetesClient ku
 		config.ProcessingInterval = 1 * time.Second
 	}
 	if config.Namespace == "" {
-		config.Namespace = "beskar7-system"
+		config.Namespace = DefaultSystemNamespace
 	}
 
 	return &LeaderElectionClaimCoordinator{

@@ -39,6 +39,9 @@ import (
 const (
 	// Beskar7MachineTemplateFinalizer allows Beskar7MachineTemplateReconciler to clean up resources associated with Beskar7MachineTemplate before removing it from the apiserver.
 	Beskar7MachineTemplateFinalizer = "beskar7machinetemplate.infrastructure.cluster.x-k8s.io"
+
+	// Resource kind constant
+	Beskar7MachineTemplateKind = "Beskar7MachineTemplate"
 )
 
 // Beskar7MachineTemplateReconciler reconciles a Beskar7MachineTemplate object
@@ -197,7 +200,7 @@ func (r *Beskar7MachineTemplateReconciler) checkForReferencingMachines(ctx conte
 	for _, machine := range machineList.Items {
 		// Check owner references
 		for _, ownerRef := range machine.OwnerReferences {
-			if ownerRef.Kind == "Beskar7MachineTemplate" && ownerRef.Name == template.Name {
+			if ownerRef.Kind == Beskar7MachineTemplateKind && ownerRef.Name == template.Name {
 				referencingMachines = append(referencingMachines, machine.Name)
 				break
 			}
@@ -242,7 +245,7 @@ func (r *Beskar7MachineTemplateReconciler) Beskar7MachineToTemplate(ctx context.
 
 	// Check if this machine has owner references to any Beskar7MachineTemplate
 	for _, ownerRef := range machine.OwnerReferences {
-		if ownerRef.Kind == "Beskar7MachineTemplate" &&
+		if ownerRef.Kind == Beskar7MachineTemplateKind &&
 			ownerRef.APIVersion == "infrastructure.cluster.x-k8s.io/v1beta1" {
 			requests = append(requests, reconcile.Request{
 				NamespacedName: types.NamespacedName{

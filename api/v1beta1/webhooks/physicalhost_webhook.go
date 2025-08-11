@@ -351,7 +351,7 @@ func (webhook *PhysicalHostWebhook) validateTLSSecurity(host *infrav1beta1.Physi
 	}
 
 	// Warn about HTTP usage
-	if parsedURL.Scheme == "http" {
+	if parsedURL.Scheme == SchemeHTTP {
 		if !webhook.isDevEnvironment(host) {
 			allErrs = append(allErrs, field.Forbidden(
 				field.NewPath("spec", "redfishConnection", "address"),
@@ -494,11 +494,11 @@ func (webhook *PhysicalHostWebhook) validateRedfishAddress(address string) field
 				"address must be a valid URL with scheme (https:// or http://)",
 			))
 		}
-	} else if parsedURL.Scheme != "https" && parsedURL.Scheme != "http" {
+	} else if parsedURL.Scheme != SchemeHTTPS && parsedURL.Scheme != SchemeHTTP {
 		allErrs = append(allErrs, field.NotSupported(
 			fieldPath,
 			parsedURL.Scheme,
-			[]string{"https", "http"},
+			[]string{SchemeHTTPS, SchemeHTTP},
 		))
 	}
 

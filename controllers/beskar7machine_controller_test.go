@@ -144,31 +144,6 @@ func NewMockRedfishClientFactory(mockClient *MockRedfishClient) internalredfish.
 	}
 }
 
-// Helper function to create PhysicalHost with complete status that satisfies CRD validation
-func createPhysicalHostWithCompleteStatus(name, namespace string, spec infrastructurev1beta1.PhysicalHostSpec) *infrastructurev1beta1.PhysicalHost {
-	return &infrastructurev1beta1.PhysicalHost{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
-			Namespace: namespace,
-		},
-		Spec: spec,
-		Status: infrastructurev1beta1.PhysicalHostStatus{
-			Ready: true,
-			State: infrastructurev1beta1.StateAvailable,
-			HardwareDetails: infrastructurev1beta1.HardwareDetails{
-				Manufacturer: "Test Manufacturer",
-				Model:        "Test Model",
-				SerialNumber: "TEST123",
-				Status: infrastructurev1beta1.HardwareStatus{
-					Health:       "OK",
-					HealthRollup: "OK",
-					State:        "Enabled",
-				},
-			},
-		},
-	}
-}
-
 var _ = Describe("Beskar7Machine Reconciler", func() {
 	var (
 		ctx         context.Context

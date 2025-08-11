@@ -1,3 +1,5 @@
+version: 2
+
 linters-settings:
   gci:
     local-prefixes: github.com/wrkode/beskar7
@@ -22,7 +24,7 @@ linters-settings:
     min-complexity: 15
   goimports:
     local-prefixes: github.com/wrkode/beskar7
-  gomnd:
+  mnd:
     settings:
       mnd:
         # don't include the "operation" and "assign"
@@ -59,18 +61,15 @@ linters:
     - dogsled
     - dupl
     - errcheck
-    - exportloopref
+    - copyloopvar
     - funlen
     - gochecknoinits
     - goconst
     - gocritic
     - gocyclo
-    - gofmt
-    - goimports
-    - gomnd
+    - mnd
     - goprintffuncname
     - gosec
-    - gosimple
     - govet
     - ineffassign
     - lll
@@ -79,8 +78,6 @@ linters:
     - nolintlint
     - rowserrcheck
     - staticcheck
-    - stylecheck
-    - typecheck
     - unconvert
     - unparam
     - unused
@@ -104,7 +101,7 @@ issues:
   exclude-rules:
     - path: _test\.go
       linters:
-        - gomnd
+        - mnd
         - funlen
         - goconst
         - gocyclo

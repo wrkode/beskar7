@@ -41,8 +41,8 @@ var _ = Describe("PhysicalHost Webhook", func() {
 			Expect(err).NotTo(HaveOccurred())
 			// Without a client, we expect a secret validation warning and a TLS verification warning
 			Expect(warnings).To(HaveLen(2))
-			Expect(string(warnings[0]) + string(warnings[1])).To(ContainSubstring("Credential secret 'bmc-credentials' cannot be validated"))
-			Expect(string(warnings[0]) + string(warnings[1])).To(ContainSubstring("TLS certificate verification is enabled"))
+			Expect(warnings[0] + warnings[1]).To(ContainSubstring("Credential secret 'bmc-credentials' cannot be validated"))
+			Expect(warnings[0] + warnings[1]).To(ContainSubstring("TLS certificate verification is enabled"))
 		})
 
 		It("should reject PhysicalHost with missing address", func() {
@@ -120,8 +120,8 @@ var _ = Describe("PhysicalHost Webhook", func() {
 			Expect(err).NotTo(HaveOccurred())
 			// In dev-like address (example.com), insecureSkipVerify yields a warning; plus secret validation warning
 			Expect(warnings).To(HaveLen(2))
-			Expect(string(warnings[0]) + string(warnings[1])).To(ContainSubstring("insecureSkipVerify is enabled"))
-			Expect(string(warnings[0]) + string(warnings[1])).To(ContainSubstring("Credential secret 'bmc-credentials' cannot be validated"))
+			Expect(warnings[0] + warnings[1]).To(ContainSubstring("insecureSkipVerify is enabled"))
+			Expect(warnings[0] + warnings[1]).To(ContainSubstring("Credential secret 'bmc-credentials' cannot be validated"))
 		})
 
 		It("should warn about ConsumerRef on create", func() {
@@ -146,7 +146,7 @@ var _ = Describe("PhysicalHost Webhook", func() {
 			Expect(err).NotTo(HaveOccurred())
 			// Expect ConsumerRef creation warning, TLS verification warning, and secret validation warning
 			Expect(warnings).To(HaveLen(3))
-			combined := string(warnings[0]) + string(warnings[1]) + string(warnings[2])
+			combined := warnings[0] + warnings[1] + warnings[2]
 			Expect(combined).To(ContainSubstring("ConsumerRef is set on creation"))
 			Expect(combined).To(ContainSubstring("TLS certificate verification is enabled"))
 			Expect(combined).To(ContainSubstring("Credential secret 'bmc-credentials' cannot be validated"))
@@ -247,7 +247,7 @@ var _ = Describe("PhysicalHost Webhook", func() {
 			warnings, err := webhook.ValidateDelete(ctx, host)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(warnings).To(HaveLen(1))
-			Expect(string(warnings[0])).To(ContainSubstring("currently claimed by"))
+			Expect(warnings[0]).To(ContainSubstring("currently claimed by"))
 		})
 
 		It("should warn about deleting provisioning host", func() {
@@ -270,7 +270,7 @@ var _ = Describe("PhysicalHost Webhook", func() {
 			warnings, err := webhook.ValidateDelete(ctx, host)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(warnings).To(HaveLen(1))
-			Expect(string(warnings[0])).To(ContainSubstring("currently provisioning"))
+			Expect(warnings[0]).To(ContainSubstring("currently provisioning"))
 		})
 	})
 

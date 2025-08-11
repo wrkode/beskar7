@@ -253,7 +253,7 @@ func (vbm *VendorSpecificBootManager) setBootParametersUEFI(ctx context.Context,
 			UefiTargetBootSourceOverride: "",
 		}
 	} else {
-		efiBootloaderPath := "\\EFI\\BOOT\\BOOTX64.EFI"
+		efiBootloaderPath := DefaultEFIBootLoaderPath
 		fullBootString := efiBootloaderPath + " " + strings.Join(params, " ")
 		uefiBootSettings = redfish.Boot{
 			BootSourceOverrideTarget:     redfish.UefiTargetBootSourceOverrideTarget,

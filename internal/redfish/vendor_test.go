@@ -157,6 +157,7 @@ func TestVendorSpecificBootManager_Creation(t *testing.T) {
 
 	if bootMgr == nil {
 		t.Error("NewVendorSpecificBootManager() returned nil")
+		return
 	}
 
 	if bootMgr.client != client {

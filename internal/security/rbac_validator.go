@@ -105,7 +105,7 @@ func (v *RBACValidator) validateRule(result *RBACValidationResult, ruleName stri
 			Resources: rule.Resources,
 			Verbs:     rule.Verbs,
 			Reason:    "Grants wildcard permissions (*) for all API groups, resources, and verbs",
-			Severity:  "CRITICAL",
+			Severity:  SeverityCritical,
 			Suggestions: []string{
 				"Replace wildcard permissions with specific API groups, resources, and verbs",
 				"Follow the principle of least privilege",
@@ -118,7 +118,7 @@ func (v *RBACValidator) validateRule(result *RBACValidationResult, ruleName stri
 	if v.containsVerb(rule.Verbs, "*") {
 		result.SecurityFindings = append(result.SecurityFindings, SecurityFinding{
 			Type:        "OverlyBroadVerbs",
-			Severity:    "HIGH",
+			Severity:    SeverityHigh,
 			Description: "Rule grants wildcard verb permissions",
 			Resource:    strings.Join(rule.Resources, ","),
 			Rule:        ruleName,
@@ -131,7 +131,7 @@ func (v *RBACValidator) validateRule(result *RBACValidationResult, ruleName stri
 		if v.containsVerb(rule.Verbs, "create") && v.containsVerb(rule.Verbs, "delete") && v.containsVerb(rule.Verbs, "patch") {
 			result.SecurityFindings = append(result.SecurityFindings, SecurityFinding{
 				Type:        "SecretsFullAccess",
-				Severity:    "HIGH",
+				Severity:    SeverityHigh,
 				Description: "Rule grants full access to secrets (create, delete, patch)",
 				Resource:    "secrets",
 				Rule:        ruleName,
@@ -144,7 +144,7 @@ func (v *RBACValidator) validateRule(result *RBACValidationResult, ruleName stri
 	if v.isClusterAdminEquivalent(rule) {
 		result.SecurityFindings = append(result.SecurityFindings, SecurityFinding{
 			Type:        "ClusterAdminEquivalent",
-			Severity:    "CRITICAL",
+			Severity:    SeverityCritical,
 			Description: "Rule grants cluster-admin equivalent permissions",
 			Resource:    strings.Join(rule.Resources, ","),
 			Rule:        ruleName,
@@ -153,11 +153,13 @@ func (v *RBACValidator) validateRule(result *RBACValidationResult, ruleName stri
 	}
 
 	// Check for impersonation permissions
-	if v.containsResource(rule.Resources, "users") || v.containsResource(rule.Resources, "groups") || v.containsResource(rule.Resources, "serviceaccounts") {
+	if v.containsResource(rule.Resources, "users") ||
+		v.containsResource(rule.Resources, "groups") ||
+		v.containsResource(rule.Resources, "serviceaccounts") {
 		if v.containsVerb(rule.Verbs, "impersonate") {
 			result.SecurityFindings = append(result.SecurityFindings, SecurityFinding{
 				Type:        "ImpersonationRisk",
-				Severity:    "HIGH",
+				Severity:    SeverityHigh,
 				Description: "Rule grants impersonation permissions",
 				Resource:    strings.Join(rule.Resources, ","),
 				Rule:        ruleName,
@@ -187,7 +189,7 @@ func (v *RBACValidator) checkOverlyBroadPermissions(result *RBACValidationResult
 				rbacResourcesWithWildcard = true
 				result.SecurityFindings = append(result.SecurityFindings, SecurityFinding{
 					Type:        "RBACWildcardAccess",
-					Severity:    "HIGH",
+					Severity:    SeverityHigh,
 					Description: "Rule grants wildcard access to RBAC resources",
 					Resource:    "rbac.authorization.k8s.io/*",
 					Rule:        ruleName,
@@ -200,7 +202,7 @@ func (v *RBACValidator) checkOverlyBroadPermissions(result *RBACValidationResult
 	if coreResourcesWithWildcard && rbacResourcesWithWildcard {
 		result.SecurityFindings = append(result.SecurityFindings, SecurityFinding{
 			Type:        "ExcessivePrivileges",
-			Severity:    "CRITICAL",
+			Severity:    SeverityCritical,
 			Description: "ClusterRole has both core resource and RBAC wildcard access",
 			Resource:    clusterRole.Name,
 			Rule:        "Multiple rules",
@@ -243,7 +245,8 @@ func (v *RBACValidator) checkDangerousPermissions(result *RBACValidationResult, 
 
 		// Check for dangerous resource combinations
 		if v.containsResource(rule.Resources, "persistentvolumes") && v.containsVerb(rule.Verbs, "create") {
-			result.Warnings = append(result.Warnings, fmt.Sprintf("%s can create PersistentVolumes, which may allow host filesystem access", ruleName))
+			result.Warnings = append(result.Warnings,
+				fmt.Sprintf("%s can create PersistentVolumes, which may allow host filesystem access", ruleName))
 		}
 	}
 
@@ -251,7 +254,7 @@ func (v *RBACValidator) checkDangerousPermissions(result *RBACValidationResult, 
 	if hasSecretAccess && hasNodeAccess {
 		result.SecurityFindings = append(result.SecurityFindings, SecurityFinding{
 			Type:        "SecretNodeAccess",
-			Severity:    "HIGH",
+			Severity:    SeverityHigh,
 			Description: "ClusterRole has both secret and node access",
 			Resource:    clusterRole.Name,
 			Rule:        "Multiple rules",
@@ -262,7 +265,7 @@ func (v *RBACValidator) checkDangerousPermissions(result *RBACValidationResult, 
 	if hasSecretAccess && hasPodExec {
 		result.SecurityFindings = append(result.SecurityFindings, SecurityFinding{
 			Type:        "SecretExecAccess",
-			Severity:    "HIGH",
+			Severity:    SeverityHigh,
 			Description: "ClusterRole has both secret access and pod exec capabilities",
 			Resource:    clusterRole.Name,
 			Rule:        "Multiple rules",

@@ -27,6 +27,18 @@ import (
 	"time"
 )
 
+// Redfish URL constants
+const (
+	RedfishAPIRoot    = "/redfish/v1/"
+	RedfishSystemPath = "/redfish/v1/Systems/1"
+	BiosEnabledState  = "Enabled"
+)
+
+// System information constants
+const (
+	DefaultSystemID = "1"
+)
+
 // VendorType represents different hardware vendors
 type VendorType string
 
@@ -267,17 +279,17 @@ func (mrs *MockRedfishServer) initializeBIOSAttributes() {
 	case VendorDell:
 		mrs.biosAttributes["KernelArgs"] = ""
 		mrs.biosAttributes["BootMode"] = "Uefi"
-		mrs.biosAttributes["SecureBoot"] = "Enabled"
+		mrs.biosAttributes["SecureBoot"] = BiosEnabledState
 	case VendorHPE:
 		mrs.biosAttributes["BootOrderPolicy"] = "AttemptOnce"
-		mrs.biosAttributes["UefiOptimizedBoot"] = "Enabled"
-		mrs.biosAttributes["SecureBootStatus"] = "Enabled"
+		mrs.biosAttributes["UefiOptimizedBoot"] = BiosEnabledState
+		mrs.biosAttributes["SecureBootStatus"] = BiosEnabledState
 	case VendorLenovo:
 		mrs.biosAttributes["SystemBootSequence"] = "UEFI First"
-		mrs.biosAttributes["SecureBootEnable"] = "Enabled"
+		mrs.biosAttributes["SecureBootEnable"] = BiosEnabledState
 	case VendorSupermicro:
 		mrs.biosAttributes["BootFeature"] = "UEFI"
-		mrs.biosAttributes["QuietBoot"] = "Enabled"
+		mrs.biosAttributes["QuietBoot"] = BiosEnabledState
 	}
 }
 
@@ -292,7 +304,7 @@ func (mrs *MockRedfishServer) handleRequest(w http.ResponseWriter, r *http.Reque
 	}
 
 	// Simulate network errors for non-root requests so client can still connect
-	if mrs.failures.NetworkErrors && r.URL.Path != "/redfish/v1/" {
+	if mrs.failures.NetworkErrors && r.URL.Path != RedfishAPIRoot {
 		http.Error(w, "Network Error", http.StatusInternalServerError)
 		return
 	}
@@ -310,13 +322,13 @@ func (mrs *MockRedfishServer) handleRequest(w http.ResponseWriter, r *http.Reque
 
 	// Route the request
 	switch {
-	case r.URL.Path == "/redfish/v1/" && r.Method == http.MethodGet:
+	case r.URL.Path == RedfishAPIRoot && r.Method == http.MethodGet:
 		mrs.handleServiceRoot(w, r)
 	case r.URL.Path == "/redfish/v1/Systems" && r.Method == http.MethodGet:
 		mrs.handleSystemsCollection(w, r)
 	case strings.HasPrefix(r.URL.Path, "/redfish/v1/Systems/") && r.Method == http.MethodGet:
 		mrs.handleSystemGet(w, r)
-	case r.URL.Path == "/redfish/v1/Systems/1" && (r.Method == http.MethodPatch || r.Method == http.MethodPost):
+	case r.URL.Path == RedfishSystemPath && (r.Method == http.MethodPatch || r.Method == http.MethodPost):
 		// Accept Boot Set requests
 		w.WriteHeader(http.StatusNoContent)
 	case strings.HasPrefix(r.URL.Path, "/redfish/v1/Systems/") && strings.HasSuffix(r.URL.Path, "/Actions/ComputerSystem.Reset") && r.Method == http.MethodPost:
@@ -369,7 +381,8 @@ func (mrs *MockRedfishServer) logRequest(r *http.Request) {
 	body := ""
 	if r.Body != nil {
 		// Note: In real implementation, you'd need to handle body reading properly
-		// This is simplified for the example
+		// This is simplified for the example - body content is not logged
+		body = "[body omitted]"
 	}
 
 	mrs.requestLog = append(mrs.requestLog, RequestLog{
@@ -525,7 +538,7 @@ func (mrs *MockRedfishServer) handleSystemGet(w http.ResponseWriter, r *http.Req
 		},
 		"PowerState": mrs.powerState,
 		"Status": map[string]string{
-			"State":  "Enabled",
+			"State":  BiosEnabledState,
 			"Health": mrs.systemInfo.Health,
 		},
 		"Boot": map[string]interface{}{
