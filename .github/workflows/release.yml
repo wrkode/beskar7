@@ -51,13 +51,12 @@ jobs:
       uses: docker/build-push-action@v5
       with:
         context: .
-        platforms: linux/amd64,linux/arm64
+        platforms: linux/amd64
         push: true
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ steps.meta.outputs.labels }}
-        cache-from: type=gha
-        cache-to: type=gha,mode=min,ignore-error=true
         provenance: false
+        sbom: false
         
     - name: Generate SBOM
       uses: anchore/sbom-action@v0
@@ -269,7 +268,8 @@ jobs:
         echo "" >> release-notes.md
         echo "Available for:" >> release-notes.md
         echo "- linux/amd64" >> release-notes.md
-        echo "- linux/arm64" >> release-notes.md
+        echo "" >> release-notes.md
+        echo "> **Note**: ARM64 support temporarily disabled for releases due to build timeout issues. Will be re-enabled in a future release." >> release-notes.md
         echo "" >> release-notes.md
         echo "## 🔐 Verification" >> release-notes.md
         echo "" >> release-notes.md
