@@ -69,6 +69,10 @@ jobs:
         
         cd gh-pages
         
+        # Configure git in the gh-pages directory
+        git config user.name "$GITHUB_ACTOR"
+        git config user.email "$GITHUB_ACTOR@users.noreply.github.com"
+        
         # Check if there are changes to commit
         if [[ -n $(git status --porcelain) ]]; then
           git add .
