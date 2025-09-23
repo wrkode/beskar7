@@ -1,0 +1,160 @@
+# Default values for beskar7.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+replicaCount: 1
+
+image:
+  repository: ghcr.io/wrkode/beskar7/beskar7
+  pullPolicy: IfNotPresent
+  # Overrides the image tag whose default is the chart appVersion.
+  tag: ""
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+# Controller manager configuration
+controllerManager:
+  replicas: 1
+  image:
+    repository: ghcr.io/wrkode/beskar7/beskar7
+    tag: v0.2.7
+    pullPolicy: IfNotPresent
+  resources:
+    limits:
+      cpu: 500m
+      memory: 128Mi
+    requests:
+      cpu: 10m
+      memory: 64Mi
+  # Additional environment variables for the controller
+  env: []
+  # - name: CONTROLLER_LOG_LEVEL
+  #   value: "info"
+
+# Kube RBAC Proxy configuration
+kubeRbacProxy:
+  image:
+    repository: gcr.io/kubebuilder/kube-rbac-proxy
+    tag: v0.15.0
+    pullPolicy: IfNotPresent
+  resources:
+    limits:
+      cpu: 500m
+      memory: 128Mi
+    requests:
+      cpu: 5m
+      memory: 64Mi
+
+serviceAccount:
+  # Specifies whether a service account should be created
+  create: true
+  # Annotations to add to the service account
+  annotations: {}
+  # The name of the service account to use.
+  # If not set and create is true, a name is generated using the fullname template
+  name: ""
+
+podAnnotations: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  # fsGroup: 2000
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+    - ALL
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  runAsUser: 65532
+
+service:
+  type: ClusterIP
+  port: 443
+  targetPort: 9443
+
+# Webhook configuration
+webhook:
+  enabled: true
+  failurePolicy: Fail
+  matchPolicy: Equivalent
+  admissionReviewVersions:
+    - v1
+  service:
+    name: beskar7-webhook-service
+    namespace: beskar7-system
+    port: 443
+    targetPort: 9443
+
+# Certificate manager configuration
+certManager:
+  enabled: true
+  issuer:
+    name: beskar7-selfsigned-issuer
+    kind: ClusterIssuer
+  certificate:
+    name: beskar7-serving-cert
+    secretName: beskar7-webhook-server-cert
+    duration: 8760h # 1 year
+    renewBefore: 720h # 30 days
+
+# Namespace configuration
+namespace:
+  create: true
+  name: beskar7-system
+
+# RBAC configuration
+rbac:
+  create: true
+
+# Network policies
+networkPolicy:
+  enabled: false
+
+# Monitoring configuration
+monitoring:
+  enabled: true
+  serviceMonitor:
+    enabled: false
+    namespace: ""
+    labels: {}
+
+# Node selector, tolerations and affinity
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
+
+# Resource limits and requests
+resources:
+  limits:
+    cpu: 500m
+    memory: 128Mi
+  requests:
+    cpu: 10m
+    memory: 64Mi
+
+# Liveness and readiness probes
+livenessProbe:
+  httpGet:
+    path: /healthz
+    port: 8081
+  initialDelaySeconds: 15
+  periodSeconds: 20
+
+readinessProbe:
+  httpGet:
+    path: /readyz
+    port: 8081
+  initialDelaySeconds: 5
+  periodSeconds: 10
+
+# Additional labels
+labels: {}
+
+# Additional annotations
+annotations: {}

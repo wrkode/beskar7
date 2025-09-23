@@ -1,0 +1,20 @@
+apiVersion: v2
+name: beskar7
+description: A Helm chart for Beskar7 - Cluster API Infrastructure Provider for Immutable Bare Metal
+type: application
+version: 0.2.7
+appVersion: "v0.2.7"
+keywords:
+  - cluster-api
+  - infrastructure
+  - bare-metal
+  - redfish
+  - kubernetes
+home: https://github.com/wrkode/beskar7
+sources:
+  - https://github.com/wrkode/beskar7
+maintainers:
+  - name: wrkode
+    url: https://github.com/wrkode
+annotations:
+  category: Infrastructure

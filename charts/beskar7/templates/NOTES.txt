@@ -1,0 +1,24 @@
+1. Beskar7 has been installed in namespace {{ include "beskar7.namespace" . }}
+
+2. Check the status of the controller manager deployment:
+   kubectl get deployment {{ include "beskar7.fullname" . }}-controller-manager -n {{ include "beskar7.namespace" . }}
+
+3. View the controller logs:
+   kubectl logs -n {{ include "beskar7.namespace" . }} deployment/{{ include "beskar7.fullname" . }}-controller-manager -c manager
+
+4. Check if CRDs are installed:
+   kubectl get crd | grep infrastructure.cluster.x-k8s.io
+
+5. Create your first PhysicalHost:
+   Check the documentation at: https://github.com/wrkode/beskar7/tree/main/docs
+
+{{- if .Values.webhook.enabled }}
+6. Webhook is enabled - ensure cert-manager is installed and running:
+   kubectl get pods -n cert-manager
+{{- end }}
+
+{{- if .Values.monitoring.enabled }}
+7. Monitoring is enabled - metrics are available at http://localhost:8080/metrics
+{{- end }}
+
+For more information, visit: https://github.com/wrkode/beskar7

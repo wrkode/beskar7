@@ -109,7 +109,25 @@ kubectl get pods -n cert-manager
 
 ### Using Helm
 
-**Note:** The Helm chart is currently under development. For now, use the manual deployment methods below.
+#### Add the Helm repository
+
+```bash
+helm repo add beskar7 https://wrkode.github.io/beskar7
+helm repo update
+```
+
+#### Install the chart
+
+```bash
+# Install with default values
+helm install beskar7 beskar7/beskar7 --namespace beskar7-system --create-namespace
+
+# Install with custom values
+helm install beskar7 beskar7/beskar7 -f values.yaml --namespace beskar7-system --create-namespace
+
+# Wait for deployment to be ready
+kubectl wait --for=condition=available --timeout=600s deployment/beskar7-controller-manager -n beskar7-system
+```
 
 ### Manual Deployment using Kustomize:
 
@@ -327,7 +345,9 @@ The test setup is designed to be portable and work across different systems. All
 
 ### Using Helm
 
-**Note:** Helm chart is under development. Use manual uninstallation below.
+```bash
+helm uninstall beskar7 --namespace beskar7-system
+```
 
 ### Manual Uninstallation
 
@@ -347,7 +367,9 @@ The test setup is designed to be portable and work across different systems. All
 
 ### Using Helm
 
-**Note:** Helm chart is under development. Use manual deployment methods for upgrading.
+```bash
+helm upgrade beskar7 beskar7/beskar7 --namespace beskar7-system
+```
 
 ## License
 
