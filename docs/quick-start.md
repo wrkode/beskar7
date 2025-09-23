@@ -4,7 +4,7 @@ This guide provides the steps to get the Beskar7 controller manager built, deplo
 
 ## Prerequisites
 
-*   [Go](https://golang.org/dl/) (version 1.21 or later recommended)
+*   [Go](https://golang.org/dl/) (version 1.24 or later required)
 *   [Docker](https://docs.docker.com/get-docker/) (for building the manager image)
 *   `docker buildx` configured for multi-arch builds (if needed, e.g., Mac M1/M2 building for amd64):
     ```bash
@@ -21,8 +21,8 @@ This guide provides the steps to get the Beskar7 controller manager built, deplo
 Beskar7 requires cert-manager to be installed in your cluster to manage webhook TLS certificates. Install cert-manager and its CRDs before deploying Beskar7:
 
 ```bash
-kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.12.0/cert-manager.crds.yaml
-kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.12.0/cert-manager.yaml
+kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.16.2/cert-manager.crds.yaml
+kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.16.2/cert-manager.yaml
 ```
 
 Wait for all cert-manager pods to be running:
@@ -52,7 +52,7 @@ kubectl get pods -n cert-manager
     # echo $CR_PAT | docker login ghcr.io -u YOUR_GITHUB_USERNAME --password-stdin
 
     # Build and push the image 
-    # (Uses values from Makefile: ghcr.io/wrkode/beskar7:v0.1.0-dev by default)
+    # (Uses values from Makefile: ghcr.io/wrkode/beskar7/beskar7:v0.2.7 by default)
     # This builds for linux/amd64 by default due to Makefile configuration.
     make docker-build docker-push 
     ```
@@ -77,7 +77,7 @@ kubectl get pods -n cert-manager
     make install
     ```
 3.  **Deploy the Controller Manager:**
-    This will deploy the controller using the image defined in the Makefile (`ghcr.io/wrkode/beskar7:v0.1.0-dev` by default).
+    This will deploy the controller using the image defined in the Makefile (`ghcr.io/wrkode/beskar7/beskar7:v0.2.7` by default).
     ```bash
     make deploy
     ```

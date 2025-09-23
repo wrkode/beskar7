@@ -15,9 +15,9 @@ Beskar7 defines resources in the `infrastructure.cluster.x-k8s.io` API group wit
 | Resource | Kind | Short Name | Purpose |
 |----------|------|------------|---------|
 | PhysicalHost | `PhysicalHost` | `ph` | Represents a physical server manageable via Redfish |
-| Beskar7Machine | `Beskar7Machine` | `b7m` | Infrastructure provider for CAPI Machine resources |
-| Beskar7Cluster | `Beskar7Cluster` | `b7c` | Infrastructure provider for CAPI Cluster resources |
-| Beskar7MachineTemplate | `Beskar7MachineTemplate` | `b7mt` | Template for creating Beskar7Machine resources |
+| Beskar7Machine | `Beskar7Machine` | - | Infrastructure provider for CAPI Machine resources |
+| Beskar7Cluster | `Beskar7Cluster` | - | Infrastructure provider for CAPI Cluster resources |
+| Beskar7MachineTemplate | `Beskar7MachineTemplate` | - | Template for creating Beskar7Machine resources |
 
 ## PhysicalHost
 

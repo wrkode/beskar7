@@ -30,7 +30,7 @@ Beskar7 now automatically detects your hardware vendor and handles boot paramete
      name: worker-node
    spec:
      provisioningMode: "RemoteConfig"  # Now works on Dell!
-     imageURL: "https://releases.kairos.io/kairos-v2.4.iso"
+     imageURL: "https://github.com/kairos-io/kairos/releases/download/v2.8.1/kairos-alpine-v2.8.1-amd64.iso"
      configURL: "https://your-config-server/config.yaml"
      osFamily: "kairos"
    ```
@@ -42,7 +42,7 @@ Beskar7 now automatically detects your hardware vendor and handles boot paramete
 
 ## What's New
 
-### ✅ **Dell Systems Now Work Automatically**
+### **Dell Systems Now Work Automatically**
 - **Before:** Manual BIOS configuration required
 - **Now:** Automatic detection and BIOS attribute handling
 
@@ -221,7 +221,7 @@ metadata:
   namespace: default
 spec:
   provisioningMode: "RemoteConfig"
-  imageURL: "https://releases.kairos.io/kairos-core-opensuse-v2.4.4.iso"
+  imageURL: "https://github.com/kairos-io/kairos/releases/download/v2.8.1/kairos-alpine-v2.8.1-amd64.iso"
   configURL: "https://your-config-server/worker-config.yaml"
   osFamily: "kairos"
 ```

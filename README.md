@@ -2,14 +2,14 @@
 
 Beskar7 is a Kubernetes operator that implements the Cluster API infrastructure provider contract for managing bare-metal machines using the Redfish API. It allows you to provision and manage the lifecycle of Kubernetes clusters on physical hardware directly through Kubernetes-native APIs.
 
-## 🚀 **NEW: Automatic Vendor-Specific Hardware Support**
+## **Automatic Vendor-Specific Hardware Support**
 
-Beskar7 now automatically detects and handles vendor-specific hardware quirks! **Dell, HPE, Lenovo, and Supermicro systems work out of the box** with zero configuration.
+Beskar7 now automatically detects and handles vendor-specific hardware quirks! **Dell, HPE, Lenovo, and Supermicro systems work out of the box** with zero configuration. (until bugs are found :D )
 
-- **✅ Dell PowerEdge:** Automatic BIOS attribute handling (no more manual iDRAC configuration!)
-- **✅ HPE ProLiant:** UEFI Target Boot Override (excellent compatibility)
-- **✅ Lenovo ThinkSystem:** UEFI with intelligent BIOS fallback
-- **✅ Supermicro:** UEFI and BIOS-attribute methods (fallback behavior depends on BMC)
+- **Dell PowerEdge:** Automatic BIOS attribute handling (testing advised following microcode upgrades)
+- **HPE ProLiant:** UEFI Target Boot Override
+- **Lenovo ThinkSystem:** UEFI with intelligent BIOS fallback
+- **Supermicro:** UEFI and BIOS-attribute methods (fallback behavior depends on BMC)
 
 **[Quick Start Guide →](docs/quick-start-vendor-support.md)** | **[Detailed Documentation →](docs/vendor-specific-support.md)**
 
@@ -19,7 +19,7 @@ Beskar7 now automatically detects and handles vendor-specific hardware quirks! *
 
 To prepare for real hardware testing, ensure you configure reconciliation timeouts via flags or env (see `docs/state-management.md`) and follow the testing instructions below.
 
-## 📚 Documentation
+## Documentation
 
 Comprehensive documentation is available in the [`docs/`](docs/) directory:
 
@@ -40,12 +40,12 @@ Beskar7 consists of several custom controllers that work together:
 
 ## Prerequisites
 
-*   [Go](https://golang.org/dl/) (version 1.21 or later recommended)
+*   [Go](https://golang.org/dl/) (version 1.24 or later required)
 *   [Docker](https://docs.docker.com/get-docker/) (for envtest)
 *   [controller-gen](https://book.kubebuilder.io/reference/controller-gen.html) (`make install-controller-gen`)
 *   [kustomize](https://kubectl.docs.kubernetes.io/installation/kustomize/) (v4 or later for `make deploy`)
 *   A running Kubernetes cluster (e.g., kind, minikube, or a remote cluster) with `kubectl` configured.
-*   Kubernetes 1.19+
+*   Kubernetes 1.31+
 *   Helm 3.2.0+
 *   Cluster API v1.4.0+
 *   **cert-manager (required, for webhook support and TLS certificates)**
@@ -55,8 +55,8 @@ Beskar7 consists of several custom controllers that work together:
 Beskar7 requires cert-manager to be installed in your cluster to manage webhook TLS certificates. Install cert-manager and its CRDs before deploying Beskar7:
 
 ```bash
-kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.12.0/cert-manager.crds.yaml
-kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.12.0/cert-manager.yaml
+kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.16.2/cert-manager.crds.yaml
+kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.16.2/cert-manager.yaml
 ```
 
 Wait for all cert-manager pods to be running:
@@ -109,25 +109,7 @@ kubectl get pods -n cert-manager
 
 ### Using Helm
 
-#### Add the Helm repository
-
-```bash
-helm repo add beskar7 https://wrkode.github.io/beskar7
-helm repo update
-```
-
-#### Install the chart
-
-```bash
-# Install with default values
-helm install beskar7 beskar7/beskar7
-
-# Install with custom values
-helm install beskar7 beskar7/beskar7 -f values.yaml
-
-# Install in a specific namespace
-helm install beskar7 beskar7/beskar7 --namespace beskar7-system --create-namespace
-```
+**Note:** The Helm chart is currently under development. For now, use the manual deployment methods below.
 
 ### Manual Deployment using Kustomize:
 
@@ -289,8 +271,8 @@ kubectl apply -f b7machine-kairos-remote.yaml
 
 Beskar7 supports any Redfish-compliant BMC. Tested vendors include:
 
-- **Dell Technologies** (iDRAC9) - Excellent support with minor RemoteConfig limitations
-- **HPE** (iLO 5) - Excellent Redfish compliance and feature support  
+- **Dell Technologies** (iDRAC9) - Support with minor RemoteConfig limitations
+- **HPE** (iLO 5) - Redfish compliance and feature support  
 - **Lenovo** (XCC) - Good overall compatibility with reliable boot parameter injection
 - **Supermicro** (BMC) - Variable support, newer X12+ series recommended
 
@@ -310,7 +292,7 @@ For information about contributing to Beskar7, see the `CONTRIBUTING.md` file an
 
 ## Project Status and Roadmap
 
-For detailed information about the project's current status and future plans, please see our [ROADMAP.md](ROADMAP.md) file.
+For detailed information about the project's current status and future plans, please see the **[GitHub Issues](https://github.com/wrkode/beskar7/issues)** and **[GitHub Projects](https://github.com/wrkode/beskar7/projects)** pages.
 
 ## Contributing
 
@@ -345,9 +327,7 @@ The test setup is designed to be portable and work across different systems. All
 
 ### Using Helm
 
-```bash
-helm uninstall beskar7
-```
+**Note:** Helm chart is under development. Use manual uninstallation below.
 
 ### Manual Uninstallation
 
@@ -367,9 +347,7 @@ helm uninstall beskar7
 
 ### Using Helm
 
-```bash
-helm upgrade beskar7 beskar7/beskar7
-```
+**Note:** Helm chart is under development. Use manual deployment methods for upgrading.
 
 ## License
 

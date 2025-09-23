@@ -48,12 +48,12 @@ kubectl get networkpolicy -n beskar7-system
 Beskar7 validates TLS certificates for all BMC connections to prevent man-in-the-middle attacks.
 
 #### Features:
-- ✅ Certificate chain validation
-- ✅ Hostname verification
-- ✅ Expiry date checking
-- ✅ Self-signed certificate detection
-- ✅ Key usage validation
-- ✅ Certificate authority verification
+- Certificate chain validation
+- Hostname verification
+- Expiry date checking
+- Self-signed certificate detection
+- Key usage validation
+- Certificate authority verification
 
 #### Configuration:
 
@@ -118,11 +118,11 @@ Beskar7 follows the principle of least privilege with minimal required permissio
 #### Security Validation:
 
 The RBAC validator checks for:
-- ❌ Wildcard permissions (`*,*,*`)
-- ❌ Overly broad verb permissions
-- ❌ Impersonation capabilities
-- ❌ Cluster-admin equivalent permissions
-- ✅ Principle of least privilege compliance
+- Wildcard permissions (`*,*,*`)
+- Overly broad verb permissions
+- Impersonation capabilities
+- Cluster-admin equivalent permissions
+- Principle of least privilege compliance
 
 ### 3. Credential Security
 
@@ -151,11 +151,11 @@ data:
 #### Security Validation:
 
 The system validates:
-- ✅ Required fields (username, password)
-- ✅ Password strength and complexity
-- ✅ Credential age and rotation needs
-- ✅ Secure storage in Kubernetes secrets
-- ❌ Plaintext credential storage
+- Required fields (username, password)
+- Password strength and complexity
+- Credential age and rotation needs
+- Secure storage in Kubernetes secrets
+- Plaintext credential storage
 
 ### 4. Security Monitoring
 
@@ -457,7 +457,7 @@ For security-related issues:
 
 ## Related Documentation
 
-- [Installation Guide](../installation.md)
-- [Configuration Reference](../configuration.md)
+- [Quick Start Guide](../quick-start.md)
+- [Deployment Best Practices](../deployment-best-practices.md)
 - [Troubleshooting Guide](../troubleshooting.md)
-- [API Reference](../api.md) 
+- [API Reference](../api-reference.md) 
