@@ -31,6 +31,25 @@ jobs:
       with:
         version: '3.12.1'
 
+    - name: Update Chart Version
+      run: |
+        # Extract version from git tag (remove 'v' prefix for Helm version)
+        VERSION=${{ github.ref_name }}
+        CHART_VERSION=${VERSION#v}
+        
+        # Update Chart.yaml with new version and appVersion
+        sed -i "s/^version:.*/version: $CHART_VERSION/" charts/beskar7/Chart.yaml
+        sed -i "s/^appVersion:.*/appVersion: \"$VERSION\"/" charts/beskar7/Chart.yaml
+        
+        # Update image tag in values.yaml
+        sed -i "s/tag: v[0-9]\+\.[0-9]\+\.[0-9]\+/tag: $VERSION/" charts/beskar7/values.yaml
+        
+        # Show what we updated
+        echo "Updated Chart.yaml:"
+        grep -E "^(version|appVersion):" charts/beskar7/Chart.yaml
+        echo "Updated values.yaml:"
+        grep "tag: v" charts/beskar7/values.yaml
+
     - name: Package Helm Chart
       run: |
         # Create charts directory for packaging
