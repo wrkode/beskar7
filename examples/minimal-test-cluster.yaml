@@ -1,0 +1,64 @@
+# Minimal Test Cluster Example
+# This is a simplified version for quick testing with a single node.
+# Perfect for development and testing Beskar7 functionality.
+#
+# Prerequisites:
+# 1. Beskar7 controller installed
+# 2. At least one bare-metal server with Redfish BMC
+#
+# Usage:
+#   kubectl apply -f minimal-test-cluster.yaml
+
+---
+# BMC credentials
+apiVersion: v1
+kind: Secret
+metadata:
+  name: test-bmc-credentials
+  namespace: default
+type: Opaque
+stringData:
+  username: "admin"
+  password: "password"  # Change this!
+
+---
+# Single PhysicalHost for testing
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+kind: PhysicalHost
+metadata:
+  name: test-host-01
+  namespace: default
+spec:
+  redfishConnection:
+    address: "https://172.16.56.43"  # Replace with your BMC IP
+    credentialsSecretRef: "test-bmc-credentials"
+    insecureSkipVerify: true
+
+---
+# Simple Beskar7Cluster
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+kind: Beskar7Cluster
+metadata:
+  name: test-cluster
+  namespace: default
+spec:
+  controlPlaneEndpoint:
+    host: "172.16.56.43"  # Replace with your server IP
+    port: 6443
+
+---
+# Beskar7Machine that will use the PhysicalHost
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+kind: Beskar7Machine
+metadata:
+  name: test-machine-01
+  namespace: default
+  labels:
+    cluster.x-k8s.io/cluster-name: "test-cluster"
+spec:
+  osFamily: "kairos"
+  imageURL: "https://github.com/kairos-io/kairos/releases/download/v2.8.1/kairos-alpine-v2.8.1-amd64.iso"
+  provisioningMode: "RemoteConfig"
+  configURL: "https://your-server.com/config/test-config.yaml"
+  bootMode: "UEFI"
+

@@ -1,0 +1,246 @@
+# Complete Beskar7 Cluster Example
+# This manifest contains all resources needed to deploy a functional Kubernetes cluster
+# using Beskar7 with bare-metal machines via Redfish.
+#
+# Prerequisites:
+# 1. Beskar7 controller is installed and running
+# 2. cert-manager is installed
+# 3. Cluster API core components are installed
+# 4. BMC credentials secret exists
+#
+# Usage:
+#   kubectl apply -f complete-cluster.yaml
+
+---
+# Secret containing BMC credentials for Redfish API access
+apiVersion: v1
+kind: Secret
+metadata:
+  name: bmc-credentials
+  namespace: default
+type: Opaque
+stringData:
+  username: "admin"
+  password: "password"  # Replace with your actual BMC password
+
+---
+# PhysicalHost - Represents a bare-metal server for the control plane
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+kind: PhysicalHost
+metadata:
+  name: control-plane-01
+  namespace: default
+  labels:
+    cluster.x-k8s.io/cluster-name: "my-cluster"
+    cluster.x-k8s.io/role: "control-plane"
+spec:
+  redfishConnection:
+    address: "https://172.16.56.101"  # Replace with your BMC IP
+    credentialsSecretRef: "bmc-credentials"
+    insecureSkipVerify: true  # Set to false in production with valid certs
+
+---
+# PhysicalHost - Represents a bare-metal server for a worker node
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+kind: PhysicalHost
+metadata:
+  name: worker-01
+  namespace: default
+  labels:
+    cluster.x-k8s.io/cluster-name: "my-cluster"
+    cluster.x-k8s.io/role: "worker"
+spec:
+  redfishConnection:
+    address: "https://172.16.56.102"  # Replace with your BMC IP
+    credentialsSecretRef: "bmc-credentials"
+    insecureSkipVerify: true
+
+---
+# PhysicalHost - Additional worker node
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+kind: PhysicalHost
+metadata:
+  name: worker-02
+  namespace: default
+  labels:
+    cluster.x-k8s.io/cluster-name: "my-cluster"
+    cluster.x-k8s.io/role: "worker"
+spec:
+  redfishConnection:
+    address: "https://172.16.56.103"  # Replace with your BMC IP
+    credentialsSecretRef: "bmc-credentials"
+    insecureSkipVerify: true
+
+---
+# Beskar7Cluster - Infrastructure cluster resource
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+kind: Beskar7Cluster
+metadata:
+  name: my-cluster
+  namespace: default
+spec:
+  controlPlaneEndpoint:
+    host: "172.16.56.10"  # Replace with your control plane VIP or load balancer IP
+    port: 6443
+
+---
+# Cluster - Core Cluster API resource
+apiVersion: cluster.x-k8s.io/v1beta1
+kind: Cluster
+metadata:
+  name: my-cluster
+  namespace: default
+spec:
+  clusterNetwork:
+    pods:
+      cidrBlocks:
+        - "10.244.0.0/16"
+    services:
+      cidrBlocks:
+        - "10.96.0.0/12"
+  infrastructureRef:
+    apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+    kind: Beskar7Cluster
+    name: my-cluster
+  controlPlaneRef:
+    apiVersion: controlplane.cluster.x-k8s.io/v1beta1
+    kind: KubeadmControlPlane
+    name: my-cluster-control-plane
+
+---
+# Beskar7MachineTemplate - Template for control plane machines
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+kind: Beskar7MachineTemplate
+metadata:
+  name: my-cluster-control-plane
+  namespace: default
+spec:
+  template:
+    spec:
+      osFamily: "kairos"
+      imageURL: "https://github.com/kairos-io/kairos/releases/download/v2.8.1/kairos-alpine-v2.8.1-amd64.iso"
+      provisioningMode: "RemoteConfig"
+      configURL: "https://your-server.com/config/control-plane-config.yaml"
+      # Optional: Customize boot order, BIOS settings, etc.
+      bootMode: "UEFI"
+
+---
+# KubeadmControlPlane - Control plane configuration
+apiVersion: controlplane.cluster.x-k8s.io/v1beta1
+kind: KubeadmControlPlane
+metadata:
+  name: my-cluster-control-plane
+  namespace: default
+spec:
+  replicas: 1
+  version: v1.31.0
+  machineTemplate:
+    infrastructureRef:
+      apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+      kind: Beskar7MachineTemplate
+      name: my-cluster-control-plane
+  kubeadmConfigSpec:
+    clusterConfiguration:
+      controllerManager:
+        extraArgs:
+          enable-hostpath-provisioner: "true"
+      apiServer:
+        certSANs:
+          - localhost
+          - 127.0.0.1
+          - 0.0.0.0
+          - "172.16.56.10"  # Control plane endpoint
+    initConfiguration:
+      nodeRegistration:
+        criSocket: /run/containerd/containerd.sock
+        kubeletExtraArgs:
+          eviction-hard: nodefs.available<0%,nodefs.inodesFree<0%,imagefs.available<0%
+    joinConfiguration:
+      nodeRegistration:
+        criSocket: /run/containerd/containerd.sock
+        kubeletExtraArgs:
+          eviction-hard: nodefs.available<0%,nodefs.inodesFree<0%,imagefs.available<0%
+
+---
+# Beskar7Machine - Control plane machine
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+kind: Beskar7Machine
+metadata:
+  name: my-cluster-control-plane-0
+  namespace: default
+  labels:
+    cluster.x-k8s.io/cluster-name: "my-cluster"
+    cluster.x-k8s.io/control-plane: "true"
+spec:
+  osFamily: "kairos"
+  imageURL: "https://github.com/kairos-io/kairos/releases/download/v2.8.1/kairos-alpine-v2.8.1-amd64.iso"
+  provisioningMode: "RemoteConfig"
+  configURL: "https://your-server.com/config/control-plane-config.yaml"
+  bootMode: "UEFI"
+  # The controller will automatically select an available PhysicalHost
+  # based on cluster labels and availability
+
+---
+# Beskar7MachineTemplate - Template for worker machines
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+kind: Beskar7MachineTemplate
+metadata:
+  name: my-cluster-workers
+  namespace: default
+spec:
+  template:
+    spec:
+      osFamily: "kairos"
+      imageURL: "https://github.com/kairos-io/kairos/releases/download/v2.8.1/kairos-alpine-v2.8.1-amd64.iso"
+      provisioningMode: "RemoteConfig"
+      configURL: "https://your-server.com/config/worker-config.yaml"
+      bootMode: "UEFI"
+
+---
+# MachineDeployment - Worker machines deployment
+apiVersion: cluster.x-k8s.io/v1beta1
+kind: MachineDeployment
+metadata:
+  name: my-cluster-workers
+  namespace: default
+spec:
+  clusterName: my-cluster
+  replicas: 2
+  selector:
+    matchLabels:
+      cluster.x-k8s.io/cluster-name: my-cluster
+      cluster.x-k8s.io/deployment-name: my-cluster-workers
+  template:
+    metadata:
+      labels:
+        cluster.x-k8s.io/cluster-name: my-cluster
+        cluster.x-k8s.io/deployment-name: my-cluster-workers
+    spec:
+      clusterName: my-cluster
+      version: v1.31.0
+      bootstrap:
+        configRef:
+          apiVersion: bootstrap.cluster.x-k8s.io/v1beta1
+          kind: KubeadmConfigTemplate
+          name: my-cluster-workers
+      infrastructureRef:
+        apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+        kind: Beskar7MachineTemplate
+        name: my-cluster-workers
+
+---
+# KubeadmConfigTemplate - Worker bootstrap configuration
+apiVersion: bootstrap.cluster.x-k8s.io/v1beta1
+kind: KubeadmConfigTemplate
+metadata:
+  name: my-cluster-workers
+  namespace: default
+spec:
+  template:
+    spec:
+      joinConfiguration:
+        nodeRegistration:
+          criSocket: /run/containerd/containerd.sock
+          kubeletExtraArgs:
+            eviction-hard: nodefs.available<0%,nodefs.inodesFree<0%,imagefs.available<0%
+
