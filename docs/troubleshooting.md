@@ -18,6 +18,39 @@ Increase verbosity by editing the manager Deployment (`config/manager/manager.ya
 
 ## Webhook and Certificate Issues
 
+### Webhook Fails with "could not find the requested resource"
+
+*   **Error:** `Error from server (InternalError): error when creating "physicalhost.yaml": Internal error occurred: failed calling webhook "default.physicalhost.infrastructure.cluster.x-k8s.io": failed to call webhook: the server could not find the requested resource`
+    *   **Cause:** The controller manager cannot reach the Kubernetes API server, usually due to overly restrictive network policies blocking egress traffic.
+    *   **Symptoms:**
+        *   Controller logs show repeated errors like: `error retrieving resource lock ... Get "https://10.96.0.1:443/..." net/http: request canceled while waiting for connection (Client.Timeout exceeded while awaiting headers)`
+        *   Controller never acquires leader lease
+        *   Webhook calls fail with "could not find the requested resource"
+    *   **Troubleshooting:**
+        1. **Check controller logs for API server connection errors:**
+            ```bash
+            kubectl logs -n beskar7-system deployment/controller-manager -c manager --tail=50
+            ```
+        2. **Check network policies in the namespace:**
+            ```bash
+            kubectl get networkpolicies -n beskar7-system
+            ```
+        3. **Temporarily delete restrictive network policies to test:**
+            ```bash
+            kubectl delete networkpolicy -n beskar7-system --all
+            kubectl rollout restart deployment/controller-manager -n beskar7-system
+            ```
+        4. **If this fixes the issue, review and update your network policies:**
+            *   Ensure egress to port 443 (HTTPS) is allowed for API server communication
+            *   Ensure ingress to port 9443 (webhook) is allowed from all sources
+            *   Remove deny-all policies that don't have corresponding allow rules
+            *   See `config/security/network-policy.yaml` for corrected examples
+        5. **Set `networkPolicy.enabled: false` in Helm values if network policies cause issues:**
+            ```yaml
+            networkPolicy:
+              enabled: false
+            ```
+
 ### Controller Fails with Missing TLS Certificate
 
 *   **Error:** `open /tmp/k8s-webhook-server/serving-certs/tls.crt: no such file or directory`

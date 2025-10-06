@@ -46,13 +46,13 @@ Beskar7 now automatically detects your hardware vendor and handles boot paramete
 - **Before:** Manual BIOS configuration required
 - **Now:** Automatic detection and BIOS attribute handling
 
-### ✅ **All Vendors Supported**
+### **All Vendors Supported**
 - **Dell:** BIOS `KernelArgs` attribute (automatic)
 - **HPE:** UEFI Target Boot Override (automatic)  
 - **Lenovo:** UEFI with BIOS fallback (automatic)
 - **Supermicro:** UEFI with multiple fallbacks (automatic)
 
-### ✅ **Zero Configuration Required**
+### **Zero Configuration Required**
 - Works out of the box
 - No vendor-specific annotations needed
 - Intelligent fallback mechanisms

@@ -44,7 +44,7 @@ spec:
         - --reconcile-timeout=$(RECONCILE_TIMEOUT)
         - --stuck-state-timeout=$(STUCK_STATE_TIMEOUT)
         - --max-retries=$(MAX_RETRIES)
-        image: ghcr.io/wrkode/beskar7/beskar7:v0.2.6
+        image: controller
         imagePullPolicy: Always
         name: manager
         securityContext:

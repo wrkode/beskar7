@@ -1,0 +1,184 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.19.0
+  name: physicalhosts.
+spec:
+  group: ""
+  names:
+    categories:
+    - cluster-api
+    kind: PhysicalHost
+    listKind: PhysicalHostList
+    plural: physicalhosts
+    shortNames:
+    - ph
+    singular: physicalhost
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - description: Current state of the Physical Host
+      jsonPath: .status.state
+      name: State
+      type: string
+    - description: Indicates if the host is ready
+      jsonPath: .status.ready
+      name: Ready
+      type: boolean
+    - description: Creation timestamp
+      jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: ""
+    schema:
+      openAPIV3Schema:
+        properties:
+          apiVersion:
+            type: string
+          kind:
+            type: string
+          metadata:
+            type: object
+          spec:
+            properties:
+              bootIsoSource:
+                type: string
+              consumerRef:
+                properties:
+                  apiVersion:
+                    type: string
+                  fieldPath:
+                    type: string
+                  kind:
+                    type: string
+                  name:
+                    type: string
+                  namespace:
+                    type: string
+                  resourceVersion:
+                    type: string
+                  uid:
+                    type: string
+                type: object
+                x-kubernetes-map-type: atomic
+              redfishConnection:
+                properties:
+                  address:
+                    pattern: ^(https?://)[a-zA-Z0-9.-]+(:[0-9]+)?(/.*)?$
+                    type: string
+                  credentialsSecretRef:
+                    minLength: 1
+                    type: string
+                  insecureSkipVerify:
+                    default: false
+                    type: boolean
+                required:
+                - address
+                - credentialsSecretRef
+                type: object
+              userDataSecretRef:
+                properties:
+                  apiVersion:
+                    type: string
+                  fieldPath:
+                    type: string
+                  kind:
+                    type: string
+                  name:
+                    type: string
+                  namespace:
+                    type: string
+                  resourceVersion:
+                    type: string
+                  uid:
+                    type: string
+                type: object
+                x-kubernetes-map-type: atomic
+            required:
+            - redfishConnection
+            type: object
+          status:
+            properties:
+              addresses:
+                items:
+                  properties:
+                    address:
+                      maxLength: 256
+                      minLength: 1
+                      type: string
+                    type:
+                      enum:
+                      - Hostname
+                      - ExternalIP
+                      - InternalIP
+                      - ExternalDNS
+                      - InternalDNS
+                      type: string
+                  required:
+                  - address
+                  - type
+                  type: object
+                type: array
+              conditions:
+                items:
+                  properties:
+                    lastTransitionTime:
+                      format: date-time
+                      type: string
+                    message:
+                      maxLength: 10240
+                      minLength: 1
+                      type: string
+                    reason:
+                      maxLength: 256
+                      minLength: 1
+                      type: string
+                    severity:
+                      maxLength: 32
+                      type: string
+                    status:
+                      type: string
+                    type:
+                      maxLength: 256
+                      minLength: 1
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - status
+                  - type
+                  type: object
+                type: array
+              errorMessage:
+                type: string
+              hardwareDetails:
+                properties:
+                  manufacturer:
+                    type: string
+                  model:
+                    type: string
+                  serialNumber:
+                    type: string
+                  status:
+                    properties:
+                      health:
+                        type: string
+                      healthRollup:
+                        type: string
+                      state:
+                        type: string
+                    type: object
+                type: object
+              observedPowerState:
+                type: string
+              ready:
+                type: boolean
+              state:
+                type: string
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

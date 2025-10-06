@@ -1,11 +1,12 @@
+{{- if .Values.networkPolicy.enabled }}
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: beskar7-manager-network-policy
-  namespace: beskar7-system
+  name: {{ include "beskar7.fullname" . }}-manager
+  namespace: {{ .Values.namespace }}
   labels:
-    app.kubernetes.io/name: beskar7
+    {{- include "beskar7.labels" . | nindent 4 }}
     app.kubernetes.io/component: network-policy
 spec:
   podSelector:
@@ -18,7 +19,6 @@ spec:
   # Ingress rules - what can connect TO the manager
   ingress:
   # Allow webhook traffic from Kubernetes API server
-  # The API server connects from various sources, so we allow all traffic to the webhook port
   - from: []
     ports:
     - protocol: TCP
@@ -33,7 +33,7 @@ spec:
     - protocol: TCP
       port: 8080
   
-  # Allow health checks from ingress controllers/load balancers
+  # Allow health checks
   - from: []
     ports:
     - protocol: TCP
@@ -50,16 +50,12 @@ spec:
       port: 53
   
   # Allow HTTPS to Kubernetes API server
-  # The API server is a service, not a pod, so we allow all HTTPS egress
-  # This is needed for the controller to communicate with the API server
   - to: []
     ports:
     - protocol: TCP
       port: 443
   
-  # Allow HTTPS/HTTP to BMC endpoints (Redfish)
-  # Note: This allows egress to any external HTTP/HTTPS endpoint for BMC communication
-  # In production, consider restricting this to specific BMC networks
+  # Allow HTTP/HTTPS to BMC endpoints (Redfish)
   - to: []
     ports:
     - protocol: TCP
@@ -82,19 +78,13 @@ spec:
       port: 3269
 
 ---
-# NOTE: A deny-all default policy has been intentionally removed
-# because it conflicts with the specific allow policies below.
-# If you need a deny-all default, ensure all your allow policies
-# explicitly cover all required traffic patterns.
-
----
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: beskar7-allow-namespace-communication
-  namespace: beskar7-system
+  name: {{ include "beskar7.fullname" . }}-allow-namespace
+  namespace: {{ .Values.namespace }}
   labels:
-    app.kubernetes.io/name: beskar7
+    {{- include "beskar7.labels" . | nindent 4 }}
     app.kubernetes.io/component: network-policy
 spec:
   podSelector: {}
@@ -107,22 +97,22 @@ spec:
   - from:
     - namespaceSelector:
         matchLabels:
-          kubernetes.io/metadata.name: beskar7-system
+          kubernetes.io/metadata.name: {{ .Values.namespace }}
   
   egress:
   - to:
     - namespaceSelector:
         matchLabels:
-          kubernetes.io/metadata.name: beskar7-system
+          kubernetes.io/metadata.name: {{ .Values.namespace }}
 
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: beskar7-allow-monitoring
-  namespace: beskar7-system
+  name: {{ include "beskar7.fullname" . }}-allow-monitoring
+  namespace: {{ .Values.namespace }}
   labels:
-    app.kubernetes.io/name: beskar7
+    {{- include "beskar7.labels" . | nindent 4 }}
     app.kubernetes.io/component: network-policy
 spec:
   podSelector:
@@ -152,60 +142,5 @@ spec:
     ports:
     - protocol: TCP
       port: 8080
+{{- end }}
 
----
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: beskar7-security-monitoring
-  namespace: beskar7-system
-  labels:
-    app.kubernetes.io/name: beskar7
-    app.kubernetes.io/component: network-policy
-spec:
-  podSelector:
-    matchLabels:
-      app.kubernetes.io/component: security-monitor
-  policyTypes:
-  - Ingress
-  - Egress
-  
-  # Security monitor ingress
-  ingress:
-  # Allow API server to send events
-  - from: []
-  
-  # Security monitor egress
-  egress:
-  # DNS resolution
-  - to: []
-    ports:
-    - protocol: UDP
-      port: 53
-    - protocol: TCP
-      port: 53
-  
-  # Kubernetes API
-  - to: []
-    ports:
-    - protocol: TCP
-      port: 443
-  
-  # TLS certificate validation (external endpoints)
-  - to: []
-    ports:
-    - protocol: TCP
-      port: 443
-    - protocol: TCP
-      port: 8443
-  
-  # Alert manager/notification systems
-  - to:
-    - namespaceSelector:
-        matchLabels:
-          name: monitoring
-    ports:
-    - protocol: TCP
-      port: 9093
-    - protocol: TCP
-      port: 9094 

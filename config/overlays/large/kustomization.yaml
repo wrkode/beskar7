@@ -18,7 +18,7 @@ labels:
 - includeSelectors: true
   pairs:
     app.kubernetes.io/name: beskar7
-    app.kubernetes.io/version: v0.2.6
+    app.kubernetes.io/version: v0.3.0
     deployment-size: large
 
 images:
