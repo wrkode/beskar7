@@ -50,16 +50,35 @@ jobs:
         echo "Updated values.yaml:"
         grep "tag: v" charts/beskar7/values.yaml
 
+    - name: Checkout gh-pages branch
+      uses: actions/checkout@v4
+      with:
+        ref: gh-pages
+        path: gh-pages-repo
+
     - name: Package Helm Chart
       run: |
         # Create charts directory for packaging
         mkdir -p .helm-repo
         
-        # Package the chart
+        # Copy existing charts from gh-pages branch (if any)
+        if [ -d "gh-pages-repo" ]; then
+          cp -f gh-pages-repo/*.tgz .helm-repo/ 2>/dev/null || true
+          cp -f gh-pages-repo/.nojekyll .helm-repo/ 2>/dev/null || true
+        fi
+        
+        # Package the new chart version
         helm package charts/beskar7 --destination .helm-repo
         
-        # Generate the index
-        helm repo index .helm-repo --url https://wrkode.github.io/beskar7
+        # Generate the index with all versions
+        helm repo index .helm-repo --url https://wrkode.github.io/beskar7 --merge gh-pages-repo/index.yaml 2>/dev/null || helm repo index .helm-repo --url https://wrkode.github.io/beskar7
+        
+        # Show what we have
+        echo "Charts in repository:"
+        ls -lh .helm-repo/*.tgz
+        echo ""
+        echo "Index entries:"
+        grep -A 3 "version:" .helm-repo/index.yaml || true
 
     - name: Deploy to GitHub Pages
       uses: peaceiris/actions-gh-pages@v4
@@ -68,4 +87,4 @@ jobs:
         publish_dir: .helm-repo
         publish_branch: gh-pages
         keep_files: false
-        force_orphan: true
+        force_orphan: false
