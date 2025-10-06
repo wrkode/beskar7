@@ -155,6 +155,14 @@ kubectl wait --for=condition=Available --timeout=300s deployment/cert-manager-ca
 
 ### Using Helm
 
+> **📝 Note for Repository Maintainers**: The Helm chart repository is automatically published to GitHub Pages via the `helm-publish.yml` workflow when a new tag is pushed. However, GitHub Pages must be manually enabled in the repository settings:
+> 1. Go to **Settings → Pages**
+> 2. Under **Build and deployment**, set **Source** to "Deploy from a branch"
+> 3. Select branch: **gh-pages**, folder: **/ (root)**
+> 4. Click **Save**
+> 
+> After enabling, wait 1-2 minutes for GitHub Pages to deploy. The workflow will then automatically update the Helm repository on every new release.
+
 #### Add the Helm repository
 
 ```bash
