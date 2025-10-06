@@ -40,15 +40,59 @@ Beskar7 consists of several custom controllers that work together:
 
 ## Prerequisites
 
+### Development Prerequisites
+
 *   [Go](https://golang.org/dl/) (version 1.24 or later required)
 *   [Docker](https://docs.docker.com/get-docker/) (for envtest)
 *   [controller-gen](https://book.kubebuilder.io/reference/controller-gen.html) (`make install-controller-gen`)
 *   [kustomize](https://kubectl.docs.kubernetes.io/installation/kustomize/) (v4 or later for `make deploy`)
-*   A running Kubernetes cluster (e.g., kind, minikube, or a remote cluster) with `kubectl` configured.
+
+### Runtime Prerequisites
+
+*   A running Kubernetes cluster (e.g., kind, minikube, or a remote cluster) with `kubectl` configured
 *   Kubernetes 1.31+
-*   Helm 3.2.0+
-*   Cluster API v1.4.0+
-*   **cert-manager (required, for webhook support and TLS certificates)**
+*   Helm 3.2.0+ (for Helm installation method)
+*   **Cluster API v1.4.0+ (REQUIRED)** - See installation below
+*   **cert-manager (REQUIRED)** - See installation below
+
+### Install Cluster API (Required)
+
+**⚠️ IMPORTANT:** Beskar7 is a Cluster API Infrastructure Provider and requires Cluster API core components to be installed first.
+
+**Option 1: Using clusterctl (Recommended)**
+```bash
+# Install clusterctl
+curl -L https://github.com/kubernetes-sigs/cluster-api/releases/download/v1.10.0/clusterctl-linux-amd64 -o clusterctl
+chmod +x clusterctl
+sudo mv clusterctl /usr/local/bin/
+
+# Initialize Cluster API
+clusterctl init
+```
+
+**Option 2: Manual Installation**
+```bash
+# Install CAPI core components
+kubectl apply -f https://github.com/kubernetes-sigs/cluster-api/releases/download/v1.10.0/cluster-api-components.yaml
+
+# Install bootstrap provider (kubeadm)
+kubectl apply -f https://github.com/kubernetes-sigs/cluster-api/releases/download/v1.10.0/bootstrap-components.yaml
+
+# Install control plane provider (kubeadm)
+kubectl apply -f https://github.com/kubernetes-sigs/cluster-api/releases/download/v1.10.0/control-plane-components.yaml
+
+# Wait for components to be ready
+kubectl wait --for=condition=Available --timeout=300s deployment/capi-controller-manager -n capi-system
+kubectl wait --for=condition=Available --timeout=300s deployment/capi-kubeadm-bootstrap-controller-manager -n capi-kubeadm-bootstrap-system
+kubectl wait --for=condition=Available --timeout=300s deployment/capi-kubeadm-control-plane-controller-manager -n capi-kubeadm-control-plane-system
+```
+
+Verify CAPI installation:
+```bash
+kubectl get pods -n capi-system
+kubectl get pods -n capi-kubeadm-bootstrap-system
+kubectl get pods -n capi-kubeadm-control-plane-system
+```
 
 ### Install cert-manager (Required)
 
@@ -62,7 +106,9 @@ kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/
 Wait for all cert-manager pods to be running:
 
 ```bash
-kubectl get pods -n cert-manager
+kubectl wait --for=condition=Available --timeout=300s deployment/cert-manager -n cert-manager
+kubectl wait --for=condition=Available --timeout=300s deployment/cert-manager-webhook -n cert-manager
+kubectl wait --for=condition=Available --timeout=300s deployment/cert-manager-cainjector -n cert-manager
 ```
 
 ## Getting Started

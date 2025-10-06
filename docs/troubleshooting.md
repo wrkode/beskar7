@@ -2,6 +2,84 @@
 
 This document provides guidance on troubleshooting common issues encountered when using Beskar7.
 
+## Installation and Prerequisites
+
+### Controller Crashes with "no kind is registered for the type v1beta1.Machine"
+
+*   **Error:** Controller logs show:
+    ```
+    ERROR controller-runtime.source.EventHandler kind must be registered to the Scheme
+    {"error": "no kind is registered for the type v1beta1.Machine in scheme \"pkg/runtime/scheme.go:110\""}
+    ```
+    
+*   **Cause:** Cluster API (CAPI) core components are not installed in your cluster. Beskar7 is a CAPI infrastructure provider and requires CAPI to be installed first.
+
+*   **Symptoms:**
+    *   Controller manager pod crashes repeatedly
+    *   Error about `v1beta1.Machine` not registered
+    *   "failed to wait for caches to sync" errors
+    *   Controller exits with error during startup
+
+*   **Solution:**
+    
+    **Step 1: Install Cluster API**
+    
+    Using clusterctl (recommended):
+    ```bash
+    # Download and install clusterctl
+    curl -L https://github.com/kubernetes-sigs/cluster-api/releases/download/v1.10.0/clusterctl-linux-amd64 -o clusterctl
+    chmod +x clusterctl
+    sudo mv clusterctl /usr/local/bin/
+    
+    # Initialize CAPI
+    clusterctl init
+    ```
+    
+    Or manually:
+    ```bash
+    # Install CAPI core components
+    kubectl apply -f https://github.com/kubernetes-sigs/cluster-api/releases/download/v1.10.0/cluster-api-components.yaml
+    kubectl apply -f https://github.com/kubernetes-sigs/cluster-api/releases/download/v1.10.0/bootstrap-components.yaml
+    kubectl apply -f https://github.com/kubernetes-sigs/cluster-api/releases/download/v1.10.0/control-plane-components.yaml
+    
+    # Wait for CAPI to be ready
+    kubectl wait --for=condition=Available --timeout=300s deployment/capi-controller-manager -n capi-system
+    kubectl wait --for=condition=Available --timeout=300s deployment/capi-kubeadm-bootstrap-controller-manager -n capi-kubeadm-bootstrap-system
+    kubectl wait --for=condition=Available --timeout=300s deployment/capi-kubeadm-control-plane-controller-manager -n capi-kubeadm-control-plane-system
+    ```
+    
+    **Step 2: Verify CAPI Installation**
+    ```bash
+    # Check CAPI CRDs are installed
+    kubectl get crd | grep cluster.x-k8s.io
+    
+    # Should see: machines.cluster.x-k8s.io, clusters.cluster.x-k8s.io, etc.
+    
+    # Check CAPI controllers are running
+    kubectl get pods -n capi-system
+    kubectl get pods -n capi-kubeadm-bootstrap-system
+    kubectl get pods -n capi-kubeadm-control-plane-system
+    ```
+    
+    **Step 3: Restart Beskar7 Controller**
+    ```bash
+    kubectl rollout restart deployment/controller-manager -n beskar7-system
+    
+    # Watch for successful startup
+    kubectl logs -n beskar7-system deployment/controller-manager -c manager -f
+    ```
+    
+    **Step 4: Verify Beskar7 is Working**
+    ```bash
+    # Should now see Beskar7 controllers starting successfully
+    kubectl logs -n beskar7-system deployment/controller-manager -c manager --tail=50
+    
+    # You should see logs like:
+    # "Starting EventSource" for physicalhost, beskar7machine, beskar7cluster
+    # "Starting Controller" messages
+    # "Starting workers" messages
+    ```
+
 ## Controller Logs
 
 The first place to look for issues is the logs of the Beskar7 controller manager pod, usually running in the `beskar7-system` namespace.
