@@ -3,14 +3,18 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.18.0
+    controller-gen.kubebuilder.io/version: v0.19.0
   name: physicalhosts.infrastructure.cluster.x-k8s.io
 spec:
   group: infrastructure.cluster.x-k8s.io
   names:
+    categories:
+    - cluster-api
     kind: PhysicalHost
     listKind: PhysicalHostList
     plural: physicalhosts
+    shortNames:
+    - ph
     singular: physicalhost
   scope: Namespaced
   versions:
@@ -30,26 +34,22 @@ spec:
     name: v1beta1
     schema:
       openAPIV3Schema:
-        description: PhysicalHost is the Schema for the physicalhosts API
         properties:
           apiVersion:
-            description: 'APIVersion defines the versioned schema of this representation of an object.'
             type: string
           kind:
-            description: 'Kind is a string value representing the REST resource this object represents.'
             type: string
           metadata:
             type: object
           spec:
-            description: PhysicalHostSpec defines the desired state of PhysicalHost
             properties:
               bootIsoSource:
-                description: BootISOSource is the URL of the ISO image to use for provisioning
                 type: string
               consumerRef:
-                description: ConsumerRef is a reference to the Beskar7Machine that is using this host
                 properties:
                   apiVersion:
+                    type: string
+                  fieldPath:
                     type: string
                   kind:
                     type: string
@@ -57,26 +57,32 @@ spec:
                     type: string
                   namespace:
                     type: string
+                  resourceVersion:
+                    type: string
                   uid:
                     type: string
                 type: object
+                x-kubernetes-map-type: atomic
               redfishConnection:
-                description: RedfishConnection contains the connection details for the Redfish endpoint
                 properties:
                   address:
-                    description: Address is the URL of the Redfish service
+                    pattern: ^(https?://)[a-zA-Z0-9.-]+(:[0-9]+)?(/.*)?$
                     type: string
                   credentialsSecretRef:
-                    description: CredentialsSecretRef is the name of the secret containing the Redfish credentials
+                    minLength: 1
                     type: string
+                  insecureSkipVerify:
+                    default: false
+                    type: boolean
                 required:
                 - address
                 - credentialsSecretRef
                 type: object
               userDataSecretRef:
-                description: UserDataSecretRef is a reference to a secret containing cloud-init user data
                 properties:
                   apiVersion:
+                    type: string
+                  fieldPath:
                     type: string
                   kind:
                     type: string
@@ -84,38 +90,59 @@ spec:
                     type: string
                   namespace:
                     type: string
+                  resourceVersion:
+                    type: string
                   uid:
                     type: string
                 type: object
+                x-kubernetes-map-type: atomic
             required:
             - redfishConnection
             type: object
           status:
-            description: PhysicalHostStatus defines the observed state of PhysicalHost
             properties:
-              conditions:
-                description: Conditions contains the different condition statuses for this PhysicalHost
+              addresses:
                 items:
-                  description: Condition defines an observation of a Cluster API resource operational state
+                  properties:
+                    address:
+                      maxLength: 256
+                      minLength: 1
+                      type: string
+                    type:
+                      enum:
+                      - Hostname
+                      - ExternalIP
+                      - InternalIP
+                      - ExternalDNS
+                      - InternalDNS
+                      type: string
+                  required:
+                  - address
+                  - type
+                  type: object
+                type: array
+              conditions:
+                items:
                   properties:
                     lastTransitionTime:
-                      description: Last time the condition transitioned from one status to another
                       format: date-time
                       type: string
                     message:
-                      description: A human readable message indicating details about the transition
+                      maxLength: 10240
+                      minLength: 1
                       type: string
                     reason:
-                      description: The reason for the condition's last transition in CamelCase
+                      maxLength: 256
+                      minLength: 1
                       type: string
                     severity:
-                      description: Severity provides an explicit classification of Reason code
+                      maxLength: 32
                       type: string
                     status:
-                      description: Status of the condition, one of True, False, Unknown
                       type: string
                     type:
-                      description: Type of condition in CamelCase
+                      maxLength: 256
+                      minLength: 1
                       type: string
                   required:
                   - lastTransitionTime
@@ -124,35 +151,34 @@ spec:
                   type: object
                 type: array
               errorMessage:
-                description: ErrorMessage contains details on the last error encountered
                 type: string
               hardwareDetails:
-                description: HardwareDetails contains information about the physical host hardware
                 properties:
-                  firmware:
-                    properties:
-                      version:
-                        type: string
-                    type: object
                   manufacturer:
                     type: string
                   model:
                     type: string
                   serialNumber:
                     type: string
+                  status:
+                    properties:
+                      health:
+                        type: string
+                      healthRollup:
+                        type: string
+                      state:
+                        type: string
+                    type: object
                 type: object
               observedPowerState:
-                description: ObservedPowerState is the last observed power state from Redfish endpoint
                 type: string
               ready:
-                description: Ready indicates if the host is ready and enrolled
                 type: boolean
               state:
-                description: State represents the current state of the host
                 type: string
             type: object
         type: object
     served: true
     storage: true
     subresources:
-      status: {} 
+      status: {}
