@@ -38,3 +38,4 @@ fix-go-env.sh
 
 # Generated manifest files
 beskar7-manifests-*.yaml
+field-testing/

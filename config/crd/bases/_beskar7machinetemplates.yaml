@@ -30,6 +30,12 @@ spec:
                 properties:
                   spec:
                     properties:
+                      bootMode:
+                        default: UEFI
+                        enum:
+                        - UEFI
+                        - Legacy
+                        type: string
                       configURL:
                         pattern: ^(https?|file)://.*\.(yaml|yml|json|toml|conf|cfg|ini|properties)$
                         type: string
@@ -39,15 +45,8 @@ spec:
                       osFamily:
                         enum:
                         - kairos
-                        - talos
                         - flatcar
                         - LeapMicro
-                        - ubuntu
-                        - rhel
-                        - centos
-                        - fedora
-                        - debian
-                        - opensuse
                         type: string
                       providerID:
                         type: string

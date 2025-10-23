@@ -299,15 +299,14 @@ Replace `kairos` with other supported OS families:
 
 ```yaml
 spec:
-  osFamily: "talos"
-  imageURL: "https://github.com/siderolabs/talos/releases/download/v1.7.0/talos-amd64.iso"
+  osFamily: "flatcar"
+  imageURL: "https://stable.release.flatcar-linux.net/amd64-usr/current/flatcar_production_iso_image.iso"
 ```
 
 Supported OS families:
 - `kairos` - Kairos (recommended)
-- `talos` - Talos Linux
 - `flatcar` - Flatcar Container Linux
-- `opensuse-leap-micro` - openSUSE Leap Micro
+- `LeapMicro` - openSUSE Leap Micro
 
 ## Troubleshooting
 

@@ -66,6 +66,8 @@ URL of the ISO image for provisioning. Set by the consuming Beskar7Machine contr
 
 Reference to a Secret containing cloud-init user data.
 
+**Status:** Currently accepted but not yet integrated into the provisioning process. This field is validated and can be set, but user data injection is pending implementation. Future versions will integrate this with OS-specific provisioning methods (cloud-init for Kairos, Ignition for Flatcar, Combustion for LeapMicro).
+
 ### Status Fields
 
 #### status.ready
@@ -205,16 +207,11 @@ URL of the OS image to use for the machine.
 Operating system family to use.
 
 **Valid Values:**
-- `kairos` - Kairos cloud-native OS
-- `talos` - Talos Linux
+- `kairos` - Kairos cloud-native OS (recommended)
 - `flatcar` - Flatcar Container Linux
 - `LeapMicro` - openSUSE Leap Micro
-- `ubuntu` - Ubuntu Server
-- `rhel` - Red Hat Enterprise Linux
-- `centos` - CentOS
-- `fedora` - Fedora Server
-- `debian` - Debian
-- `opensuse` - openSUSE
+
+**Note:** Only the OS families listed above are currently supported with full RemoteConfig provisioning capabilities. Each OS family has specific kernel parameter requirements for configuration URL passing.
 
 #### spec.configURL
 

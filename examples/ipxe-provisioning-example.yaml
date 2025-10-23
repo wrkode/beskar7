@@ -1,0 +1,237 @@
+# iPXE Provisioning Example for Beskar7
+#
+# This example demonstrates how to use iPXE network boot with Beskar7.
+#
+# PREREQUISITES:
+# 1. iPXE Server infrastructure:
+#    - DHCP server configured for iPXE chainloading
+#    - HTTP server hosting iPXE scripts and boot files
+#    - iPXE boot menu with OS installation options
+# 2. Physical hosts with Redfish-compliant BMCs
+# 3. BMCs must support network boot
+# 4. iPXE scripts configured for unattended installation
+#
+# iPXE ADVANTAGES:
+# - More flexible than standard PXE
+# - HTTP-based (faster than TFTP)
+# - Advanced scripting capabilities
+# - Can embed network configuration
+# - Supports HTTPS for secure boot
+#
+# NOTES:
+# - Beskar7 configures BMC to boot from network
+# - iPXE scripts handle the actual boot and installation process
+# - Ideal for dynamic, script-driven provisioning
+# - Supports complex boot workflows and conditional logic
+
+---
+# Namespace for the cluster
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ipxe-cluster
+
+---
+# Redfish credentials secret
+apiVersion: v1
+kind: Secret
+metadata:
+  name: bmc-credentials
+  namespace: ipxe-cluster
+type: Opaque
+stringData:
+  username: "admin"
+  password: "SecurePassword456"  # Change this!
+
+---
+# PhysicalHost 1 - Control Plane with iPXE
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+kind: PhysicalHost
+metadata:
+  name: ipxe-control-plane-01
+  namespace: ipxe-cluster
+  labels:
+    topology.kubernetes.io/zone: "rack-1"
+    node-role: "control-plane"
+    # Custom label for iPXE script selection
+    ipxe-profile: "kubernetes-control-plane"
+spec:
+  redfishConnection:
+    address: "https://192.168.2.10"
+    credentialsSecretRef: bmc-credentials
+    insecureSkipVerify: true
+
+---
+# PhysicalHost 2 - Worker with iPXE
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+kind: PhysicalHost
+metadata:
+  name: ipxe-worker-01
+  namespace: ipxe-cluster
+  labels:
+    topology.kubernetes.io/zone: "rack-1"
+    node-role: "worker"
+    ipxe-profile: "kubernetes-worker"
+spec:
+  redfishConnection:
+    address: "https://192.168.2.11"
+    credentialsSecretRef: bmc-credentials
+    insecureSkipVerify: true
+
+---
+# PhysicalHost 3 - Worker with iPXE
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+kind: PhysicalHost
+metadata:
+  name: ipxe-worker-02
+  namespace: ipxe-cluster
+  labels:
+    topology.kubernetes.io/zone: "rack-2"
+    node-role: "worker"
+    ipxe-profile: "kubernetes-worker"
+spec:
+  redfishConnection:
+    address: "https://192.168.2.12"
+    credentialsSecretRef: bmc-credentials
+    insecureSkipVerify: true
+
+---
+# Cluster API Cluster
+apiVersion: cluster.x-k8s.io/v1beta1
+kind: Cluster
+metadata:
+  name: ipxe-cluster
+  namespace: ipxe-cluster
+spec:
+  clusterNetwork:
+    pods:
+      cidrBlocks:
+        - 10.244.0.0/16
+    services:
+      cidrBlocks:
+        - 10.96.0.0/12
+  infrastructureRef:
+    apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+    kind: Beskar7Cluster
+    name: ipxe-cluster
+  controlPlaneRef:
+    apiVersion: controlplane.cluster.x-k8s.io/v1beta1
+    kind: KubeadmControlPlane
+    name: ipxe-cluster-control-plane
+
+---
+# Beskar7Cluster
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+kind: Beskar7Cluster
+metadata:
+  name: ipxe-cluster
+  namespace: ipxe-cluster
+spec:
+  controlPlaneEndpoint:
+    host: ""
+    port: 6443
+
+---
+# Control Plane Machine Template using iPXE
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+kind: Beskar7MachineTemplate
+metadata:
+  name: ipxe-cluster-control-plane
+  namespace: ipxe-cluster
+spec:
+  template:
+    spec:
+      # iPXE provisioning mode
+      provisioningMode: "iPXE"
+      
+      # OS family (for reference - actual OS installed by iPXE script)
+      osFamily: "kairos"
+      
+      # ImageURL points to iPXE script or boot image URL (for reference)
+      imageURL: "http://ipxe-server.example.com/boot.ipxe"
+      
+      # UEFI boot mode
+      bootMode: "UEFI"
+
+---
+# KubeadmControlPlane
+apiVersion: controlplane.cluster.x-k8s.io/v1beta1
+kind: KubeadmControlPlane
+metadata:
+  name: ipxe-cluster-control-plane
+  namespace: ipxe-cluster
+spec:
+  replicas: 1
+  version: v1.30.0
+  machineTemplate:
+    infrastructureRef:
+      apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+      kind: Beskar7MachineTemplate
+      name: ipxe-cluster-control-plane
+  kubeadmConfigSpec:
+    initConfiguration:
+      nodeRegistration:
+        kubeletExtraArgs:
+          provider-id: "b7://{{ ds.meta_data.instance_id }}"
+    joinConfiguration:
+      nodeRegistration:
+        kubeletExtraArgs:
+          provider-id: "b7://{{ ds.meta_data.instance_id }}"
+
+---
+# Worker Machine Deployment
+apiVersion: cluster.x-k8s.io/v1beta1
+kind: MachineDeployment
+metadata:
+  name: ipxe-cluster-workers
+  namespace: ipxe-cluster
+spec:
+  clusterName: ipxe-cluster
+  replicas: 2
+  selector:
+    matchLabels:
+      cluster.x-k8s.io/cluster-name: ipxe-cluster
+  template:
+    spec:
+      clusterName: ipxe-cluster
+      version: v1.30.0
+      bootstrap:
+        configRef:
+          apiVersion: bootstrap.cluster.x-k8s.io/v1beta1
+          kind: KubeadmConfigTemplate
+          name: ipxe-cluster-workers
+      infrastructureRef:
+        apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+        kind: Beskar7MachineTemplate
+        name: ipxe-cluster-workers
+
+---
+# Worker Machine Template using iPXE
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+kind: Beskar7MachineTemplate
+metadata:
+  name: ipxe-cluster-workers
+  namespace: ipxe-cluster
+spec:
+  template:
+    spec:
+      provisioningMode: "iPXE"
+      osFamily: "kairos"
+      imageURL: "http://ipxe-server.example.com/boot.ipxe"
+      bootMode: "UEFI"
+
+---
+# Worker Bootstrap Config
+apiVersion: bootstrap.cluster.x-k8s.io/v1beta1
+kind: KubeadmConfigTemplate
+metadata:
+  name: ipxe-cluster-workers
+  namespace: ipxe-cluster
+spec:
+  template:
+    spec:
+      joinConfiguration:
+        nodeRegistration:
+          kubeletExtraArgs:
+            provider-id: "b7://{{ ds.meta_data.instance_id }}"
+

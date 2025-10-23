@@ -8,8 +8,9 @@ Beskar7 acts as a bridge between the declarative Kubernetes API and the physical
 
 *   Define your bare-metal infrastructure (`PhysicalHost` resources) within Kubernetes.
 *   Provision Kubernetes nodes onto these physical hosts using `Beskar7Machine` resources, which integrate with CAPI `Machine` objects.
-*   Leverage Kubernetes-native OSes like Kairos, Talos, Flatcar, and openSUSE MicroOS using their specific provisioning methods (Remote Configuration via kernel parameters or Pre-Baked ISOs).
+*   Leverage immutable, cloud-native OSes like Kairos, Flatcar, and openSUSE Leap Micro using their specific provisioning methods (Remote Configuration via kernel parameters or Pre-Baked ISOs).
 *   Orchestrate cluster-level infrastructure using `Beskar7Cluster` resources.
+*   Support multiple provisioning modes including PXE and iPXE network boot.
 
 ## Why Beskar7?
 

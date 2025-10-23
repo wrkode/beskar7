@@ -365,8 +365,9 @@ func (r *Beskar7ClusterReconciler) reconcileDelete(ctx context.Context, logger l
 	// Mark conditions False
 	conditions.MarkFalse(b7cluster, infrastructurev1beta1.ControlPlaneEndpointReady, clusterv1.DeletingReason, clusterv1.ConditionSeverityInfo, "Beskar7Cluster is being deleted")
 
-	// TODO: Add any cluster-level cleanup logic here if this controller manages shared resources.
-	// Typically, the infra cluster object itself doesn't own external resources.
+	// Beskar7Cluster typically does not own external resources that require cleanup.
+	// All infrastructure resources (PhysicalHosts, Beskar7Machines) are cleaned up
+	// via their own controllers and finalizers.
 	logger.Info("No cluster-specific cleanup required.")
 
 	// Beskar7Cluster is deleted, remove the finalizer.

@@ -33,9 +33,6 @@ patchesStrategicMerge:
 # through a ComponentConfig type
 #- manager_config_patch.yaml
 
-
-# TODO(user): Add transformations like Annotations, Labels, ConfigMapReplacements
-
 # Images for the Beskar7 manager. The image name `controller` must match
 # the name used in config/manager/manager.yaml.
 images:

@@ -106,20 +106,13 @@ spec:
 
 ### OS Selection
 
-Beskar7 supports multiple immutable Linux distributions:
+Beskar7 supports the following immutable Linux distributions:
 
 **Kairos (Recommended):**
 ```yaml
 spec:
   osFamily: "kairos"
   imageURL: "https://github.com/kairos-io/kairos/releases/download/v2.8.1/kairos-alpine-v2.8.1-amd64.iso"
-```
-
-**Talos:**
-```yaml
-spec:
-  osFamily: "talos"
-  imageURL: "https://github.com/siderolabs/talos/releases/download/v1.7.0/talos-amd64.iso"
 ```
 
 **Flatcar:**
@@ -132,7 +125,7 @@ spec:
 **openSUSE Leap Micro:**
 ```yaml
 spec:
-  osFamily: "opensuse-leap-micro"
+  osFamily: "LeapMicro"
   imageURL: "https://download.opensuse.org/distribution/leap-micro/5.5/appliances/openSUSE-Leap-Micro.x86_64-Default.iso"
 ```
 
@@ -151,6 +144,42 @@ spec:
   provisioningMode: "PreBakedISO"
   imageURL: "https://your-server.com/custom-image.iso"
 ```
+
+**PXE Mode** (network boot via PXE):
+```yaml
+spec:
+  provisioningMode: "PXE"
+  osFamily: "flatcar"
+  imageURL: "http://pxe-server/flatcar.iso"  # For reference
+```
+
+**iPXE Mode** (network boot via iPXE):
+```yaml
+spec:
+  provisioningMode: "iPXE"
+  osFamily: "kairos"
+  imageURL: "http://ipxe-server/boot.ipxe"
+```
+
+## Example Files
+
+### Basic Examples
+
+- **`minimal-test-cluster.yaml`** - Minimal single-node cluster for testing
+- **`complete-cluster.yaml`** - Full multi-node cluster with HA control plane
+- **`pxe-simple-test.yaml`** - Simple PXE/iPXE testing without full cluster
+
+### Network Boot Examples
+
+- **`pxe-simple-test.yaml`** - Simple PXE/iPXE test without full cluster
+- **`pxe-provisioning-example.yaml`** - Complete PXE-based cluster deployment
+- **`ipxe-provisioning-example.yaml`** - Complete iPXE-based cluster deployment
+
+### Network Boot Documentation
+
+- **`pxe-ipxe-prerequisites.md`** - ⚠️ **Start here!** Complete infrastructure requirements
+- **`PXE_QUICK_START.md`** - 5-minute quick start guide
+- **`PXE_TESTING_GUIDE.md`** - Comprehensive testing and troubleshooting guide
 
 ## Example Workflows
 

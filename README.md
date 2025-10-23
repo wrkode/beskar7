@@ -4,7 +4,7 @@ Beskar7 is a Kubernetes operator that implements the Cluster API infrastructure 
 
 ## **Automatic Vendor-Specific Hardware Support**
 
-Beskar7 now automatically detects and handles vendor-specific hardware quirks! **Dell, HPE, Lenovo, and Supermicro systems work out of the box** with zero configuration. (until bugs are found :D )
+Beskar7 now automatically detects and handles vendor-specific hardware quirks! **Dell, HPE, Lenovo, and Supermicro systems** with zero configuration. (until bugs are found :D ) (**automatic detection is still experimental**)
 
 - **Dell PowerEdge:** Automatic BIOS attribute handling (testing advised following microcode upgrades)
 - **HPE ProLiant:** UEFI Target Boot Override
@@ -17,6 +17,15 @@ Beskar7 now automatically detects and handles vendor-specific hardware quirks! *
 
 **Alpha:** This project is currently under active development. Key features are being implemented, and the APIs may change. Not yet suitable for production use.
 
+### Supported Features
+
+- **Provisioning Modes**: RemoteConfig, PreBakedISO, PXE, iPXE
+- **OS Families**: Kairos (recommended), Flatcar, openSUSE Leap Micro
+- **Boot Modes**: UEFI (recommended), Legacy BIOS
+- **Vendor Support**: Dell, HPE, Lenovo, Supermicro (automatic detection experimental)
+- ✅ **Hardware Management**: Power control, boot configuration, status monitoring
+- ✅ **Cluster API Integration**: Full CAPI provider implementation
+
 To prepare for real hardware testing, ensure you configure reconciliation timeouts via flags or env (see `docs/state-management.md`) and follow the testing instructions below.
 
 ## Documentation
@@ -27,6 +36,7 @@ Comprehensive documentation is available in the [`docs/`](docs/) directory:
 - **[Quick Start Guide](docs/quick-start.md)** - Get up and running quickly
 - **[API Reference](docs/api-reference.md)** - Complete API documentation
 - **[Hardware Compatibility](docs/hardware-compatibility.md)** - Vendor support matrix
+- **[PXE/iPXE Setup Guide](examples/pxe-ipxe-prerequisites.md)** - Infrastructure requirements for network boot
 - **[Deployment Best Practices](docs/deployment-best-practices.md)** - Production deployment guidance
 - **[Troubleshooting](docs/troubleshooting.md)** - Common issues and solutions
 
@@ -270,14 +280,13 @@ kubectl get physicalhost server-01 -o wide
 
 If the PhysicalHost doesn't reach `Available` state, see the **[Troubleshooting Guide](docs/troubleshooting.md)** for common issues and solutions.
 
-### 3. Create a `Beskar7Machine` (Pre-Baked ISO Mode)
+### 3. Create a `Beskar7Machine` (Multiple Provisioning Modes)
 
-This example assumes you have an ISO image (`http://example.com/my-kairos-prebaked.iso`) that has Kairos OS and its configuration already embedded using Kairos's own tooling.
+Beskar7 supports four provisioning modes. Choose the one that fits your infrastructure:
 
-**Important Note for Pre-Baked ISO Mode:**
-When using `provisioningMode: "PreBakedISO"`, you are responsible for ensuring the ISO specified in `imageURL` is:
-1.  **Self-sufficient:** It must contain all necessary OS installation files and configuration for a complete, unattended installation.
-2.  **Bootable:** It must be bootable in the desired firmware mode (Legacy BIOS or UEFI) of your target hardware. Beskar7 will set the virtual media as the boot target, but the ISO itself must handle the rest.
+#### Mode 1: Pre-Baked ISO (Self-Contained)
+
+Use this when you have an ISO with OS and configuration pre-built.
 
 <details>
 <summary>Example: `b7machine-prebaked.yaml`</summary>
@@ -288,27 +297,20 @@ kind: Beskar7Machine
 metadata:
   name: node-01
   namespace: default
-  labels:
-    cluster.x-k8s.io/cluster-name: "my-cluster" # CAPI Machine owner should set this
-    cluster.x-k8s.io/role: "control-plane"      # Example role
 spec:
-  osFamily: "kairos"
-  imageURL: "http://example.com/my-kairos-prebaked.iso" # URL to your pre-baked ISO
+  osFamily: "kairos"  # kairos, flatcar, or LeapMicro
+  imageURL: "http://example.com/my-kairos-prebaked.iso"
   provisioningMode: "PreBakedISO"
-  # providerID will be set by the controller
+  bootMode: "UEFI"  # UEFI (recommended) or Legacy
 ```
 </details>
 
-```bash
-kubectl apply -f b7machine-prebaked.yaml
-```
+#### Mode 2: Remote Config (Dynamic Configuration)
 
-### 4. Create a `Beskar7Machine` (Remote Config Mode - Kairos Example)
-
-This example uses a generic Kairos installer ISO and provides a URL to a Kairos configuration file served over HTTPS.
+Use this with a generic ISO and external configuration URL.
 
 <details>
-<summary>Example: `b7machine-kairos-remote.yaml`</summary>
+<summary>Example: `b7machine-remoteconfig.yaml`</summary>
 
 ```yaml
 apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
@@ -316,37 +318,98 @@ kind: Beskar7Machine
 metadata:
   name: node-02
   namespace: default
-  labels:
-    cluster.x-k8s.io/cluster-name: "my-cluster"
-    cluster.x-k8s.io/role: "worker"
 spec:
-  osFamily: "kairos"
-  imageURL: "https://github.com/kairos-io/kairos/releases/download/v2.8.1/kairos-alpine-v2.8.1-amd64.iso" # Generic Kairos ISO
+  osFamily: "kairos"  # kairos, flatcar, or LeapMicro
+  imageURL: "https://github.com/kairos-io/kairos/releases/download/v2.8.1/kairos-alpine-v2.8.1-amd64.iso"
   provisioningMode: "RemoteConfig"
-  configURL: "https://your-server.com/path/to/kairos-config.yaml" # URL to your Kairos config file
-  # providerID will be set by the controller
+  configURL: "https://your-server.com/kairos-config.yaml"  # Required for RemoteConfig
+  bootMode: "UEFI"
 ```
 </details>
 
-```bash
-kubectl apply -f b7machine-kairos-remote.yaml
-```
+**Configuration URL Parameters by OS:**
+- **Kairos**: `config_url=<ConfigURL>`
+- **Flatcar**: `flatcar.ignition.config.url=<ConfigURL>`
+- **Leap Micro**: `combustion.path=<ConfigURL>`
 
-**Note on `configURL` for RemoteConfig:**
-*   Ensure the URL is accessible from the bare-metal server during its boot process.
-*   For Kairos, the parameter `config_url=<ConfigURL>` will be passed to the kernel.
-*   For Talos, `talos.config=<ConfigURL>`.
-*   For Flatcar, `flatcar.ignition.config.url=<ConfigURL>`.
-*   For openSUSE Leap Micro, `combustion.path=<ConfigURL>`.
+#### Mode 3: PXE Boot (Traditional Network Boot)
+
+Use this with existing PXE infrastructure.
+
+<details>
+<summary>Example: `b7machine-pxe.yaml`</summary>
+
+```yaml
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+kind: Beskar7Machine
+metadata:
+  name: node-03
+  namespace: default
+spec:
+  osFamily: "flatcar"
+  imageURL: "http://pxe-server.example.com/flatcar.iso"  # Reference
+  provisioningMode: "PXE"
+  bootMode: "UEFI"
+```
+</details>
+
+**Prerequisites:** DHCP, TFTP, and PXE infrastructure must be configured. See [PXE Setup Guide](examples/pxe-ipxe-prerequisites.md).
+
+#### Mode 4: iPXE Boot (Modern Network Boot)
+
+Use this with iPXE infrastructure for faster, HTTP-based boot.
+
+<details>
+<summary>Example: `b7machine-ipxe.yaml`</summary>
+
+```yaml
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+kind: Beskar7Machine
+metadata:
+  name: node-04
+  namespace: default
+spec:
+  osFamily: "kairos"
+  imageURL: "http://ipxe-server.example.com/boot.ipxe"  # iPXE script URL
+  provisioningMode: "iPXE"
+  bootMode: "UEFI"
+```
+</details>
+
+**Prerequisites:** DHCP and HTTP server with iPXE scripts. See [iPXE Setup Guide](examples/pxe-ipxe-prerequisites.md).
+
+### 4. Complete Examples
+
+For complete cluster deployments with multiple nodes, see the [`examples/`](examples/) directory:
+
+- **[Minimal Test Cluster](examples/minimal-test-cluster.yaml)** - Single-node testing
+- **[Complete Cluster](examples/complete-cluster.yaml)** - Multi-node with HA
+- **[PXE Provisioning](examples/pxe-provisioning-example.yaml)** - Full PXE cluster
+- **[iPXE Provisioning](examples/ipxe-provisioning-example.yaml)** - Full iPXE cluster
+- **[Examples README](examples/README.md)** - Overview of all examples
 
 ## Hardware Compatibility
 
-Beskar7 supports any Redfish-compliant BMC. Tested vendors include:
+### Supported Hardware Vendors
 
-- **Dell Technologies** (iDRAC9) - Support with minor RemoteConfig limitations
-- **HPE** (iLO 5) - Redfish compliance and feature support  
-- **Lenovo** (XCC) - Good overall compatibility with reliable boot parameter injection
-- **Supermicro** (BMC) - Variable support, newer X12+ series recommended
+Beskar7 supports any Redfish-compliant BMC with **automatic vendor detection**:
+
+- **Dell Technologies** (iDRAC9+) - Full support with automatic BIOS attribute handling
+- **HPE** (iLO 5+) - Full support with UEFI Target Boot Override  
+- **Lenovo** (XCC) - Full support with intelligent BIOS fallback
+- **Supermicro** (BMC) - Good support, X12+ series recommended
+
+### Supported Operating Systems
+
+Beskar7 supports the following immutable OS families:
+
+| OS Family | Provisioning Modes | Status |
+|-----------|-------------------|--------|
+| **Kairos** (Alpine, Ubuntu) | All modes | ✅ Recommended |
+| **Flatcar Container Linux** | All modes | ✅ Fully supported |
+| **openSUSE Leap Micro** | All modes | ✅ Fully supported |
+
+**Note:** Traditional Linux distributions (Ubuntu, RHEL, CentOS, etc.) are not currently supported. Only immutable, cloud-native OS families with built-in provisioning mechanisms are supported.
 
 For detailed compatibility information, hardware-specific workarounds, and testing procedures, see the **[Hardware Compatibility Matrix](docs/hardware-compatibility.md)**.
 
@@ -360,15 +423,11 @@ For production deployments, review:
 
 ## Contributing
 
-For information about contributing to Beskar7, see the `CONTRIBUTING.md` file and the issue tracker at https://github.com/wrkode/beskar7/issues.
+Contributions are welcome! For information about contributing to Beskar7, see the issue tracker at https://github.com/wrkode/beskar7/issues.
 
 ## Project Status and Roadmap
 
 For detailed information about the project's current status and future plans, please see the **[GitHub Issues](https://github.com/wrkode/beskar7/issues)** and **[GitHub Projects](https://github.com/wrkode/beskar7/projects)** pages.
-
-## Contributing
-
-Contributions are welcome! Please refer to the contribution guidelines (to be added).
 
 ## Running Tests
 
@@ -424,6 +483,49 @@ helm uninstall beskar7 --namespace beskar7-system
 ```bash
 helm upgrade beskar7 beskar7/beskar7 --namespace beskar7-system
 ```
+
+## Quick Reference
+
+### Provisioning Modes
+
+| Mode | Use Case | Infrastructure Required |
+|------|----------|------------------------|
+| **PreBakedISO** | Pre-configured ISO | HTTP/HTTPS server for ISO hosting |
+| **RemoteConfig** | Generic ISO + config URL | HTTP/HTTPS server for ISO and config |
+| **PXE** | Traditional network boot | DHCP, TFTP, PXE infrastructure |
+| **iPXE** | Modern network boot | DHCP, HTTP, iPXE infrastructure |
+
+### Supported OS Families
+
+- **kairos** - Cloud-native, immutable OS (recommended)
+- **flatcar** - Container-optimized Linux
+- **LeapMicro** - openSUSE Leap Micro
+
+### Key Resources
+
+- **PhysicalHost** - Represents a bare-metal server
+- **Beskar7Machine** - CAPI Machine infrastructure
+- **Beskar7Cluster** - CAPI Cluster infrastructure
+- **Beskar7MachineTemplate** - Template for machine configs
+
+### Getting Help
+
+- 📖 [Complete Documentation](docs/README.md)
+- 🐛 [Issue Tracker](https://github.com/wrkode/beskar7/issues)
+- 💬 [Discussions](https://github.com/wrkode/beskar7/discussions)
+- 📚 [Examples](examples/)
+
+## Recent Updates
+
+### Latest Improvements (v0.x.x)
+
+- ✅ **PXE/iPXE Support**: Full network boot provisioning modes
+- ✅ **Boot Mode Control**: UEFI and Legacy BIOS support
+- ✅ **Enhanced Testing**: Comprehensive test coverage
+- ✅ **Documentation**: Complete alignment with implementation
+- ✅ **OS Support**: Focused on proven immutable OS families
+
+See [CHANGELOG.md](CHANGELOG.md) for detailed release notes.
 
 ## License
 

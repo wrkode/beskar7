@@ -26,6 +26,9 @@ type Client interface {
 	// SetBootSourceISO configures the system to boot from an ISO
 	SetBootSourceISO(ctx context.Context, isoURL string) error
 
+	// SetBootSourcePXE configures the system to boot from PXE/network
+	SetBootSourcePXE(ctx context.Context) error
+
 	// EjectVirtualMedia ejects any inserted virtual media
 	EjectVirtualMedia(ctx context.Context) error
 

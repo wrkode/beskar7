@@ -58,10 +58,11 @@ const (
 	// Provisioning modes
 	provisioningModeRemoteConfig = "RemoteConfig"
 	provisioningModePreBakedISO  = "PreBakedISO"
+	provisioningModePXE          = "PXE"
+	provisioningModeIPXE         = "iPXE"
 
 	// Supported OS families
 	osFamilyKairos    = "kairos"
-	osFamilyTalos     = "talos"
 	osFamilyFlatcar   = "flatcar"
 	osFamilyLeapMicro = "LeapMicro"
 )
@@ -457,8 +458,6 @@ func (r *Beskar7MachineReconciler) configureHostBootParameters(ctx context.Conte
 		switch b7machine.Spec.OSFamily {
 		case osFamilyKairos:
 			kernelParams = []string{fmt.Sprintf("config_url=%s", b7machine.Spec.ConfigURL)}
-		case osFamilyTalos:
-			kernelParams = []string{fmt.Sprintf("talos.config=%s", b7machine.Spec.ConfigURL)}
 		case osFamilyFlatcar:
 			kernelParams = []string{fmt.Sprintf("flatcar.ignition.config.url=%s", b7machine.Spec.ConfigURL)}
 		case osFamilyLeapMicro:
@@ -489,6 +488,26 @@ func (r *Beskar7MachineReconciler) configureHostBootParameters(ctx context.Conte
 			logger.Error(err, "Failed to set boot source ISO for PreBakedISO", "ImageURL", b7machine.Spec.ImageURL)
 			return err
 		}
+
+	case provisioningModePXE:
+		logger.Info("Configuring boot for PXE mode")
+		// For PXE boot, we need to configure the host to boot from network
+		// The actual PXE infrastructure (DHCP, TFTP) must be configured separately
+		if err := rfClient.SetBootSourcePXE(ctx); err != nil {
+			logger.Error(err, "Failed to configure PXE boot")
+			return errors.Wrap(err, "PXE boot configuration failed - ensure BMC supports PXE boot and network boot infrastructure is available")
+		}
+		logger.Info("Successfully configured PXE boot - ensure PXE server is properly configured")
+
+	case provisioningModeIPXE:
+		logger.Info("Configuring boot for iPXE mode")
+		// For iPXE, we typically boot to iPXE and then chain load from a URL
+		// This requires iPXE infrastructure to be available
+		if err := rfClient.SetBootSourcePXE(ctx); err != nil {
+			logger.Error(err, "Failed to configure iPXE boot")
+			return errors.Wrap(err, "iPXE boot configuration failed - ensure BMC supports network boot and iPXE infrastructure is available")
+		}
+		logger.Info("Successfully configured iPXE boot - ensure iPXE server is properly configured")
 
 	default:
 		err := errors.Errorf("invalid ProvisioningMode: %s", provisioningMode)
@@ -562,8 +581,8 @@ func (r *Beskar7MachineReconciler) findAndClaimHostOriginal(ctx context.Context,
 	// ProviderID not set, list hosts to find an associated or available one
 	logger.Info("ProviderID not set, searching for associated or available PhysicalHost")
 	phList := &infrastructurev1beta1.PhysicalHostList{}
+	// List all hosts in namespace; label-based selection is handled by HostClaimCoordinator
 	listOpts := []client.ListOption{client.InNamespace(b7machine.Namespace)}
-	// TODO: Add label selector if using labels for matching?
 	if err := r.List(ctx, phList, listOpts...); err != nil {
 		logger.Error(err, "Failed to list PhysicalHosts")
 		return nil, ctrl.Result{}, err
@@ -658,8 +677,6 @@ func (r *Beskar7MachineReconciler) findAndClaimHostOriginal(ctx context.Context,
 			switch b7machine.Spec.OSFamily {
 			case osFamilyKairos:
 				kernelParams = []string{fmt.Sprintf("config_url=%s", b7machine.Spec.ConfigURL)}
-			case osFamilyTalos:
-				kernelParams = []string{fmt.Sprintf("talos.config=%s", b7machine.Spec.ConfigURL)}
 			case osFamilyFlatcar:
 				kernelParams = []string{fmt.Sprintf("flatcar.ignition.config.url=%s", b7machine.Spec.ConfigURL)}
 			case osFamilyLeapMicro:
@@ -690,6 +707,26 @@ func (r *Beskar7MachineReconciler) findAndClaimHostOriginal(ctx context.Context,
 				logger.Error(err, "Failed to set boot source ISO for PreBakedISO", "ImageURL", b7machine.Spec.ImageURL)
 				return nil, ctrl.Result{}, err // Requeue
 			}
+
+		case provisioningModePXE:
+			logger.Info("Configuring boot for PXE mode")
+			// For PXE boot, we need to configure the host to boot from network
+			// The actual PXE infrastructure (DHCP, TFTP) must be configured separately
+			if err := rfClient.SetBootSourcePXE(ctx); err != nil {
+				logger.Error(err, "Failed to configure PXE boot")
+				return nil, ctrl.Result{}, errors.Wrap(err, "PXE boot configuration failed - ensure BMC supports PXE boot and network boot infrastructure is available")
+			}
+			logger.Info("Successfully configured PXE boot - ensure PXE server is properly configured")
+
+		case provisioningModeIPXE:
+			logger.Info("Configuring boot for iPXE mode")
+			// For iPXE, we typically boot to iPXE and then chain load from a URL
+			// This requires iPXE infrastructure to be available
+			if err := rfClient.SetBootSourcePXE(ctx); err != nil {
+				logger.Error(err, "Failed to configure iPXE boot")
+				return nil, ctrl.Result{}, errors.Wrap(err, "iPXE boot configuration failed - ensure BMC supports network boot and iPXE infrastructure is available")
+			}
+			logger.Info("Successfully configured iPXE boot - ensure iPXE server is properly configured")
 
 		default:
 			err := errors.Errorf("invalid ProvisioningMode: %s", provisioningMode)

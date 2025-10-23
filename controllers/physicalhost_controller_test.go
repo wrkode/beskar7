@@ -140,7 +140,10 @@ var _ = Describe("PhysicalHost Controller", func() {
 				g.Expect(createdPh.Status.State).To(Equal(infrastructurev1beta1.StateAvailable))
 				g.Expect(createdPh.Status.ObservedPowerState).To(Equal(string(redfish.OffPowerState))) // Mock default
 				g.Expect(createdPh.Status.HardwareDetails).NotTo(BeNil())
-				// TODO: Add condition checks using conditions.IsTrue, etc.
+
+				// Check conditions
+				g.Expect(conditions.IsTrue(createdPh, infrastructurev1beta1.RedfishConnectionReadyCondition)).To(BeTrue(), "RedfishConnectionReady should be true")
+				g.Expect(conditions.IsTrue(createdPh, infrastructurev1beta1.HostAvailableCondition)).To(BeTrue(), "HostAvailable should be true")
 			}, Timeout, Interval).Should(Succeed(), "PhysicalHost should become Available")
 
 			// Verify mock client methods were called (optional)
@@ -225,15 +228,6 @@ var _ = Describe("PhysicalHost Controller", func() {
 			// Cleanup the unique secret for this test
 			Expect(k8sClient.Delete(ctx, deleteSecret)).To(Succeed())
 		})
-
-		// TODO: Add more tests:
-		// - Test deletion/finalizer removal
-		// - Test Redfish connection failure (using mock)
-		// - Test secret not found / missing data
-		// - Test provisioning flow (when claimed by a machine)
-		//   - Check SetBootSourceISO called
-		//   - Check SetPowerState called
-		//   - Check status becomes Provisioned
 
 		It("should handle Redfish connection failure", func() {
 			By("Creating PhysicalHost with mock that fails connection")

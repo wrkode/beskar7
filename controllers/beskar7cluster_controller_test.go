@@ -203,7 +203,6 @@ var _ = Describe("Beskar7Cluster Reconciler", func() {
 		})
 
 		It("should handle machine ready but no address", func() {
-			Skip("TODO: Fix control plane endpoint detection for machines without addresses")
 			// Create a machine that's ready but has no addresses
 			machineWithoutAddress := &clusterv1.Machine{
 				ObjectMeta: metav1.ObjectMeta{
@@ -247,7 +246,6 @@ var _ = Describe("Beskar7Cluster Reconciler", func() {
 		})
 
 		It("should handle machine ready but only external address", func() {
-			Skip("TODO: Fix control plane endpoint detection for machines with only external addresses")
 			// Create a machine that's ready but only has external IP
 			machineWithExternalOnly := &clusterv1.Machine{
 				ObjectMeta: metav1.ObjectMeta{
@@ -344,7 +342,6 @@ var _ = Describe("Beskar7Cluster Reconciler", func() {
 			}, "5s", "100ms").Should(Succeed(), "ControlPlaneEndpoint should not be set for non-ready machine")
 		})
 
-		// TODO: Add tests for failure domain discovery
 		It("should discover FailureDomains from PhysicalHost labels", func() {
 			// Create the Beskar7Cluster first (will have finalizer added on first reconcile)
 			Expect(k8sClient.Create(ctx, b7cluster)).To(Succeed())

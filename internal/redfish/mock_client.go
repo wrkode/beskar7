@@ -19,6 +19,7 @@ type MockClient struct {
 	ShouldFail      map[string]error // Map method name to error to simulate failures
 	InsertedISO     string
 	BootSourceIsISO bool
+	BootSourceIsPXE bool
 
 	// Network address fields
 	NetworkAddresses        []NetworkAddress
@@ -123,6 +124,22 @@ func (m *MockClient) SetBootSourceISO(ctx context.Context, isoURL string) error 
 	}
 	m.InsertedISO = isoURL
 	m.BootSourceIsISO = true
+	m.BootSourceIsPXE = false
+	return nil
+}
+
+// SetBootSourcePXE mock implementation.
+func (m *MockClient) SetBootSourcePXE(ctx context.Context) error {
+	m.mu.Lock()
+	m.SetBootSourceCalled = true
+	m.mu.Unlock()
+	if err := m.failIfNeeded("SetBootSourcePXE"); err != nil {
+		return err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.BootSourceIsPXE = true
+	m.BootSourceIsISO = false
 	return nil
 }
 

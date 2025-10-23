@@ -45,6 +45,7 @@ type MockRedfishClient struct {
 	GetPowerStateFunc                    func(ctx context.Context) (redfish.PowerState, error)
 	SetPowerStateFunc                    func(ctx context.Context, state redfish.PowerState) error
 	SetBootSourceISOFunc                 func(ctx context.Context, isoURL string) error
+	SetBootSourcePXEFunc                 func(ctx context.Context) error
 	EjectVirtualMediaFunc                func(ctx context.Context) error
 	SetBootParametersFunc                func(ctx context.Context, params []string) error
 	SetBootParametersWithAnnotationsFunc func(ctx context.Context, params []string, annotations map[string]string) error
@@ -81,6 +82,13 @@ func (m *MockRedfishClient) SetBootSourceISO(ctx context.Context, isoURL string)
 	m.SetBootSourceISOCalls = append(m.SetBootSourceISOCalls, isoURL)
 	if m.SetBootSourceISOFunc != nil {
 		return m.SetBootSourceISOFunc(ctx, isoURL)
+	}
+	return nil
+}
+
+func (m *MockRedfishClient) SetBootSourcePXE(ctx context.Context) error {
+	if m.SetBootSourcePXEFunc != nil {
+		return m.SetBootSourcePXEFunc(ctx)
 	}
 	return nil
 }
@@ -1089,22 +1097,22 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 			Expect(mockRfClient.SetBootSourceISOCalls[0]).To(Equal(genericIsoURL), "SetBootSourceISO called with incorrect ImageURL for LeapMicro")
 		})
 
-		It("should configure boot for RemoteConfig mode with Talos", func() {
-			remoteConfigURL := "https://example.com/talos-machineconfig.yaml"
-			genericIsoURL := "http://example.com/talos-generic.iso"
+		It("should configure boot for RemoteConfig mode with LeapMicro", func() {
+			remoteConfigURL := "https://example.com/combustion.sh"
+			genericIsoURL := "http://example.com/leap-micro.iso"
 
-			b7machine.Spec.OSFamily = "talos"
+			b7machine.Spec.OSFamily = "LeapMicro"
 			b7machine.Spec.ImageURL = genericIsoURL
 			b7machine.Spec.ProvisioningMode = "RemoteConfig"
 			b7machine.Spec.ConfigURL = remoteConfigURL
 
 			// Create a PhysicalHost that the reconciler will find and claim
 			host = &infrastructurev1beta1.PhysicalHost{
-				ObjectMeta: metav1.ObjectMeta{Name: "available-host-talos", Namespace: testNs.Name},
+				ObjectMeta: metav1.ObjectMeta{Name: "available-host-leap2", Namespace: testNs.Name},
 				Spec: infrastructurev1beta1.PhysicalHostSpec{
 					RedfishConnection: infrastructurev1beta1.RedfishConnection{
-						Address:              "https://dummy-talos.example.com",
-						CredentialsSecretRef: "dummy-secret-talos",
+						Address:              "https://dummy-leap2.example.com",
+						CredentialsSecretRef: "dummy-secret-leap2",
 					},
 				},
 			}
@@ -1114,11 +1122,11 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: host.Name, Namespace: host.Namespace}, createdHost)).To(Succeed())
 				createdHost.Status = infrastructurev1beta1.PhysicalHostStatus{State: infrastructurev1beta1.StateAvailable, Ready: true}
 				g.Expect(k8sClient.Status().Update(ctx, createdHost)).To(Succeed())
-			}, "10s", "100ms").Should(Succeed(), "Failed to update PhysicalHost status for talos test")
+			}, "10s", "100ms").Should(Succeed(), "Failed to update PhysicalHost status for LeapMicro test")
 
 			// Create dummy secret for Redfish credentials
 			dummySecret := &corev1.Secret{
-				ObjectMeta: metav1.ObjectMeta{Name: "dummy-secret-talos", Namespace: testNs.Name},
+				ObjectMeta: metav1.ObjectMeta{Name: "dummy-secret-leap2", Namespace: testNs.Name},
 				Data:       map[string][]byte{"username": []byte("user"), "password": []byte("pass")},
 			}
 			Expect(k8sClient.Create(ctx, dummySecret)).To(Succeed())
@@ -1145,17 +1153,14 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 				updatedHost := &infrastructurev1beta1.PhysicalHost{}
 				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: host.Name, Namespace: host.Namespace}, updatedHost)).To(Succeed())
 				g.Expect(updatedHost.Spec.ConsumerRef).NotTo(BeNil())
-			}, "15s", "200ms").Should(Succeed(), "PhysicalHost should be claimed after second reconcile for talos")
+			}, "15s", "200ms").Should(Succeed(), "PhysicalHost should be claimed after second reconcile for LeapMicro")
 
 			// Assert Redfish calls
-			Expect(mockRfClient.SetBootParametersCalls).To(HaveLen(1), "SetBootParameters should be called once for Talos")
-			Expect(mockRfClient.SetBootParametersCalls[0]).To(Equal([]string{fmt.Sprintf("talos.config=%s", remoteConfigURL)}), "SetBootParameters called with incorrect Talos params")
-			Expect(mockRfClient.SetBootSourceISOCalls).To(HaveLen(1), "SetBootSourceISO should be called once for Talos")
-			Expect(mockRfClient.SetBootSourceISOCalls[0]).To(Equal(genericIsoURL), "SetBootSourceISO called with incorrect ImageURL for Talos")
+			Expect(mockRfClient.SetBootParametersCalls).To(HaveLen(1), "SetBootParameters should be called once for LeapMicro")
+			Expect(mockRfClient.SetBootParametersCalls[0]).To(Equal([]string{fmt.Sprintf("combustion.path=%s", remoteConfigURL)}), "SetBootParameters called with incorrect LeapMicro params")
+			Expect(mockRfClient.SetBootSourceISOCalls).To(HaveLen(1), "SetBootSourceISO should be called once for LeapMicro")
+			Expect(mockRfClient.SetBootSourceISOCalls[0]).To(Equal(genericIsoURL), "SetBootSourceISO called with incorrect ImageURL for LeapMicro")
 		})
-
-		// TODO: Add test for "RemoteConfig" mode with missing ConfigURL (error expected)
-		// TODO: Add test for "RemoteConfig" mode with unsupported OSFamily (error expected)
 
 		It("should handle missing ConfigURL in RemoteConfig mode", func() {
 			b7machine.Spec.OSFamily = "kairos"
@@ -1447,7 +1452,6 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 		})
 
 		It("should fail for RemoteConfig mode with missing ConfigURL", func() {
-			Skip("TODO: Fix ConfigURL validation logic - test expects error but controller doesn't reach validation step")
 			// Setup mock Redfish client for this test
 			configErrorMockClient := &MockRedfishClient{
 				GetSystemInfoFunc: func(ctx context.Context) (*internalredfish.SystemInfo, error) {
@@ -1540,7 +1544,7 @@ var _ = Describe("Beskar7Machine Reconciler", func() {
 			err := k8sClient.Create(ctx, b7machine)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("Unsupported value: \"unsupported-os\""))
-			Expect(err.Error()).To(ContainSubstring("supported values: \"kairos\", \"talos\", \"flatcar\", \"LeapMicro\""))
+			Expect(err.Error()).To(ContainSubstring("supported values: \"kairos\", \"flatcar\", \"LeapMicro\""))
 
 		})
 	})
