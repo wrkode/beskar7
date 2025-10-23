@@ -52,7 +52,7 @@ Beskar7 consists of several custom controllers that work together:
 
 ### Development Prerequisites
 
-*   [Go](https://golang.org/dl/) (version 1.24 or later required)
+*   [Go](https://golang.org/dl/) (version 1.25 or later required)
 *   [Docker](https://docs.docker.com/get-docker/) (for envtest)
 *   [controller-gen](https://book.kubebuilder.io/reference/controller-gen.html) (`make install-controller-gen`)
 *   [kustomize](https://kubectl.docs.kubernetes.io/installation/kustomize/) (v4 or later for `make deploy`)

@@ -71,6 +71,7 @@ var _ = BeforeSuite(func() {
 	// Ensure envtest assets are available
 	if os.Getenv("KUBEBUILDER_ASSETS") == "" {
 		By("resolving envtest assets via setup-envtest")
+		// Use specific commit that works with Go 1.24 (before Go 1.25 requirement)
 		cmd := exec.Command("bash", "-lc", "go run sigs.k8s.io/controller-runtime/tools/setup-envtest@latest use 1.31.x -p path")
 		cmd.Env = os.Environ()
 		output, err := cmd.CombinedOutput()

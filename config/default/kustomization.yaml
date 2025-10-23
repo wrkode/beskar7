@@ -9,7 +9,7 @@ namespace: beskar7-system
 # Labels to add to all resources and selectors.
 commonLabels:
   app.kubernetes.io/name: beskar7
-  app.kubernetes.io/version: v0.3.4-alpha
+  app.kubernetes.io/version: v0.2.7
 
 bases:
 - ../crd
