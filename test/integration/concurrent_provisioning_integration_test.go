@@ -150,7 +150,7 @@ var _ = Describe("Concurrent Provisioning Integration", func() {
 				},
 				Spec: infrastructurev1beta1.PhysicalHostSpec{
 					RedfishConnection: infrastructurev1beta1.RedfishConnection{
-						Address:              "redfish.example.com",
+						Address:              "https://redfish.example.com",
 						CredentialsSecretRef: "test-secret",
 					},
 				},
@@ -247,7 +247,7 @@ var _ = Describe("Concurrent Provisioning Integration", func() {
 					},
 					Spec: infrastructurev1beta1.PhysicalHostSpec{
 						RedfishConnection: infrastructurev1beta1.RedfishConnection{
-							Address:              fmt.Sprintf("redfish%d.example.com", i),
+							Address:              fmt.Sprintf("https://redfish%d.example.com", i),
 							CredentialsSecretRef: "test-secret",
 						},
 					},
@@ -341,7 +341,7 @@ var _ = Describe("Concurrent Provisioning Integration", func() {
 				},
 				Spec: infrastructurev1beta1.PhysicalHostSpec{
 					RedfishConnection: infrastructurev1beta1.RedfishConnection{
-						Address:              "redfish.example.com",
+						Address:              "https://redfish.example.com",
 						CredentialsSecretRef: "test-secret",
 					},
 					ConsumerRef: &corev1.ObjectReference{
@@ -434,7 +434,7 @@ var _ = Describe("Concurrent Provisioning Integration", func() {
 				},
 				Spec: infrastructurev1beta1.PhysicalHostSpec{
 					RedfishConnection: infrastructurev1beta1.RedfishConnection{
-						Address:              "redfish.example.com",
+						Address:              "https://redfish.example.com",
 						CredentialsSecretRef: "test-secret",
 					},
 				},
@@ -509,7 +509,7 @@ var _ = Describe("Concurrent Provisioning Integration", func() {
 					},
 					Spec: infrastructurev1beta1.PhysicalHostSpec{
 						RedfishConnection: infrastructurev1beta1.RedfishConnection{
-							Address:              fmt.Sprintf("redfish%d.example.com", i),
+							Address:              fmt.Sprintf("https://redfish%d.example.com", i),
 							CredentialsSecretRef: "test-secret",
 						},
 					},
