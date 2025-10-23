@@ -2,8 +2,6 @@ module github.com/wrkode/beskar7
 
 go 1.25.0
 
-toolchain go1.24.2
-
 require (
 	github.com/onsi/ginkgo/v2 v2.23.4
 	github.com/onsi/gomega v1.37.0
