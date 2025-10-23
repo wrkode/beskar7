@@ -517,15 +517,16 @@ helm upgrade beskar7 beskar7/beskar7 --namespace beskar7-system
 
 ## Recent Updates
 
-### Latest Improvements (v0.x.x)
+### v0.3.4-alpha (October 23, 2025)
 
 - ✅ **PXE/iPXE Support**: Full network boot provisioning modes
 - ✅ **Boot Mode Control**: UEFI and Legacy BIOS support
-- ✅ **Enhanced Testing**: Comprehensive test coverage
+- ✅ **Enhanced Testing**: All skipped tests fixed and passing
 - ✅ **Documentation**: Complete alignment with implementation
-- ✅ **OS Support**: Focused on proven immutable OS families
+- ✅ **OS Support**: Focused on proven immutable OS families (kairos, flatcar, LeapMicro)
+- ✅ **Hardware Matching**: Label-based host selection implemented
 
-See [CHANGELOG.md](CHANGELOG.md) for detailed release notes.
+See [CHANGELOG.md](CHANGELOG.md) for complete release notes and breaking changes.
 
 ## License
 
