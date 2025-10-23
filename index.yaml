@@ -5,7 +5,7 @@ entries:
       category: Infrastructure
     apiVersion: v2
     appVersion: v0.3.4-rc1
-    created: "2025-10-23T05:19:41.136172498Z"
+    created: "2025-10-23T16:26:34.125062837Z"
     description: A Helm chart for Beskar7 - Cluster API Infrastructure Provider for
       Immutable Bare Metal
     digest: e918796c03ea14fd9f35b78f739ed226174cbc297f24c01f088bccbc0eecbebb
@@ -29,8 +29,33 @@ entries:
   - annotations:
       category: Infrastructure
     apiVersion: v2
+    appVersion: v0.3.4-alpha
+    created: "2025-10-23T16:26:34.124418774Z"
+    description: A Helm chart for Beskar7 - Cluster API Infrastructure Provider for
+      Immutable Bare Metal
+    digest: 6c1f1ce97876500dde60da44b6bb04c7d581064c70e0f39540c1a2bc592629c6
+    home: https://github.com/wrkode/beskar7
+    keywords:
+    - cluster-api
+    - infrastructure
+    - bare-metal
+    - redfish
+    - kubernetes
+    maintainers:
+    - name: wrkode
+      url: https://github.com/wrkode
+    name: beskar7
+    sources:
+    - https://github.com/wrkode/beskar7
+    type: application
+    urls:
+    - https://wrkode.github.io/beskar7/beskar7-0.3.4-alpha.tgz
+    version: 0.3.4-alpha
+  - annotations:
+      category: Infrastructure
+    apiVersion: v2
     appVersion: v0.3.3
-    created: "2025-10-23T05:19:41.135436937Z"
+    created: "2025-10-23T16:26:34.123749674Z"
     description: A Helm chart for Beskar7 - Cluster API Infrastructure Provider for
       Immutable Bare Metal
     digest: 18c06d537990663bb8e36f365e2e6f9add29e9ad2a8ae7b2a71317ecc75ff18e
@@ -51,4 +76,4 @@ entries:
     urls:
     - https://wrkode.github.io/beskar7/beskar7-0.3.3.tgz
     version: 0.3.3
-generated: "2025-10-23T05:19:41.134599236Z"
+generated: "2025-10-23T16:26:34.122893475Z"
