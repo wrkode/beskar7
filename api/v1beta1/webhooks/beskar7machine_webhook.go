@@ -149,8 +149,9 @@ func (webhook *Beskar7MachineWebhook) validateMachine(machine *infrav1beta1.Besk
 
 func (webhook *Beskar7MachineWebhook) defaultMachine(machine *infrav1beta1.Beskar7Machine) error {
 	// Set default provisioning mode if not specified
+	// Default to PreBakedISO as it's simpler and doesn't require ConfigURL
 	if machine.Spec.ProvisioningMode == "" {
-		machine.Spec.ProvisioningMode = provisioningModeRemoteConfig
+		machine.Spec.ProvisioningMode = provisioningModePreBakedISO
 	}
 
 	// Set default boot mode if not specified
