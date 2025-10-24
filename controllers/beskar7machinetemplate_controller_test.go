@@ -106,19 +106,12 @@ var _ = Describe("Beskar7MachineTemplate Controller", func() {
 		})
 
 		It("should fail validation for invalid template", func() {
-			By("Creating template with missing ImageURL")
+			By("Creating template with missing ImageURL should fail at webhook validation")
 			invalidTemplate := template.DeepCopy()
+			invalidTemplate.Name = "invalid-template"
 			invalidTemplate.Spec.Template.Spec.ImageURL = ""
-			Expect(k8sClient.Create(ctx, invalidTemplate)).To(Succeed())
-
-			By("First reconcile - should add finalizer")
-			result, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: key})
-			Expect(err).NotTo(HaveOccurred())
-			Expect(result.Requeue).To(BeTrue(), "Should requeue after adding finalizer")
-
-			By("Second reconcile - should fail validation")
-			result, err = reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: key})
-			Expect(err).To(HaveOccurred())
+			err := k8sClient.Create(ctx, invalidTemplate)
+			Expect(err).To(HaveOccurred(), "Should fail to create template with invalid ImageURL")
 			Expect(apierrors.IsInvalid(err)).To(BeTrue(), "Should return invalid error for missing ImageURL")
 		})
 
