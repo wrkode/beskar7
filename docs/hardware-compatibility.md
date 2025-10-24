@@ -127,17 +127,15 @@ All tested vendors support basic power operations:
 
 ### Supported OS Families
 
+The following immutable OS families are fully supported with RemoteConfig provisioning:
+
 | OS Family | Version Range | RemoteConfig | PreBakedISO | Notes |
 |-----------|---------------|--------------|-------------|-------|
-| **Kairos** | v2.4+ | ✅ | ✅ | Excellent support, cloud-init compatible |
-| **Talos** | v1.4+ | ✅ | ✅ | Native machine config support |
+| **Kairos** | v2.4+ | ✅ | ✅ | Recommended - Excellent support, cloud-init compatible |
 | **Flatcar** | 3400+ | ✅ | ✅ | Ignition-based configuration |
 | **openSUSE LeapMicro** | 5.3+ | ✅ | ✅ | Combustion script support |
-| **Ubuntu** | 20.04+ | ⚠️ | ✅ | Limited RemoteConfig testing |
-| **RHEL/CentOS** | 8+ | ⚠️ | ✅ | Kickstart-based, limited RemoteConfig |
-| **Fedora** | 35+ | ⚠️ | ✅ | Cloud-init compatible |
-| **Debian** | 11+ | ⚠️ | ✅ | Preseed-based configuration |
-| **openSUSE** | 15.4+ | ⚠️ | ✅ | AutoYaST configuration |
+
+**Note:** Other OS families (Ubuntu, RHEL, CentOS, Fedora, Debian, etc.) are not currently supported. Future support may be added based on community demand.
 
 ### OS-Specific Configuration
 
@@ -145,11 +143,7 @@ All tested vendors support basic power operations:
 - Uses `config_url=<URL>` kernel parameter
 - Supports cloud-init and Kairos-specific configuration
 - Excellent unattended installation support
-
-**Talos:**
-- Uses `talos.config=<URL>` kernel parameter
-- Machine configuration via YAML
-- Built for Kubernetes, minimal attack surface
+- Recommended for most use cases
 
 **Flatcar:**
 - Uses `flatcar.ignition.config.url=<URL>` kernel parameter

@@ -46,11 +46,18 @@ type ClaimRequest struct {
 
 // HostRequirements defines requirements for host selection
 type HostRequirements struct {
-	// Future: Add hardware requirements like CPU, memory, storage
-	MinCPUCores   int
-	MinMemoryGB   int
-	RequiredTags  []string
+	// MinCPUCores specifies minimum number of CPU cores required (0 = no requirement)
+	MinCPUCores int
+	// MinMemoryGB specifies minimum memory in GB required (0 = no requirement)
+	MinMemoryGB int
+	// RequiredTags are labels that must be present on the host
+	RequiredTags []string
+	// PreferredTags are labels that are preferred but not required
 	PreferredTags []string
+	// RequiredLabels are key-value pairs that must match on the host
+	RequiredLabels map[string]string
+	// PreferredLabels are key-value pairs that are preferred but not required
+	PreferredLabels map[string]string
 }
 
 // ClaimResult represents the result of a claim operation
@@ -227,8 +234,48 @@ func (c *HostClaimCoordinator) isHostAvailable(host *infrastructurev1beta1.Physi
 
 // meetsRequirements checks if a host meets the specified requirements
 func (c *HostClaimCoordinator) meetsRequirements(host *infrastructurev1beta1.PhysicalHost, requirements HostRequirements) bool {
-	// For now, all available hosts meet requirements
-	// Future: Implement hardware requirement checking
+	logger := log.FromContext(context.Background()).WithValues("host", host.Name)
+
+	// Check required labels - all must match
+	if len(requirements.RequiredLabels) > 0 {
+		for key, value := range requirements.RequiredLabels {
+			hostValue, exists := host.Labels[key]
+			if !exists || hostValue != value {
+				logger.V(1).Info("Host does not meet required label",
+					"requiredKey", key,
+					"requiredValue", value,
+					"hostValue", hostValue,
+					"exists", exists)
+				return false
+			}
+		}
+	}
+
+	// Check required tags (labels that must exist, regardless of value)
+	if len(requirements.RequiredTags) > 0 {
+		for _, tag := range requirements.RequiredTags {
+			if _, exists := host.Labels[tag]; !exists {
+				logger.V(1).Info("Host does not have required tag", "tag", tag)
+				return false
+			}
+		}
+	}
+
+	// Note: CPU and Memory checking would require HardwareDetails to be populated with more information
+	// than what's currently available from standard Redfish SystemInfo.
+	// Most Redfish implementations provide Processor and Memory collection information,
+	// but we're not currently fetching or storing that data in HardwareDetails.
+	// This would need to be implemented in the PhysicalHost controller and the HardwareDetails struct.
+
+	// For now, log a warning if CPU/Memory requirements are specified
+	if requirements.MinCPUCores > 0 || requirements.MinMemoryGB > 0 {
+		logger.V(1).Info("CPU/Memory requirements specified but not yet supported - ignoring",
+			"minCPUCores", requirements.MinCPUCores,
+			"minMemoryGB", requirements.MinMemoryGB)
+		// TODO: Implement CPU/Memory checking once HardwareDetails includes this information
+	}
+
+	// All requirements met
 	return true
 }
 

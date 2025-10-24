@@ -203,7 +203,6 @@ var _ = Describe("Beskar7Cluster Reconciler", func() {
 		})
 
 		It("should handle machine ready but no address", func() {
-			Skip("TODO: Fix control plane endpoint detection for machines without addresses")
 			// Create a machine that's ready but has no addresses
 			machineWithoutAddress := &clusterv1.Machine{
 				ObjectMeta: metav1.ObjectMeta{
@@ -234,8 +233,13 @@ var _ = Describe("Beskar7Cluster Reconciler", func() {
 			Expect(k8sClient.Create(ctx, b7cluster)).To(Succeed())
 			reconciler := &Beskar7ClusterReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}
 
-			// Reconcile and expect no control plane endpoint to be set
-			_, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: key})
+			// First reconcile - should add finalizer
+			result, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: key})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.Requeue).To(BeTrue(), "Should requeue after adding finalizer")
+
+			// Second reconcile - should check for control plane endpoint (but not find one)
+			_, err = reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: key})
 			Expect(err).NotTo(HaveOccurred())
 
 			// Verify that control plane endpoint is not set due to missing address
@@ -247,7 +251,6 @@ var _ = Describe("Beskar7Cluster Reconciler", func() {
 		})
 
 		It("should handle machine ready but only external address", func() {
-			Skip("TODO: Fix control plane endpoint detection for machines with only external addresses")
 			// Create a machine that's ready but only has external IP
 			machineWithExternalOnly := &clusterv1.Machine{
 				ObjectMeta: metav1.ObjectMeta{
@@ -283,8 +286,13 @@ var _ = Describe("Beskar7Cluster Reconciler", func() {
 			Expect(k8sClient.Create(ctx, b7cluster)).To(Succeed())
 			reconciler := &Beskar7ClusterReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}
 
-			// Reconcile - should use external IP as fallback
-			_, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: key})
+			// First reconcile - should add finalizer
+			result, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: key})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.Requeue).To(BeTrue(), "Should requeue after adding finalizer")
+
+			// Second reconcile - should detect control plane endpoint
+			_, err = reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: key})
 			Expect(err).NotTo(HaveOccurred())
 
 			// Verify that control plane endpoint uses external IP
@@ -344,7 +352,6 @@ var _ = Describe("Beskar7Cluster Reconciler", func() {
 			}, "5s", "100ms").Should(Succeed(), "ControlPlaneEndpoint should not be set for non-ready machine")
 		})
 
-		// TODO: Add tests for failure domain discovery
 		It("should discover FailureDomains from PhysicalHost labels", func() {
 			// Create the Beskar7Cluster first (will have finalizer added on first reconcile)
 			Expect(k8sClient.Create(ctx, b7cluster)).To(Succeed())

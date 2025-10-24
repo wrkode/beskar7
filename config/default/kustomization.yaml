@@ -9,7 +9,7 @@ namespace: beskar7-system
 # Labels to add to all resources and selectors.
 commonLabels:
   app.kubernetes.io/name: beskar7
-  app.kubernetes.io/version: v0.3.0
+  app.kubernetes.io/version: v0.2.7
 
 bases:
 - ../crd
@@ -33,15 +33,12 @@ patchesStrategicMerge:
 # through a ComponentConfig type
 #- manager_config_patch.yaml
 
-
-# TODO(user): Add transformations like Annotations, Labels, ConfigMapReplacements
-
 # Images for the Beskar7 manager. The image name `controller` must match
 # the name used in config/manager/manager.yaml.
 images:
 - name: controller
   newName: ghcr.io/wrkode/beskar7/beskar7
-  newTag: v0.3.0
+  newTag: v0.2.7
 
 # Replace VERSION placeholder with actual version
 replacements:

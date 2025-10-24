@@ -7,9 +7,10 @@ This document covers more advanced configuration options and usage scenarios for
 Beskar7 supports two primary provisioning modes controlled by the `spec.provisioningMode` field on the `Beskar7Machine` resource:
 
 *   **`RemoteConfig` (Default if `spec.configURL` is set):**
-    *   Requires `spec.osFamily`, `spec.imageURL` (pointing to a generic OS installer ISO), and `spec.configURL` (pointing to an OS configuration file like Kairos YAML, Flatcar Ignition JSON, Talos MachineConfig YAML, or Combustion script).
-    *   Beskar7 attempts to configure the BMC to boot the generic ISO and inject kernel parameters (`config_url=...`, `flatcar.ignition.config.url=...`, etc.) so the booting OS can fetch its configuration from the specified `configURL`.
+    *   Requires `spec.osFamily`, `spec.imageURL` (pointing to a generic OS installer ISO), and `spec.configURL` (pointing to an OS configuration file like Kairos YAML, Flatcar Ignition JSON, or openSUSE Combustion script).
+    *   Beskar7 attempts to configure the BMC to boot the generic ISO and inject kernel parameters (`config_url=...` for Kairos, `flatcar.ignition.config.url=...` for Flatcar, `combustion.path=...` for LeapMicro) so the booting OS can fetch its configuration from the specified `configURL`.
     *   **Reliability:** This mode depends heavily on the target BMC's Redfish implementation supporting the `UefiTargetBootSourceOverride` method for setting boot parameters. Success may vary across hardware vendors.
+    *   **Supported OS Families:** Currently only `kairos`, `flatcar`, and `LeapMicro` are supported with RemoteConfig mode.
 *   **`PreBakedISO` (Default if `spec.configURL` is *not* set):**
     *   Requires `spec.osFamily` and `spec.imageURL`.
     *   The `spec.imageURL` must point to an ISO image that has *already* been customized (using the target OS's native tooling, e.g., `kairos-agent build iso ...`) to include all necessary configuration for an unattended installation.

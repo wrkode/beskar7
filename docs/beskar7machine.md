@@ -23,31 +23,31 @@ Yes
 
 #### osFamily
 - **osFamily** (string, required): The operating system family to use. Must be one of:
-  - `kairos` - Kairos cloud-native OS
-  - `talos` - Talos Linux
+  - `kairos` - Kairos cloud-native OS (recommended)
   - `flatcar` - Flatcar Container Linux
   - `LeapMicro` - openSUSE Leap Micro
-  - `ubuntu` - Ubuntu Server
-  - `rhel` - Red Hat Enterprise Linux
-  - `centos` - CentOS
-  - `fedora` - Fedora Server
-  - `debian` - Debian
-  - `opensuse` - openSUSE
+
+**Note:** Only the OS families listed above are currently supported with full RemoteConfig provisioning capabilities.
 
 ### Optional Fields
 
 #### configURL
-- **configURL** (string, optional): URL of the configuration to use for the machine
+- **configURL** (string, optional): URL of the configuration to use for the machine. Required when provisioningMode is "RemoteConfig".
 
 #### providerID
-- **providerID** (string, optional): Provider-specific identifier for the machine
+- **providerID** (string, optional): Provider-specific identifier for the machine. Automatically set by the controller.
 
 #### provisioningMode
 - **provisioningMode** (string, optional, default: "RemoteConfig"): The mode to use for provisioning. Must be one of:
   - `RemoteConfig` - Boot generic ISO with configuration URL (requires configURL)
-  - `PreBakedISO` - Boot pre-configured ISO (configURL should not be set). Use this when the OS config is embedded into the ISO for `kairos`, `talos`, `flatcar`, or `LeapMicro`.
-  - `PXE` - PXE boot (future implementation)
-  - `iPXE` - iPXE boot (future implementation)
+  - `PreBakedISO` - Boot pre-configured ISO (configURL should not be set). Use this when the OS config is embedded into the ISO.
+  - `PXE` - PXE network boot (requires external PXE infrastructure)
+  - `iPXE` - iPXE network boot (requires external iPXE infrastructure)
+
+#### bootMode
+- **bootMode** (string, optional, default: "UEFI"): The firmware boot mode to use. Must be one of:
+  - `UEFI` - UEFI boot mode (recommended for modern systems)
+  - `Legacy` - Legacy BIOS boot mode
 
 ## Status
 

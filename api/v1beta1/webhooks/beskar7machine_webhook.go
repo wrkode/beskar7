@@ -105,6 +105,13 @@ func (webhook *Beskar7MachineWebhook) validateMachine(machine *infrav1beta1.Besk
 		}
 	}
 
+	// Validate boot mode if specified
+	if machine.Spec.BootMode != "" {
+		if errs := webhook.validateBootMode(machine.Spec.BootMode); len(errs) > 0 {
+			allErrs = append(allErrs, errs...)
+		}
+	}
+
 	// Validate ConfigURL format if specified
 	if machine.Spec.ConfigURL != "" {
 		if errs := webhook.validateConfigURL(machine.Spec.ConfigURL); len(errs) > 0 {
@@ -142,8 +149,14 @@ func (webhook *Beskar7MachineWebhook) validateMachine(machine *infrav1beta1.Besk
 
 func (webhook *Beskar7MachineWebhook) defaultMachine(machine *infrav1beta1.Beskar7Machine) error {
 	// Set default provisioning mode if not specified
+	// Default to PreBakedISO as it's simpler and doesn't require ConfigURL
 	if machine.Spec.ProvisioningMode == "" {
-		machine.Spec.ProvisioningMode = provisioningModeRemoteConfig
+		machine.Spec.ProvisioningMode = provisioningModePreBakedISO
+	}
+
+	// Set default boot mode if not specified
+	if machine.Spec.BootMode == "" {
+		machine.Spec.BootMode = "UEFI"
 	}
 
 	return nil
@@ -256,22 +269,15 @@ func (webhook *Beskar7MachineWebhook) validateOSFamily(osFamily string) field.Er
 
 	validOSFamilies := map[string]bool{
 		"kairos":    true,
-		"talos":     true,
 		"flatcar":   true,
 		"LeapMicro": true,
-		"ubuntu":    true,
-		"rhel":      true,
-		"centos":    true,
-		"fedora":    true,
-		"debian":    true,
-		"opensuse":  true,
 	}
 
 	if !validOSFamilies[osFamily] {
 		allErrs = append(allErrs, field.NotSupported(
 			fieldPath,
 			osFamily,
-			[]string{"kairos", "talos", "flatcar", "LeapMicro", "ubuntu", "rhel", "centos", "fedora", "debian", "opensuse"},
+			[]string{"kairos", "flatcar", "LeapMicro"},
 		))
 	}
 
@@ -294,6 +300,26 @@ func (webhook *Beskar7MachineWebhook) validateProvisioningMode(provisioningMode 
 			fieldPath,
 			provisioningMode,
 			[]string{"RemoteConfig", "PreBakedISO", "PXE", "iPXE"},
+		))
+	}
+
+	return allErrs
+}
+
+func (webhook *Beskar7MachineWebhook) validateBootMode(bootMode string) field.ErrorList {
+	var allErrs field.ErrorList
+	fieldPath := field.NewPath("spec", "bootMode")
+
+	validBootModes := map[string]bool{
+		"UEFI":   true,
+		"Legacy": true,
+	}
+
+	if !validBootModes[bootMode] {
+		allErrs = append(allErrs, field.NotSupported(
+			fieldPath,
+			bootMode,
+			[]string{"UEFI", "Legacy"},
 		))
 	}
 

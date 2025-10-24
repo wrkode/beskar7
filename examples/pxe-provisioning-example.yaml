@@ -1,0 +1,234 @@
+# PXE Provisioning Example for Beskar7
+#
+# This example demonstrates how to use PXE network boot with Beskar7.
+#
+# PREREQUISITES:
+# 1. PXE Server infrastructure running in your network:
+#    - DHCP server configured to provide PXE boot information
+#    - TFTP server with bootloader files (pxelinux.0, UEFI bootloader, etc.)
+#    - HTTP/NFS server hosting OS images and configuration
+# 2. Physical hosts with Redfish-compliant BMCs
+# 3. BMCs must support PXE boot (check hardware compatibility)
+# 4. Network connectivity between hosts and PXE infrastructure
+#
+# NOTES:
+# - Beskar7 configures the BMC to boot from network (PXE)
+# - The actual OS installation is handled by your PXE infrastructure
+# - This mode is ideal for environments with existing PXE infrastructure
+# - OS configuration must be handled by your PXE server (kickstart, cloud-init, etc.)
+
+---
+# Namespace for the cluster
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: pxe-cluster
+
+---
+# Redfish credentials secret for BMC access
+apiVersion: v1
+kind: Secret
+metadata:
+  name: bmc-credentials
+  namespace: pxe-cluster
+type: Opaque
+stringData:
+  username: "admin"
+  password: "P@ssw0rd123"  # Change this!
+
+---
+# PhysicalHost 1 - Control Plane Node
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+kind: PhysicalHost
+metadata:
+  name: pxe-control-plane-01
+  namespace: pxe-cluster
+  labels:
+    topology.kubernetes.io/zone: "zone-a"
+    node-role: "control-plane"
+spec:
+  redfishConnection:
+    address: "https://192.168.1.10"  # BMC IP address
+    credentialsSecretRef: bmc-credentials
+    insecureSkipVerify: true  # Set to false in production with proper certs
+
+---
+# PhysicalHost 2 - Worker Node
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+kind: PhysicalHost
+metadata:
+  name: pxe-worker-01
+  namespace: pxe-cluster
+  labels:
+    topology.kubernetes.io/zone: "zone-a"
+    node-role: "worker"
+spec:
+  redfishConnection:
+    address: "https://192.168.1.11"
+    credentialsSecretRef: bmc-credentials
+    insecureSkipVerify: true
+
+---
+# PhysicalHost 3 - Worker Node
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+kind: PhysicalHost
+metadata:
+  name: pxe-worker-02
+  namespace: pxe-cluster
+  labels:
+    topology.kubernetes.io/zone: "zone-b"
+    node-role: "worker"
+spec:
+  redfishConnection:
+    address: "https://192.168.1.12"
+    credentialsSecretRef: bmc-credentials
+    insecureSkipVerify: true
+
+---
+# Cluster API Cluster
+apiVersion: cluster.x-k8s.io/v1beta1
+kind: Cluster
+metadata:
+  name: pxe-cluster
+  namespace: pxe-cluster
+spec:
+  clusterNetwork:
+    pods:
+      cidrBlocks:
+        - 10.244.0.0/16
+    services:
+      cidrBlocks:
+        - 10.96.0.0/12
+  infrastructureRef:
+    apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+    kind: Beskar7Cluster
+    name: pxe-cluster
+  controlPlaneRef:
+    apiVersion: controlplane.cluster.x-k8s.io/v1beta1
+    kind: KubeadmControlPlane
+    name: pxe-cluster-control-plane
+
+---
+# Beskar7Cluster - Infrastructure provider cluster
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+kind: Beskar7Cluster
+metadata:
+  name: pxe-cluster
+  namespace: pxe-cluster
+spec:
+  # Control plane endpoint will be automatically discovered from control plane machines
+  controlPlaneEndpoint:
+    host: ""
+    port: 6443
+
+---
+# Control Plane Machine Template using PXE
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+kind: Beskar7MachineTemplate
+metadata:
+  name: pxe-cluster-control-plane
+  namespace: pxe-cluster
+spec:
+  template:
+    spec:
+      # PXE provisioning mode - Beskar7 will configure BMC to boot from network
+      provisioningMode: "PXE"
+      
+      # OS family selection (for identification purposes)
+      # Note: Actual OS installation is handled by your PXE infrastructure
+      osFamily: "flatcar"
+      
+      # ImageURL is not used in PXE mode but required by API validation
+      # Set to a placeholder or your PXE boot image URL for reference
+      imageURL: "http://pxe-server.example.com/images/flatcar-stable.iso"
+      
+      # Boot mode - UEFI recommended for modern systems
+      bootMode: "UEFI"
+
+---
+# KubeadmControlPlane - Control plane configuration
+apiVersion: controlplane.cluster.x-k8s.io/v1beta1
+kind: KubeadmControlPlane
+metadata:
+  name: pxe-cluster-control-plane
+  namespace: pxe-cluster
+spec:
+  replicas: 1
+  version: v1.30.0
+  machineTemplate:
+    infrastructureRef:
+      apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+      kind: Beskar7MachineTemplate
+      name: pxe-cluster-control-plane
+  kubeadmConfigSpec:
+    initConfiguration:
+      nodeRegistration:
+        kubeletExtraArgs:
+          provider-id: "b7://{{ ds.meta_data.instance_id }}"
+    joinConfiguration:
+      nodeRegistration:
+        kubeletExtraArgs:
+          provider-id: "b7://{{ ds.meta_data.instance_id }}"
+
+---
+# Worker Machine Deployment
+apiVersion: cluster.x-k8s.io/v1beta1
+kind: MachineDeployment
+metadata:
+  name: pxe-cluster-workers
+  namespace: pxe-cluster
+spec:
+  clusterName: pxe-cluster
+  replicas: 2
+  selector:
+    matchLabels:
+      cluster.x-k8s.io/cluster-name: pxe-cluster
+      cluster.x-k8s.io/deployment-name: pxe-cluster-workers
+  template:
+    metadata:
+      labels:
+        cluster.x-k8s.io/cluster-name: pxe-cluster
+        cluster.x-k8s.io/deployment-name: pxe-cluster-workers
+    spec:
+      clusterName: pxe-cluster
+      version: v1.30.0
+      bootstrap:
+        configRef:
+          apiVersion: bootstrap.cluster.x-k8s.io/v1beta1
+          kind: KubeadmConfigTemplate
+          name: pxe-cluster-workers
+      infrastructureRef:
+        apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+        kind: Beskar7MachineTemplate
+        name: pxe-cluster-workers
+
+---
+# Worker Machine Template using PXE
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+kind: Beskar7MachineTemplate
+metadata:
+  name: pxe-cluster-workers
+  namespace: pxe-cluster
+spec:
+  template:
+    spec:
+      provisioningMode: "PXE"
+      osFamily: "flatcar"
+      imageURL: "http://pxe-server.example.com/images/flatcar-stable.iso"
+      bootMode: "UEFI"
+
+---
+# Worker Bootstrap Config
+apiVersion: bootstrap.cluster.x-k8s.io/v1beta1
+kind: KubeadmConfigTemplate
+metadata:
+  name: pxe-cluster-workers
+  namespace: pxe-cluster
+spec:
+  template:
+    spec:
+      joinConfiguration:
+        nodeRegistration:
+          kubeletExtraArgs:
+            provider-id: "b7://{{ ds.meta_data.instance_id }}"
+

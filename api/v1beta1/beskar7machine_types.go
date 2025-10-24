@@ -50,7 +50,7 @@ type Beskar7MachineSpec struct {
 
 	// OSFamily is the operating system family to use for the machine.
 	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:Enum=kairos;talos;flatcar;LeapMicro;ubuntu;rhel;centos;fedora;debian;opensuse
+	// +kubebuilder:validation:Enum=kairos;flatcar;LeapMicro
 	OSFamily string `json:"osFamily"`
 
 	// ProvisioningMode is the mode to use for provisioning the machine.
@@ -58,6 +58,12 @@ type Beskar7MachineSpec struct {
 	// +kubebuilder:default="RemoteConfig"
 	// +optional
 	ProvisioningMode string `json:"provisioningMode,omitempty"`
+
+	// BootMode specifies the boot mode for the machine (UEFI or Legacy).
+	// +kubebuilder:validation:Enum=UEFI;Legacy
+	// +kubebuilder:default="UEFI"
+	// +optional
+	BootMode string `json:"bootMode,omitempty"`
 }
 
 // Beskar7MachineStatus defines the observed state of Beskar7Machine.

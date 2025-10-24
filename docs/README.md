@@ -61,15 +61,16 @@ Welcome to the Beskar7 documentation! This directory contains comprehensive docu
 - **Beskar7MachineTemplate**: Template for creating machine configurations
 
 ### Provisioning Modes
-- **RemoteConfig**: Boot generic ISO with remote configuration URL
+- **RemoteConfig**: Boot generic ISO with remote configuration URL (requires configURL)
 - **PreBakedISO**: Boot pre-configured ISO with embedded settings
+- **PXE**: Network boot using PXE (requires external PXE infrastructure)
+- **iPXE**: Network boot using iPXE (requires external iPXE infrastructure)
 
 ### Supported Operating Systems
-- Kairos (cloud-native, immutable)
-- Talos Linux (Kubernetes-focused)
-- Flatcar Container Linux
-- openSUSE Leap Micro
-- Traditional Linux distributions (Ubuntu, RHEL, CentOS, etc.)
+The following immutable OS families are currently supported with full RemoteConfig capabilities:
+- **Kairos** (recommended) - Cloud-native, immutable OS with built-in cluster provisioning
+- **Flatcar Container Linux** - Minimal, secure container-optimized OS
+- **openSUSE Leap Micro** - Lightweight immutable OS for containers and edge computing
 
 ## Hardware Support
 

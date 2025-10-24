@@ -36,16 +36,11 @@ Yes
 
 ##### spec.osFamily
 - **osFamily** (string, required): The operating system family to use. Must be one of:
-  - `kairos` - Kairos cloud-native OS
-  - `talos` - Talos Linux
+  - `kairos` - Kairos cloud-native OS (recommended)
   - `flatcar` - Flatcar Container Linux
   - `LeapMicro` - openSUSE Leap Micro
-  - `ubuntu` - Ubuntu Server
-  - `rhel` - Red Hat Enterprise Linux
-  - `centos` - CentOS
-  - `fedora` - Fedora Server
-  - `debian` - Debian
-  - `opensuse` - openSUSE
+
+**Note:** Only the OS families listed above are currently supported with full RemoteConfig provisioning capabilities.
 
 ### Optional Fields
 

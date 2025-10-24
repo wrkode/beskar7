@@ -270,7 +270,7 @@ Increase verbosity by editing the manager Deployment (`config/manager/manager.ya
 
 *   **Error: `osFamily 'xyz' is not supported`**
     *   **Cause:** Unsupported operating system family specified
-    *   **Solution:** Use supported OS families: kairos, talos, flatcar, ubuntu, etc.
+    *   **Solution:** Use supported OS families: `kairos`, `flatcar`, or `LeapMicro`
 
 *   **Error: `configURL is required for RemoteConfig mode`**
     *   **Cause:** Missing configuration URL for RemoteConfig provisioning

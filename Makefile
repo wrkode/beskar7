@@ -87,13 +87,14 @@ undeploy:
 release-manifests:
 	$(MAKE) manifests # Ensure CRDs and RBAC are up-to-date
 	# Update kustomization.yaml files with current VERSION before building
-	sed -i.bak 's/app\.kubernetes\.io\/version: v[0-9]\+\.[0-9]\+\.[0-9]\+/app.kubernetes.io\/version: $(VERSION)/g' config/default/kustomization.yaml
-	sed -i.bak 's/newTag: v[0-9]\+\.[0-9]\+\.[0-9]\+/newTag: $(VERSION)/g' config/default/kustomization.yaml
+	# Pattern matches versions with optional suffixes like -alpha, -beta, -rc1, etc.
+	sed -i.bak 's/app\.kubernetes\.io\/version: v[0-9]\+\.[0-9]\+\.[0-9]\+\(-[a-zA-Z0-9]\+\)*/app.kubernetes.io\/version: $(VERSION)/g' config/default/kustomization.yaml
+	sed -i.bak 's/newTag: v[0-9]\+\.[0-9]\+\.[0-9]\+\(-[a-zA-Z0-9]\+\)*/newTag: $(VERSION)/g' config/default/kustomization.yaml
 	# Update manager kustomization (critical for image tag)
-	sed -i.bak 's/newTag: v[0-9]\+\.[0-9]\+\.[0-9]\+/newTag: $(VERSION)/g' config/manager/kustomization.yaml
+	sed -i.bak 's/newTag: v[0-9]\+\.[0-9]\+\.[0-9]\+\(-[a-zA-Z0-9]\+\)*/newTag: $(VERSION)/g' config/manager/kustomization.yaml
 	# Update overlay files too
-	find config/overlays -name "kustomization.yaml" -exec sed -i.bak 's/app\.kubernetes\.io\/version: v[0-9]\+\.[0-9]\+\.[0-9]\+/app.kubernetes.io\/version: $(VERSION)/g' {} \;
-	find config/overlays -name "kustomization.yaml" -exec sed -i.bak 's/newTag: v[0-9]\+\.[0-9]\+\.[0-9]\+/newTag: $(VERSION)/g' {} \;
+	find config/overlays -name "kustomization.yaml" -exec sed -i.bak 's/app\.kubernetes\.io\/version: v[0-9]\+\.[0-9]\+\.[0-9]\+\(-[a-zA-Z0-9]\+\)*/app.kubernetes.io\/version: $(VERSION)/g' {} \;
+	find config/overlays -name "kustomization.yaml" -exec sed -i.bak 's/newTag: v[0-9]\+\.[0-9]\+\.[0-9]\+\(-[a-zA-Z0-9]\+\)*/newTag: $(VERSION)/g' {} \;
 	$(KUSTOMIZE) build config/default > beskar7-manifests-$(VERSION).yaml
 	# Restore original kustomization.yaml files
 	mv config/default/kustomization.yaml.bak config/default/kustomization.yaml

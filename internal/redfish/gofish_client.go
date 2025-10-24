@@ -320,6 +320,28 @@ func (c *gofishClient) SetBootSourceISO(ctx context.Context, isoURL string) erro
 	return nil
 }
 
+// SetBootSourcePXE configures the system to boot from PXE/network.
+func (c *gofishClient) SetBootSourcePXE(ctx context.Context) error {
+	system, err := c.getSystemService(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get system to set PXE boot: %w", err)
+	}
+
+	boot := redfish.Boot{
+		BootSourceOverrideTarget:  redfish.PxeBootSourceOverrideTarget,   // Target PXE
+		BootSourceOverrideEnabled: redfish.OnceBootSourceOverrideEnabled, // Boot from it once
+	}
+	log.Info("Attempting to set boot source override to PXE", "target", boot.BootSourceOverrideTarget, "enabled", boot.BootSourceOverrideEnabled)
+	err = system.SetBoot(boot)
+	if err != nil {
+		log.Error(err, "Failed to set boot source override to PXE")
+		return fmt.Errorf("failed to set boot source override to PXE: %w", err)
+	}
+
+	log.Info("Successfully set boot source to PXE")
+	return nil
+}
+
 // EjectVirtualMedia ejects any inserted virtual media.
 func (c *gofishClient) EjectVirtualMedia(ctx context.Context) error {
 	vm, err := c.findFirstVirtualMedia(ctx)
@@ -567,11 +589,46 @@ func (c *gofishClient) extractAddressesFromNetworkInterface(ctx context.Context,
 
 	// NetworkInterface doesn't directly contain IP addresses like EthernetInterface
 	// We need to check if it has associated ports or device functions that might contain address info
-	// For now, just log that we found the interface but can't extract addresses
-	log.V(1).Info("Found NetworkInterface but cannot extract addresses directly", "interface", netIntf.Name)
+	log.V(1).Info("Extracting addresses from NetworkInterface", "interface", netIntf.Name, "id", netIntf.ID)
 
-	// TODO: If needed, implement logic to traverse NetworkPorts or NetworkDeviceFunctions
-	// associated with this NetworkInterface to find IP address information
+	// Try to get NetworkPorts from the NetworkInterface
+	networkPorts, err := netIntf.NetworkPorts()
+	if err != nil {
+		log.V(1).Info("Could not retrieve NetworkPorts from NetworkInterface", "interface", netIntf.Name, "error", err)
+	} else if len(networkPorts) > 0 {
+		log.V(1).Info("Found NetworkPorts", "interface", netIntf.Name, "count", len(networkPorts))
+		for _, port := range networkPorts {
+			// NetworkPorts might have associated addresses in some implementations
+			// Check the OEM or vendor-specific fields if available
+			log.V(2).Info("Found NetworkPort", "port", port.ID, "physicalPortNumber", port.PhysicalPortNumber)
+		}
+	}
 
+	// Try to get NetworkDeviceFunctions from the NetworkInterface
+	networkDeviceFunctions, err := netIntf.NetworkDeviceFunctions()
+	if err != nil {
+		log.V(1).Info("Could not retrieve NetworkDeviceFunctions from NetworkInterface", "interface", netIntf.Name, "error", err)
+	} else if len(networkDeviceFunctions) > 0 {
+		log.V(1).Info("Found NetworkDeviceFunctions", "interface", netIntf.Name, "count", len(networkDeviceFunctions))
+		for _, devFunc := range networkDeviceFunctions {
+			// NetworkDeviceFunction might contain Ethernet information
+			if devFunc.Ethernet.MACAddress != "" {
+				log.V(1).Info("Found NetworkDeviceFunction with Ethernet",
+					"devFunc", devFunc.ID,
+					"macAddress", devFunc.Ethernet.MACAddress)
+
+				// Some implementations might include IP addresses in the Ethernet structure
+				// However, this is not standard - typically IP addresses are only in EthernetInterfaces
+				// We log the discovery but cannot extract IP addresses from this structure
+			}
+		}
+	}
+
+	// Note: NetworkInterface, NetworkPorts, and NetworkDeviceFunctions typically don't contain
+	// IP address information in standard Redfish schemas. IP addresses are usually only available
+	// through EthernetInterfaces. This traversal is implemented for completeness and vendor-specific
+	// implementations that might extend these resources with IP information.
+
+	log.V(1).Info("NetworkInterface traversal complete - no IP addresses found (this is expected)", "interface", netIntf.Name)
 	return addresses
 }
