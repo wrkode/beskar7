@@ -4,8 +4,8 @@ Beskar7 is a Kubernetes operator that implements the Cluster API infrastructure 
 
 ## **Automatic Vendor-Specific Hardware Support**
 
-**Important:** RedFish+VirtualMedia is in the the of being removed. please do not rely nor test this method.
- 
+**Important:** RedFish+VirtualMedia is in the process of being removed. please do not rely nor test this method.
+
 Beskar7 now automatically detects and handles vendor-specific hardware quirks! **Dell, HPE, Lenovo, and Supermicro systems** with zero configuration. (until bugs are found :D ) (**automatic detection is still experimental**)
 
 - **Dell PowerEdge:** Automatic BIOS attribute handling (testing advised following microcode upgrades)
