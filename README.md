@@ -4,6 +4,8 @@ Beskar7 is a Kubernetes operator that implements the Cluster API infrastructure 
 
 ## **Automatic Vendor-Specific Hardware Support**
 
+**Important:** RedFish+VirtualMedia is in the the of being removed. please do not rely nor test this method.
+ 
 Beskar7 now automatically detects and handles vendor-specific hardware quirks! **Dell, HPE, Lenovo, and Supermicro systems** with zero configuration. (until bugs are found :D ) (**automatic detection is still experimental**)
 
 - **Dell PowerEdge:** Automatic BIOS attribute handling (testing advised following microcode upgrades)
@@ -23,8 +25,8 @@ Beskar7 now automatically detects and handles vendor-specific hardware quirks! *
 - **OS Families**: Kairos (recommended), Flatcar, openSUSE Leap Micro
 - **Boot Modes**: UEFI (recommended), Legacy BIOS
 - **Vendor Support**: Dell, HPE, Lenovo, Supermicro (automatic detection experimental)
-- ✅ **Hardware Management**: Power control, boot configuration, status monitoring
-- ✅ **Cluster API Integration**: Full CAPI provider implementation
+- **Hardware Management**: Power control, boot configuration, status monitoring
+- **Cluster API Integration**: Infrastructure provider implementation
 
 To prepare for real hardware testing, ensure you configure reconciliation timeouts via flags or env (see `docs/state-management.md`) and follow the testing instructions below.
 
@@ -164,14 +166,6 @@ kubectl wait --for=condition=Available --timeout=300s deployment/cert-manager-ca
 ## Installation / Deployment
 
 ### Using Helm
-
-> **📝 Note for Repository Maintainers**: The Helm chart repository is automatically published to GitHub Pages via the `helm-publish.yml` workflow when a new tag is pushed. However, GitHub Pages must be manually enabled in the repository settings:
-> 1. Go to **Settings → Pages**
-> 2. Under **Build and deployment**, set **Source** to "Deploy from a branch"
-> 3. Select branch: **gh-pages**, folder: **/ (root)**
-> 4. Click **Save**
-> 
-> After enabling, wait 1-2 minutes for GitHub Pages to deploy. The workflow will then automatically update the Helm repository on every new release.
 
 #### Add the Helm repository
 
@@ -405,9 +399,9 @@ Beskar7 supports the following immutable OS families:
 
 | OS Family | Provisioning Modes | Status |
 |-----------|-------------------|--------|
-| **Kairos** (Alpine, Ubuntu) | All modes | ✅ Recommended |
-| **Flatcar Container Linux** | All modes | ✅ Fully supported |
-| **openSUSE Leap Micro** | All modes | ✅ Fully supported |
+| **Kairos** (Alpine, Ubuntu) | All modes | Recommended |
+| **Flatcar Container Linux** | All modes | untested |
+| **openSUSE Leap Micro** | All modes | supported |
 
 **Note:** Traditional Linux distributions (Ubuntu, RHEL, CentOS, etc.) are not currently supported. Only immutable, cloud-native OS families with built-in provisioning mechanisms are supported.
 
@@ -415,7 +409,7 @@ For detailed compatibility information, hardware-specific workarounds, and testi
 
 ## Production Deployment
 
-For production deployments, review:
+For deployments, review:
 
 - **[Deployment Best Practices](docs/deployment-best-practices.md)** - Security, scaling, and operational guidance
 - **[Troubleshooting Guide](docs/troubleshooting.md)** - Common issues and vendor-specific solutions
@@ -514,17 +508,6 @@ helm upgrade beskar7 beskar7/beskar7 --namespace beskar7-system
 - 🐛 [Issue Tracker](https://github.com/wrkode/beskar7/issues)
 - 💬 [Discussions](https://github.com/wrkode/beskar7/discussions)
 - 📚 [Examples](examples/)
-
-## Recent Updates
-
-### v0.3.4-alpha (October 23, 2025)
-
-- ✅ **PXE/iPXE Support**: Full network boot provisioning modes
-- ✅ **Boot Mode Control**: UEFI and Legacy BIOS support
-- ✅ **Enhanced Testing**: All skipped tests fixed and passing
-- ✅ **Documentation**: Complete alignment with implementation
-- ✅ **OS Support**: Focused on proven immutable OS families (kairos, flatcar, LeapMicro)
-- ✅ **Hardware Matching**: Label-based host selection implemented
 
 See [CHANGELOG.md](CHANGELOG.md) for complete release notes and breaking changes.
 
