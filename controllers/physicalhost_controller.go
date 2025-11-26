@@ -22,7 +22,6 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
-	"github.com/stmcginnis/gofish/redfish"
 	infrastructurev1beta1 "github.com/wrkode/beskar7/api/v1beta1"
 	internalredfish "github.com/wrkode/beskar7/internal/redfish"
 	corev1 "k8s.io/api/core/v1"
@@ -179,9 +178,9 @@ func (r *PhysicalHostReconciler) reconcileNormal(ctx context.Context, logger log
 		Model:        sysInfo.Model,
 		SerialNumber: sysInfo.SerialNumber,
 		Status: infrastructurev1beta1.HardwareStatus{
-			Health:       sysInfo.Status.Health.String(),
-			HealthRollup: sysInfo.Status.HealthRollup.String(),
-			State:        sysInfo.Status.State.String(),
+			Health:       string(sysInfo.Status.Health),
+			HealthRollup: string(sysInfo.Status.HealthRollup),
+			State:        string(sysInfo.Status.State),
 		},
 	}
 

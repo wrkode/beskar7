@@ -90,7 +90,6 @@ var _ = Describe("PhysicalHost Controller", func() {
 				RedfishClientFactory: func(ctx context.Context, address, username, password string, insecure bool) (internalredfish.Client, error) {
 					return mockRfClient, nil
 				},
-				reconcileTimeout: 60 * time.Second,
 			}
 		})
 
@@ -171,7 +170,6 @@ var _ = Describe("PhysicalHost Controller", func() {
 				RedfishClientFactory: func(ctx context.Context, address, username, password string, insecure bool) (internalredfish.Client, error) {
 					return nil, fmt.Errorf("connection timeout")
 				},
-				reconcileTimeout: 60 * time.Second,
 			}
 
 			failedPh := physicalHost.DeepCopy()
@@ -260,11 +258,11 @@ var _ = Describe("PhysicalHost Controller", func() {
 				SerialNumber: "TEST123",
 				CPUs: []infrastructurev1beta1.CPUInfo{
 					{
-						ID:       "0",
-						Vendor:   "Intel",
-						Model:    "Xeon Gold 6254",
-						Cores:    18,
-						Threads:  36,
+						ID:        "0",
+						Vendor:    "Intel",
+						Model:     "Xeon Gold 6254",
+						Cores:     18,
+						Threads:   36,
 						Frequency: "3.1GHz",
 					},
 				},
@@ -340,7 +338,6 @@ var _ = Describe("PhysicalHost Controller", func() {
 				RedfishClientFactory: func(ctx context.Context, address, username, password string, insecure bool) (internalredfish.Client, error) {
 					return mockRfClient, nil
 				},
-				reconcileTimeout: 60 * time.Second,
 			}
 		})
 

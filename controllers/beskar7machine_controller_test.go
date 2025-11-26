@@ -1,7 +1,6 @@
 package controllers
 
 import (
-	"context"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -9,7 +8,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/tools/record"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	conditions "sigs.k8s.io/cluster-api/util/conditions"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -81,18 +79,16 @@ var _ = Describe("Beskar7Machine Controller", func() {
 					Namespace: testNs.Name,
 				},
 				Spec: infrastructurev1beta1.Beskar7MachineSpec{
-					InspectionImage: "http://boot-server/ipxe/inspect.ipxe",
-					TargetOSImage:   "http://boot-server/images/kairos.tar.gz",
-					BootMode:        "iPXE",
+					InspectionImageURL: "http://boot-server/ipxe/inspect.ipxe",
+					TargetImageURL:     "http://boot-server/images/kairos.tar.gz",
 				},
 			}
 
 			// Create reconciler
 			reconciler = &Beskar7MachineReconciler{
-				Client:   k8sClient,
-				Scheme:   k8sClient.Scheme(),
-				Log:      ctrl.Log.WithName("beskar7machine-test"),
-				Recorder: record.NewFakeRecorder(100),
+				Client: k8sClient,
+				Scheme: k8sClient.Scheme(),
+				Log:    ctrl.Log.WithName("beskar7machine-test"),
 			}
 		})
 
@@ -171,11 +167,11 @@ var _ = Describe("Beskar7Machine Controller", func() {
 				SerialNumber: "ABC123",
 				CPUs: []infrastructurev1beta1.CPUInfo{
 					{
-						ID:       "0",
-						Vendor:   "Intel",
-						Model:    "Xeon Gold 6254",
-						Cores:    18,
-						Threads:  36,
+						ID:        "0",
+						Vendor:    "Intel",
+						Model:     "Xeon Gold 6254",
+						Cores:     18,
+						Threads:   36,
 						Frequency: "3.1GHz",
 					},
 				},
@@ -199,7 +195,7 @@ var _ = Describe("Beskar7Machine Controller", func() {
 				provisionedMachine := &infrastructurev1beta1.Beskar7Machine{}
 				g.Expect(k8sClient.Get(ctx, machineLookupKey, provisionedMachine)).To(Succeed())
 				g.Expect(provisionedMachine.Status.Ready).To(BeTrue())
-				g.Expect(conditions.IsTrue(provisionedMachine, infrastructurev1beta1.MachineProvisionedCondition)).To(BeTrue())
+				g.Expect(conditions.IsTrue(provisionedMachine, infrastructurev1beta1.InfrastructureReadyCondition)).To(BeTrue())
 			}, Timeout, Interval).Should(Succeed())
 
 			By("Verifying host transitioned to Provisioned")
@@ -234,7 +230,7 @@ var _ = Describe("Beskar7Machine Controller", func() {
 				cond := conditions.Get(waitingMachine, infrastructurev1beta1.MachineProvisionedCondition)
 				g.Expect(cond).NotTo(BeNil())
 				g.Expect(cond.Status).To(Equal(corev1.ConditionFalse))
-				g.Expect(cond.Reason).To(Equal(infrastructurev1beta1.WaitingForHostReason))
+				g.Expect(cond.Reason).To(Equal(infrastructurev1beta1.WaitingForPhysicalHostReason))
 			}, Timeout, Interval).Should(Succeed())
 		})
 
@@ -301,9 +297,9 @@ var _ = Describe("Beskar7Machine Controller", func() {
 		It("Should validate hardware requirements", func() {
 			By("Creating machine with hardware requirements")
 			beskar7Machine.Spec.HardwareRequirements = &infrastructurev1beta1.HardwareRequirements{
-				MinCPUCores:  32,
-				MinMemoryGB:  64,
-				MinDiskGB:    1000,
+				MinCPUCores: 32,
+				MinMemoryGB: 64,
+				MinDiskGB:   1000,
 			}
 			Expect(k8sClient.Create(ctx, beskar7Machine)).To(Succeed())
 
@@ -328,8 +324,8 @@ var _ = Describe("Beskar7Machine Controller", func() {
 				SerialNumber: "XYZ789",
 				CPUs: []infrastructurev1beta1.CPUInfo{
 					{
-						ID:       "0",
-						Cores:    16, // Less than required 32
+						ID:    "0",
+						Cores: 16, // Less than required 32
 					},
 				},
 				Memory: []infrastructurev1beta1.MemoryInfo{

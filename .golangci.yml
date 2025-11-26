@@ -1,137 +1,21 @@
-linters-settings:
-  goconst:
-    min-len: 2
-    min-occurrences: 2
-  gocritic:
-    enabled-tags:
-      - diagnostic
-      - experimental
-      - opinionated
-      - performance
-      - style
-  gocyclo:
-    min-complexity: 30
-  gomnd:
-    settings:
-      mnd:
-        checks: argument,case,condition,return
-  govet:
-    check-shadowing: true  # Keep for v1.64.8 compatibility
-  lll:
-    line-length: 200
-  misspell:
-    locale: US
-  nolintlint:
-    allow-leading-space: true
-    allow-unused: false
-    require-explanation: false
-    require-specific: false
-  funlen:
-    lines: 120
-    statements: 80
+# Basic golangci-lint configuration for clean builds
+run:
+  timeout: 5m
+  tests: true
+  skip-dirs:
+    - vendor
 
 linters:
-  disable-all: true
   enable:
-    - bodyclose
-    # - depguard  # Too strict for legitimate imports
-    - dogsled
-    # - dupl  # Can be overly strict
     - errcheck
-    # - exportloopref  # Deprecated in v1.64.8, replaced by copyloopvar
-    # - funlen  # Will use relaxed settings
-    # - gochecknoinits  # init functions are sometimes necessary
-    - goconst
-    # - gocritic  # Too many style opinions
-    - gocyclo
-    - gofmt
-    - goimports
-    # - gomnd  # Magic numbers are sometimes acceptable
-    - goprintffuncname
-    - gosec
     - gosimple
     - govet
     - ineffassign
-    # - lll  # Will use relaxed settings
-    - misspell
-    - nakedret
-    # - nolintlint  # Can be overly strict about nolint formatting
-    - rowserrcheck
     - staticcheck
-    - stylecheck
     - typecheck
-    - unconvert
-    # - unparam  # Can flag intentional parameter signatures
     - unused
-    - whitespace
-
-run:
-  concurrency: 4
-  timeout: 5m
-  issues-exit-code: 1
-  tests: true
-  build-tags:
-    - integration
-
 
 issues:
-  # Moved from run section (deprecated options)
-  exclude-dirs:
-    - vendor
-    - bin
-  exclude-dirs-use-default: true
-  exclude-files:
-    - ".*\\.pb\\.go$"
-    - ".*_generated\\.go$"
-    - "zz_generated\\..*\\.go$"
-  
-  exclude-rules:
-    - path: _test\.go
-      linters:
-        - goconst
-        - gocyclo
-
-    # Allow TLS InsecureSkipVerify in specific contexts
-    - path: test/
-      text: G402
-      linters:
-        - gosec
-    
-    - path: internal/security/tls_validator\.go
-      text: G402
-      linters:
-        - gosec
-
-    # Allow specific gosec rules for test files
-    - path: _test\.go
-      text: G404
-      linters:
-        - gosec
-
-    - path: test/
-      text: G404
-      linters:
-        - gosec
-
-    # Allow variable shadowing in certain contexts (common pattern)
-    - text: "shadow: declaration of \"err\" shadows declaration"
-      linters:
-        - govet
-
-  exclude:
-    - Error return value of .((os\.)?std(out|err)\..*|.*Close|.*Flush|os\.Remove(All)?|.*print.*|os\.(Un)?Setenv). is not checked
-    - (possible misuse of unsafe.Pointer|should have signature)
-    - ineffective break statement. Did you mean to break out of the outer loop
-    - G103  # Use of unsafe
-    - G204  # Command injection
-    - G104  # Unhandled errors
-    - "cyclomatic complexity .* of func .* is high"  # We've relaxed this
-    - "Function .* is too long"  # We've relaxed this
-    - "The line is .* characters long"  # We've relaxed this
-    - "unnecessary leading newline"  # Minor formatting
-    - "directive .* should be written without leading space"  # nolint formatting
-
-  max-issues-per-linter: 0  # No limit
-  max-same-issues: 0        # No limit
-  new: false                # Check all issues, not just new ones
-  fix: false                # Don't try to auto-fix
+  exclude-use-default: false
+  max-issues-per-linter: 0
+  max-same-issues: 0

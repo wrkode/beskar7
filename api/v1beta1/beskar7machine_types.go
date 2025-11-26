@@ -11,6 +11,8 @@ const (
 	// PhysicalHostAssociatedCondition indicates whether the Beskar7Machine has
 	// successfully associated with a PhysicalHost.
 	PhysicalHostAssociatedCondition clusterv1.ConditionType = "PhysicalHostAssociated"
+	// MachineProvisionedCondition indicates whether the machine has been provisioned
+	MachineProvisionedCondition clusterv1.ConditionType = "MachineProvisioned"
 )
 
 // Reasons for condition failures
@@ -21,6 +23,8 @@ const (
 	// WaitingForPhysicalHostReason (Severity=Info) indicates that the Beskar7Machine
 	// is waiting for an available PhysicalHost to be claimed.
 	WaitingForPhysicalHostReason string = "WaitingForPhysicalHost"
+	// WaitingForHostReason (Severity=Info) indicates waiting for a host (alias for compatibility)
+	WaitingForHostReason string = "WaitingForHost"
 	// PhysicalHostNotReadyReason (Severity=Info) indicates that the associated PhysicalHost
 	// is not yet in a Ready state (e.g., still provisioning).
 	PhysicalHostNotReadyReason string = "PhysicalHostNotReady"

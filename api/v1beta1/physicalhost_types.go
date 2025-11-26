@@ -24,6 +24,22 @@ const (
 	StateReady = "Ready"
 	// StateError indicates the host is in an error state
 	StateError = "Error"
+
+	// Deprecated states - for backward compatibility with old code
+	// These map to new states and should not be used in new code
+	StateClaimed        = "InUse"      // Deprecated: Use StateInUse
+	StateProvisioning   = "Inspecting" // Deprecated: Use StateInspecting
+	StateProvisioned    = "Ready"      // Deprecated: Use StateReady
+	StateDeprovisioning = "Error"      // Deprecated: Handle in controller
+)
+
+// Inspection phases
+const (
+	InspectionPending    = "Pending"
+	InspectionInProgress = "InProgress"
+	InspectionComplete   = "Complete"
+	InspectionFailed     = "Failed"
+	InspectionTimeout    = "Timeout"
 )
 
 // RedfishConnection contains the information needed to connect to a Redfish service
@@ -108,112 +124,6 @@ type InspectionReport struct {
 	// Timestamp when the inspection was performed
 	Timestamp metav1.Time `json:"timestamp"`
 
-	// CPUs contains CPU information
-	CPUs CPUInfo `json:"cpus"`
-
-	// Memory contains memory information
-	Memory MemoryInfo `json:"memory"`
-
-	// Disks contains information about storage devices
-	// +optional
-	Disks []DiskInfo `json:"disks,omitempty"`
-
-	// NICs contains network interface information
-	// +optional
-	NICs []NICInfo `json:"nics,omitempty"`
-
-	// System contains system/BIOS information
-	System SystemInfo `json:"system"`
-
-	// RawData contains the complete raw inspection output for debugging
-	// +optional
-	RawData string `json:"rawData,omitempty"`
-}
-
-// CPUInfo contains CPU-related information
-type CPUInfo struct {
-	// Count is the number of physical CPU sockets
-	Count int `json:"count"`
-
-	// Cores is the total number of CPU cores
-	Cores int `json:"cores"`
-
-	// Threads is the total number of CPU threads
-	Threads int `json:"threads"`
-
-	// Model is the CPU model name
-	// +optional
-	Model string `json:"model,omitempty"`
-
-	// Architecture is the CPU architecture (e.g., x86_64, aarch64)
-	// +optional
-	Architecture string `json:"architecture,omitempty"`
-
-	// MHz is the CPU frequency in MHz
-	// +optional
-	MHz float64 `json:"mhz,omitempty"`
-}
-
-// MemoryInfo contains memory information
-type MemoryInfo struct {
-	// TotalBytes is the total amount of physical memory in bytes
-	TotalBytes int64 `json:"totalBytes"`
-
-	// AvailableBytes is the available memory in bytes
-	// +optional
-	AvailableBytes int64 `json:"availableBytes,omitempty"`
-
-	// TotalGB is the total memory in GB (derived from TotalBytes)
-	TotalGB int `json:"totalGB"`
-}
-
-// DiskInfo contains information about a storage device
-type DiskInfo struct {
-	// Device is the device name (e.g., /dev/sda, /dev/nvme0n1)
-	Device string `json:"device"`
-
-	// SizeBytes is the size in bytes
-	SizeBytes int64 `json:"sizeBytes"`
-
-	// SizeGB is the size in GB
-	SizeGB int `json:"sizeGB"`
-
-	// Type is the disk type (SSD, HDD, NVMe)
-	// +optional
-	Type string `json:"type,omitempty"`
-
-	// Model is the disk model
-	// +optional
-	Model string `json:"model,omitempty"`
-
-	// Serial is the disk serial number
-	// +optional
-	Serial string `json:"serial,omitempty"`
-}
-
-// NICInfo contains network interface information
-type NICInfo struct {
-	// Interface is the interface name (e.g., eth0, ens3)
-	Interface string `json:"interface"`
-
-	// MACAddress is the MAC address
-	MACAddress string `json:"macAddress"`
-
-	// LinkStatus indicates if the link is up
-	// +optional
-	LinkStatus string `json:"linkStatus,omitempty"`
-
-	// SpeedMbps is the link speed in Mbps
-	// +optional
-	SpeedMbps int `json:"speedMbps,omitempty"`
-
-	// Driver is the network driver name
-	// +optional
-	Driver string `json:"driver,omitempty"`
-}
-
-// SystemInfo contains system/BIOS information
-type SystemInfo struct {
 	// Manufacturer is the system manufacturer
 	// +optional
 	Manufacturer string `json:"manufacturer,omitempty"`
@@ -226,13 +136,121 @@ type SystemInfo struct {
 	// +optional
 	SerialNumber string `json:"serialNumber,omitempty"`
 
-	// BIOSVersion is the BIOS/UEFI version
+	// BootModeDetected is the boot mode detected by inspector (UEFI, Legacy)
 	// +optional
-	BIOSVersion string `json:"biosVersion,omitempty"`
+	BootModeDetected string `json:"bootModeDetected,omitempty"`
 
-	// BMCAddress is the BMC IP address (if detectable)
+	// FirmwareVersion is the BIOS/UEFI version
 	// +optional
-	BMCAddress string `json:"bmcAddress,omitempty"`
+	FirmwareVersion string `json:"firmwareVersion,omitempty"`
+
+	// CPUs contains CPU information (array of CPUs)
+	// +optional
+	CPUs []CPUInfo `json:"cpus,omitempty"`
+
+	// Memory contains memory module information (array of DIMMs)
+	// +optional
+	Memory []MemoryInfo `json:"memory,omitempty"`
+
+	// Disks contains information about storage devices
+	// +optional
+	Disks []DiskInfo `json:"disks,omitempty"`
+
+	// NICs contains network interface information
+	// +optional
+	NICs []NICInfo `json:"nics,omitempty"`
+}
+
+// CPUInfo contains information about a CPU
+type CPUInfo struct {
+	// ID is the CPU identifier
+	// +optional
+	ID string `json:"id,omitempty"`
+
+	// Vendor is the CPU vendor (e.g., GenuineIntel, AuthenticAMD)
+	// +optional
+	Vendor string `json:"vendor,omitempty"`
+
+	// Model is the CPU model name
+	// +optional
+	Model string `json:"model,omitempty"`
+
+	// Cores is the number of cores
+	// +optional
+	Cores int `json:"cores,omitempty"`
+
+	// Threads is the number of threads
+	// +optional
+	Threads int `json:"threads,omitempty"`
+
+	// Frequency is the CPU frequency (e.g., "3.1GHz")
+	// +optional
+	Frequency string `json:"frequency,omitempty"`
+}
+
+// MemoryInfo contains information about a memory module
+type MemoryInfo struct {
+	// ID is the memory module identifier (e.g., DIMM0)
+	// +optional
+	ID string `json:"id,omitempty"`
+
+	// Type is the memory type (e.g., DDR4, DDR5)
+	// +optional
+	Type string `json:"type,omitempty"`
+
+	// Capacity is the memory capacity (e.g., "32GB")
+	// +optional
+	Capacity string `json:"capacity,omitempty"`
+
+	// Speed is the memory speed (e.g., "3200MHz")
+	// +optional
+	Speed string `json:"speed,omitempty"`
+}
+
+// DiskInfo contains information about a storage disk
+type DiskInfo struct {
+	// Name is the device name (e.g., /dev/sda, /dev/nvme0n1)
+	// +optional
+	Name string `json:"name,omitempty"`
+
+	// Model is the disk model
+	// +optional
+	Model string `json:"model,omitempty"`
+
+	// SizeGB is the disk size in GB
+	// +optional
+	SizeGB int `json:"sizeGB,omitempty"`
+
+	// Type is the disk type (SSD, HDD, NVMe)
+	// +optional
+	Type string `json:"type,omitempty"`
+
+	// SerialNumber is the disk serial number
+	// +optional
+	SerialNumber string `json:"serialNumber,omitempty"`
+}
+
+// NICInfo contains information about a network interface card
+type NICInfo struct {
+	// Name is the interface name (e.g., eth0, ens3)
+	// +optional
+	Name string `json:"name,omitempty"`
+
+	// MACAddress is the MAC address
+	// +optional
+	MACAddress string `json:"macAddress,omitempty"`
+
+	// Driver is the network driver name
+	// +optional
+	Driver string `json:"driver,omitempty"`
+
+	// Speed is the link speed (e.g., "1Gbps", "10Gbps")
+	// +optional
+	Speed string `json:"speed,omitempty"`
+
+	// IPAddresses are the IP addresses assigned to this interface
+	// +optional
+	IPAddresses []string `json:"ipAddresses,omitempty"`
 }
 
 // PhysicalHostStatus defines the observed state of PhysicalHost
@@ -385,8 +403,16 @@ func (in *PhysicalHostStatus) DeepCopyInto(out *PhysicalHostStatus) {
 func (in *InspectionReport) DeepCopyInto(out *InspectionReport) {
 	*out = *in
 	in.Timestamp.DeepCopyInto(&out.Timestamp)
-	out.CPUs = in.CPUs
-	out.Memory = in.Memory
+	if in.CPUs != nil {
+		in, out := &in.CPUs, &out.CPUs
+		*out = make([]CPUInfo, len(*in))
+		copy(*out, *in)
+	}
+	if in.Memory != nil {
+		in, out := &in.Memory, &out.Memory
+		*out = make([]MemoryInfo, len(*in))
+		copy(*out, *in)
+	}
 	if in.Disks != nil {
 		in, out := &in.Disks, &out.Disks
 		*out = make([]DiskInfo, len(*in))
@@ -397,7 +423,6 @@ func (in *InspectionReport) DeepCopyInto(out *InspectionReport) {
 		*out = make([]NICInfo, len(*in))
 		copy(*out, *in)
 	}
-	out.System = in.System
 }
 
 // DeepCopy is an autogenerated deepcopy function for InspectionReport

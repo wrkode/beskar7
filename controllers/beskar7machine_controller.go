@@ -320,14 +320,29 @@ func (r *Beskar7MachineReconciler) validateInspectionReport(ctx context.Context,
 	if b7machine.Spec.HardwareRequirements != nil {
 		reqs := b7machine.Spec.HardwareRequirements
 
-		if reqs.MinCPUCores > 0 && report.CPUs.Cores < reqs.MinCPUCores {
-			err := fmt.Errorf("insufficient CPU cores: found %d, required %d", report.CPUs.Cores, reqs.MinCPUCores)
+		// Calculate total cores from all CPUs
+		totalCores := 0
+		for _, cpu := range report.CPUs {
+			totalCores += cpu.Cores
+		}
+
+		if reqs.MinCPUCores > 0 && totalCores < reqs.MinCPUCores {
+			err := fmt.Errorf("insufficient CPU cores: found %d, required %d", totalCores, reqs.MinCPUCores)
 			logger.Error(err, "Hardware validation failed")
 			return ctrl.Result{}, err
 		}
 
-		if reqs.MinMemoryGB > 0 && report.Memory.TotalGB < reqs.MinMemoryGB {
-			err := fmt.Errorf("insufficient memory: found %d GB, required %d GB", report.Memory.TotalGB, reqs.MinMemoryGB)
+		// Calculate total memory from all DIMMs
+		totalMemoryGB := 0
+		for _, mem := range report.Memory {
+			// Parse capacity string (e.g., "32GB" -> 32)
+			var memGB int
+			fmt.Sscanf(mem.Capacity, "%d", &memGB)
+			totalMemoryGB += memGB
+		}
+
+		if reqs.MinMemoryGB > 0 && totalMemoryGB < reqs.MinMemoryGB {
+			err := fmt.Errorf("insufficient memory: found %d GB, required %d GB", totalMemoryGB, reqs.MinMemoryGB)
 			logger.Error(err, "Hardware validation failed")
 			return ctrl.Result{}, err
 		}
@@ -503,18 +518,7 @@ func parseProviderID(id string) (string, string, error) {
 	return parts[:idx], parts[idx+1:], nil
 }
 
-func isPaused(obj client.Object) bool {
-	annotations := obj.GetAnnotations()
-	if annotations == nil {
-		return false
-	}
-	_, ok := annotations[clusterv1.PausedAnnotation]
-	return ok
-}
-
-func isClusterPaused(cluster *clusterv1.Cluster) bool {
-	return cluster != nil && cluster.Spec.Paused
-}
+// isPaused and isClusterPaused functions are in utils.go
 
 // SetupWithManager sets up the controller.
 func (r *Beskar7MachineReconciler) SetupWithManager(mgr ctrl.Manager) error {
@@ -522,4 +526,3 @@ func (r *Beskar7MachineReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		For(&infrastructurev1beta1.Beskar7Machine{}).
 		Complete(r)
 }
-
