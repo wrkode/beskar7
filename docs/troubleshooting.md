@@ -1,313 +1,561 @@
-# Troubleshooting
+# Troubleshooting Beskar7
 
-This document provides guidance on troubleshooting common issues encountered when using Beskar7.
+This guide helps you diagnose and resolve common Beskar7 issues.
 
-## Installation and Prerequisites
-
-### Controller Crashes with "no kind is registered for the type v1beta1.Machine"
-
-*   **Error:** Controller logs show:
-    ```
-    ERROR controller-runtime.source.EventHandler kind must be registered to the Scheme
-    {"error": "no kind is registered for the type v1beta1.Machine in scheme \"pkg/runtime/scheme.go:110\""}
-    ```
-    
-*   **Cause:** Cluster API (CAPI) core components are not installed in your cluster. Beskar7 is a CAPI infrastructure provider and requires CAPI to be installed first.
-
-*   **Symptoms:**
-    *   Controller manager pod crashes repeatedly
-    *   Error about `v1beta1.Machine` not registered
-    *   "failed to wait for caches to sync" errors
-    *   Controller exits with error during startup
-
-*   **Solution:**
-    
-    **Step 1: Install Cluster API**
-    
-    Using clusterctl (recommended):
-    ```bash
-    # Download and install clusterctl
-    curl -L https://github.com/kubernetes-sigs/cluster-api/releases/download/v1.10.0/clusterctl-linux-amd64 -o clusterctl
-    chmod +x clusterctl
-    sudo mv clusterctl /usr/local/bin/
-    
-    # Initialize CAPI
-    clusterctl init
-    ```
-    
-    Or manually:
-    ```bash
-    # Install CAPI core components
-    kubectl apply -f https://github.com/kubernetes-sigs/cluster-api/releases/download/v1.10.0/cluster-api-components.yaml
-    kubectl apply -f https://github.com/kubernetes-sigs/cluster-api/releases/download/v1.10.0/bootstrap-components.yaml
-    kubectl apply -f https://github.com/kubernetes-sigs/cluster-api/releases/download/v1.10.0/control-plane-components.yaml
-    
-    # Wait for CAPI to be ready
-    kubectl wait --for=condition=Available --timeout=300s deployment/capi-controller-manager -n capi-system
-    kubectl wait --for=condition=Available --timeout=300s deployment/capi-kubeadm-bootstrap-controller-manager -n capi-kubeadm-bootstrap-system
-    kubectl wait --for=condition=Available --timeout=300s deployment/capi-kubeadm-control-plane-controller-manager -n capi-kubeadm-control-plane-system
-    ```
-    
-    **Step 2: Verify CAPI Installation**
-    ```bash
-    # Check CAPI CRDs are installed
-    kubectl get crd | grep cluster.x-k8s.io
-    
-    # Should see: machines.cluster.x-k8s.io, clusters.cluster.x-k8s.io, etc.
-    
-    # Check CAPI controllers are running
-    kubectl get pods -n capi-system
-    kubectl get pods -n capi-kubeadm-bootstrap-system
-    kubectl get pods -n capi-kubeadm-control-plane-system
-    ```
-    
-    **Step 3: Restart Beskar7 Controller**
-    ```bash
-    kubectl rollout restart deployment/controller-manager -n beskar7-system
-    
-    # Watch for successful startup
-    kubectl logs -n beskar7-system deployment/controller-manager -c manager -f
-    ```
-    
-    **Step 4: Verify Beskar7 is Working**
-    ```bash
-    # Should now see Beskar7 controllers starting successfully
-    kubectl logs -n beskar7-system deployment/controller-manager -c manager --tail=50
-    
-    # You should see logs like:
-    # "Starting EventSource" for physicalhost, beskar7machine, beskar7cluster
-    # "Starting Controller" messages
-    # "Starting workers" messages
-    ```
-
-## Controller Logs
-
-The first place to look for issues is the logs of the Beskar7 controller manager pod, usually running in the `beskar7-system` namespace.
+## Quick Diagnosis
 
 ```bash
-# List the controller manager pods
-kubectl get pods -n beskar7-system -l control-plane=beskar7-controller-manager
+# Check controller is running
+kubectl get pods -n beskar7-system
 
-# View the logs
-kubectl logs -n beskar7-system -f <pod-name> -c manager
+# Check controller logs
+kubectl logs -n beskar7-system deployment/beskar7-controller-manager -f
+
+# Check PhysicalHost status
+kubectl get physicalhost
+
+# Check Beskar7Machine status
+kubectl get beskar7machine
+
+# Describe resources for details
+kubectl describe physicalhost <name>
+kubectl describe beskar7machine <name>
 ```
 
-Increase verbosity by editing the manager Deployment (`config/manager/manager.yaml` or via `kubectl edit deployment -n beskar7-system beskar7-controller-manager`) and adding a `-v=X` argument (e.g., `-v=5`) to the manager container's args list, then restart the pod.
+## Common Issues
 
-## Webhook and Certificate Issues
+### 1. Controller Crashes: "no kind is registered for the type v1beta1.Machine"
 
-### Webhook Fails with "could not find the requested resource"
+**Symptom:**
+```
+ERROR controller-runtime.source.EventHandler kind must be registered
+no kind is registered for the type v1beta1.Machine
+```
 
-*   **Error:** `Error from server (InternalError): error when creating "physicalhost.yaml": Internal error occurred: failed calling webhook "default.physicalhost.infrastructure.cluster.x-k8s.io": failed to call webhook: the server could not find the requested resource`
-    *   **Cause:** The controller manager cannot reach the Kubernetes API server, usually due to overly restrictive network policies blocking egress traffic.
-    *   **Symptoms:**
-        *   Controller logs show repeated errors like: `error retrieving resource lock ... Get "https://10.96.0.1:443/..." net/http: request canceled while waiting for connection (Client.Timeout exceeded while awaiting headers)`
-        *   Controller never acquires leader lease
-        *   Webhook calls fail with "could not find the requested resource"
-    *   **Troubleshooting:**
-        1. **Check controller logs for API server connection errors:**
-            ```bash
-            kubectl logs -n beskar7-system deployment/controller-manager -c manager --tail=50
-            ```
-        2. **Check network policies in the namespace:**
-            ```bash
-            kubectl get networkpolicies -n beskar7-system
-            ```
-        3. **Temporarily delete restrictive network policies to test:**
-            ```bash
-            kubectl delete networkpolicy -n beskar7-system --all
-            kubectl rollout restart deployment/controller-manager -n beskar7-system
-            ```
-        4. **If this fixes the issue, review and update your network policies:**
-            *   Ensure egress to port 443 (HTTPS) is allowed for API server communication
-            *   Ensure ingress to port 9443 (webhook) is allowed from all sources
-            *   Remove deny-all policies that don't have corresponding allow rules
-            *   See `config/security/network-policy.yaml` for corrected examples
-        5. **Set `networkPolicy.enabled: false` in Helm values if network policies cause issues:**
-            ```yaml
-            networkPolicy:
-              enabled: false
-            ```
+**Cause:** Cluster API is not installed
 
-### Controller Fails with Missing TLS Certificate
+**Solution:**
+```bash
+# Install Cluster API
+clusterctl init
 
-*   **Error:** `open /tmp/k8s-webhook-server/serving-certs/tls.crt: no such file or directory`
-    *   **Cause:** The controller-manager cannot find the webhook TLS certificate. This is almost always because cert-manager is not installed, not running, or the certificate/secret is missing.
-    *   **Troubleshooting:**
-        1. **Ensure cert-manager is installed and running:**
-            ```bash
-            kubectl get pods -n cert-manager
-            ```
-            All pods should be `Running`.
-        2. **Check for the certificate and secret:**
-            ```bash
-            kubectl get certificate -n beskar7-system
-            kubectl get secret -n beskar7-system
-            ```
-            You should see a certificate (e.g., `beskar7-serving-cert`) and a secret (e.g., `beskar7-webhook-server-cert`).
-        3. **If missing, re-apply the certificate manifest:**
-            ```bash
-            kubectl apply -f config/certmanager/certificate.yaml
-            ```
-        4. **Check cert-manager logs for errors:**
-            ```bash
-            kubectl logs -n cert-manager -l app=cert-manager
-            ```
-        5. **If you see errors about the namespace being terminated, ensure the `beskar7-system` namespace is `Active` and not stuck in `Terminating`.
+# Or manually:
+kubectl apply -f https://github.com/kubernetes-sigs/cluster-api/releases/download/v1.10.0/cluster-api-components.yaml
+kubectl apply -f https://github.com/kubernetes-sigs/cluster-api/releases/download/v1.10.0/bootstrap-components.yaml
+kubectl apply -f https://github.com/kubernetes-sigs/cluster-api/releases/download/v1.10.0/control-plane-components.yaml
 
-*   **Error:** `the server could not find the requested resource (post certificates.cert-manager.io)`
-    *   **Cause:** cert-manager CRDs are not installed.
-    *   **Troubleshooting:**
-        1. Install cert-manager CRDs:
-            ```bash
-            kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.12.0/cert-manager.crds.yaml
-            ```
-        2. Install cert-manager:
-            ```bash
-            kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.12.0/cert-manager.yaml
-            ```
-        3. Wait for all cert-manager pods to be running:
-            ```bash
-            kubectl get pods -n cert-manager
-            ```
+# Restart Beskar7
+kubectl rollout restart deployment/beskar7-controller-manager -n beskar7-system
+```
 
-## Common Issues & Solutions
+### 2. Webhook Fails: "connection refused" or "certificate" errors
 
-### `PhysicalHost` Reconciliation Errors
+**Symptom:**
+```
+failed calling webhook "mutation.physicalhost.infrastructure.cluster.x-k8s.io"
+x509: certificate signed by unknown authority
+```
 
-*   **Error: "Failed to connect to Redfish endpoint ... dial tcp ... i/o timeout"**
-    *   **Cause:** Network connectivity issue between the controller manager pod and the BMC IP address.
-    *   **Troubleshooting:**
-        *   Verify the BMC IP address in the `PhysicalHost.spec.redfishConnection.address` is correct.
-        *   Check network routes and firewalls between your Kubernetes nodes and the BMC network.
-        *   Verify the Redfish service is enabled and running on the BMC (usually port 443 for HTTPS).
-        *   Try pinging or connecting (`nc -vz <bmc_ip> 443`) from a Kubernetes node.
-        *   Try connecting from a debug pod within the cluster.
+**Cause:** cert-manager not installed or not ready
 
-*   **Error: "Failed to connect to Redfish endpoint ... unable to execute request, no target provided"**
-    *   **Cause:** Often indicates an issue within the underlying HTTP client or `gofish` library when parsing or preparing the request for the specified endpoint URL, even if basic connectivity exists.
-    *   **Troubleshooting:**
-        *   Ensure the `address` in `PhysicalHost.spec.redfishConnection` is correctly formatted (e.g., `https://1.2.3.4` or just `1.2.3.4`).
-        *   Check the version of the `gofish` library being used (`go.mod`) and consider updating.
-        *   Verify DNS resolution within the controller pod if using hostnames.
+**Solution:**
+```bash
+# Install cert-manager
+kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.16.2/cert-manager.yaml
 
-*   **Error: "Failed to connect to Redfish endpoint ... authentication failed"** (or similar relating to auth)
-    *   **Cause:** Incorrect username or password in the referenced credentials Secret.
-    *   **Troubleshooting:**
-        *   Verify the `credentialsSecretRef` in `PhysicalHost.spec.redfishConnection` points to the correct Secret name.
-        *   Check the content of the Secret (`kubectl get secret <secret-name> -o yaml`) ensures the `username` and `password` keys exist and contain the correct base64-encoded credentials.
-        *   Verify the user account is enabled and has appropriate privileges on the BMC.
+# Wait for it to be ready
+kubectl wait --for=condition=Available --timeout=300s deployment/cert-manager -n cert-manager
 
-*   **Error: "Failed to connect to Redfish endpoint ... x509: certificate signed by unknown authority"** (or similar TLS errors)
-    *   **Cause:** The BMC is using a self-signed or untrusted TLS certificate, and Beskar7 is configured to verify certificates.
-    *   **Troubleshooting:**
-        *   **Recommended:** Configure the BMC with a certificate signed by a trusted CA.
-        *   **Less Secure:** Set `insecureSkipVerify: true` in the `PhysicalHost.spec.redfishConnection` block. Use this with caution.
+# Restart Beskar7
+kubectl rollout restart deployment/beskar7-controller-manager -n beskar7-system
 
-*   **`PhysicalHost` Stuck in `Enrolling` or `Error` State:**
-    *   Check controller logs for connection or query errors as described above.
-    *   Verify Redfish service health on the BMC itself.
+# Verify webhook is working
+kubectl get validatingwebhookconfigurations
+kubectl get mutatingwebhookconfigurations
+```
 
-### `Beskar7Machine` Reconciliation Errors
+### 3. PhysicalHost Stuck in "Enrolling"
 
-*   **Machine Stuck Waiting for `PhysicalHost`:**
-    *   **Log:** `No associated or available PhysicalHost found, requeuing`
-    *   **Cause:** No `PhysicalHost` resources in the `Available` state exist in the same namespace as the `Beskar7Machine`.
-    *   **Troubleshooting:**
-        *   Ensure `PhysicalHost` resources for your hardware exist.
-        *   Check the status of existing `PhysicalHost`s (`kubectl get physicalhost -o wide`). Are they `Available`? If not, check their logs/conditions to see why.
-        *   Ensure `PhysicalHost`s are in the same namespace as the `Beskar7Machine`.
+**Symptom:** Host never transitions to Available
 
-*   **Machine Stuck Claiming Host / Configuring Boot:**
-    *   **Log:** `Failed to get Redfish client for host provisioning...`, `Failed to set boot parameters...`, `Failed to set boot source ISO...`
-    *   **Cause:** Errors occurred during the second phase of reconciliation where the `Beskar7MachineController` connects to the claimed `PhysicalHost`'s BMC to configure boot settings.
-    *   **Troubleshooting:** Check the specific error message. It often relates back to Redfish connectivity, authentication (same checks as for `PhysicalHost`), or BMC capability issues.
+**Common Causes:**
 
-*   **RemoteConfig Fails - `SetBootParameters` Error:**
-    *   **Log:** `Failed to set boot settings via UefiTargetBootSourceOverride...`
-    *   **Cause:** As noted in Advanced Usage, setting kernel parameters via Redfish (`UefiTargetBootSourceOverride`) is vendor-dependent and may not be supported or may require specific EFI paths.
-    *   **Troubleshooting:**
-        *   Check BMC documentation for Redfish boot override capabilities.
-        *   Inspect the target ISO to verify the EFI bootloader path (`\EFI\BOOT\BOOTX64.EFI` is a guess).
-        *   Consider using the `PreBakedISO` mode as an alternative if `RemoteConfig` is unreliable for your hardware.
-        *   Check for more detailed Redfish error messages in the logs (if available via `common.Error`).
+#### A. BMC Not Reachable
 
-*   **Virtual Media / ISO Boot Issues:**
-    *   **Log:** `Failed to insert virtual media...`, `Failed to set boot source override...`
-    *   **Cause:** Problems with the BMC's virtual media service.
-    *   **Troubleshooting:**
-        *   Verify the `imageURL` in the `Beskar7MachineSpec` is correct and accessible from the network where the BMC resides.
-        *   Check BMC logs/status for virtual media errors.
-        *   Ensure the BMC supports mounting ISOs from the specified URL type (e.g., HTTP, HTTPS, NFS - Beskar7 currently assumes HTTP/S via `gofish`).
+```bash
+# Test from your machine
+curl -k -u admin:password https://BMC_IP/redfish/v1/
 
-## Webhook Validation Errors
+# Test from controller pod
+kubectl run -it --rm debug --image=curlimages/curl --restart=Never -- \
+  curl -k -u admin:password https://BMC_IP/redfish/v1/
+```
 
-### Resource Creation/Update Rejected by Webhooks
+**Solution:**
+- Verify BMC IP address is correct
+- Check network connectivity
+- Ensure firewall allows port 443 from Kubernetes nodes
 
-*   **Error: `admission webhook denied the request`**
-    *   **Cause:** Resource specification violates validation rules enforced by admission webhooks.
-    *   **Common validation failures:**
+#### B. Invalid Credentials
 
-#### PhysicalHost Validation Errors
+```bash
+# Check secret exists
+kubectl get secret <secret-name> -o yaml
 
-*   **Error: `insecureSkipVerify=true is not allowed in production environments`**
-    *   **Cause:** TLS certificate validation is disabled in non-development environment
-    *   **Solution:** Configure proper TLS certificates or add development annotations
+# Verify username/password are correct
+kubectl get secret <secret-name> -o jsonpath='{.data.username}' | base64 -d
+kubectl get secret <secret-name> -o jsonpath='{.data.password}' | base64 -d
+```
 
-*   **Error: `invalid Redfish address format`**
-    *   **Cause:** Address doesn't match expected format (IP or FQDN with optional scheme)
-    *   **Solution:** Use format like `https://192.168.1.100` or `192.168.1.100`
+**Solution:**
+- Update secret with correct credentials
+- Verify BMC user has necessary permissions
 
-*   **Error: `credentialsSecretRef is required`**
-    *   **Cause:** Missing reference to credentials secret
-    *   **Solution:** Create credentials secret and reference it properly
+#### C. Redfish API Disabled
 
-#### Beskar7Machine Validation Errors
+**Solution:**
+- Log into BMC web interface
+- Enable Redfish API in settings
+- Dell iDRAC: Network → Redfish → Enable
+- HPE iLO: Network → iLO RESTful API → Enable
+- Supermicro: Configuration → Redfish API → Enable
 
-*   **Error: `invalid URL format for imageURL`**
-    *   **Cause:** ImageURL doesn't point to supported image format
-    *   **Solution:** Use URLs ending in .iso, .img, .qcow2, etc.
+### 4. Inspection Phase Stuck in "Pending" or "Booting"
 
-*   **Error: `osFamily 'xyz' is not supported`**
-    *   **Cause:** Unsupported operating system family specified
-    *   **Solution:** Use supported OS families: `kairos`, `flatcar`, or `LeapMicro`
+**Symptom:** InspectionPhase never progresses to "Complete"
 
-*   **Error: `configURL is required for RemoteConfig mode`**
-    *   **Cause:** Missing configuration URL for RemoteConfig provisioning
-    *   **Solution:** Provide valid configURL or change to PreBakedISO mode
+**Check:**
+```bash
+# Check inspection phase
+kubectl get physicalhost <name> -o jsonpath='{.status.inspectionPhase}'
 
-*   **Error: `configURL is not allowed for PreBakedISO mode`**
-    *   **Cause:** Configuration URL specified for pre-baked ISO mode
-    *   **Solution:** Remove configURL or change to RemoteConfig mode
+# Check machine phase
+kubectl get beskar7machine <name> -o jsonpath='{.status.phase}'
+```
 
-#### Beskar7MachineTemplate Validation Errors
+**Common Causes:**
 
-*   **Error: `providerID should not be set in machine templates`**
-    *   **Cause:** ProviderID is managed by controllers and forbidden in templates
-    *   **Solution:** Remove providerID from template specification
+#### A. iPXE Infrastructure Not Configured
 
-*   **Error: `imageURL is immutable in machine templates`**
-    *   **Cause:** Attempting to modify immutable field after creation
-    *   **Solution:** Create new template version instead of modifying existing one
+**Solution:** Set up iPXE infrastructure
+- See [iPXE Setup Guide](ipxe-setup.md)
+- Verify DHCP server is running
+- Verify HTTP server is accessible
+- Test boot script URL manually:
+  ```bash
+  curl http://boot-server/ipxe/boot.ipxe
+  ```
 
-*   **Error: `template validation failed`**
-    *   **Cause:** Template spec violates Beskar7Machine validation rules
-    *   **Solution:** Fix template spec according to Beskar7Machine requirements
+#### B. PXE Boot Not Enabled
 
-### Webhook Service Connectivity Issues
+**Solution:**
+- Enter server BIOS setup
+- Enable "Network Boot" or "PXE Boot"
+- Set network boot first in boot order
+- Save and reboot
 
-*   **Error: `failed calling webhook ... connection refused`**
-    *   **Cause:** Kubernetes API server cannot reach webhook service
-    *   **Troubleshooting:**
-        1. Check webhook service exists: `kubectl get svc -n beskar7-system beskar7-webhook-service`
-        2. Check webhook configuration: `kubectl get validatingwebhookconfiguration,mutatingwebhookconfiguration`
-        3. Verify webhook pods are running: `kubectl get pods -n beskar7-system`
-        4. Check webhook endpoints: `kubectl get endpoints -n beskar7-system`
+#### C. Inspection Image Not Accessible
 
-### General Tips
+**Solution:**
+- Verify inspection image exists:
+  ```bash
+  curl -I http://boot-server/inspector/vmlinuz
+  curl -I http://boot-server/inspector/initrd.img
+  ```
+- Check HTTP server logs
+- Ensure server can reach boot server from provisioning network
 
-*   **Check CRD Status:** `kubectl get crd physicalhosts.infrastructure.cluster.x-k8s.io -o yaml`, etc. Ensure they are established.
-*   **Check Resource Status:** Use `kubectl get physicalhost <n> -o yaml` and `kubectl get beskar7machine <n> -o yaml` to inspect the full status, including conditions and reported states.
-*   **Check BMC:** Log in directly to the BMC (Web UI, SSH) to verify its status, Redfish service state, virtual media status, and power state.
-*   **Validate Before Apply:** Use `kubectl apply --dry-run=server` to validate resources before creation
-*   **Check Webhook Logs:** View webhook validation details in controller manager logs with increased verbosity (-v=5) 
+#### D. Network Configuration Issues
+
+**Solution:**
+- Check DHCP is working (server gets IP)
+- Verify DNS resolution (if using hostnames)
+- Check firewall rules
+- Monitor server serial console for boot errors
+
+### 5. Inspection Times Out
+
+**Symptom:** InspectionPhase changes to "Timeout" after 10 minutes
+
+**Causes:**
+- Inspection image not booting
+- Inspector can't reach Beskar7 API
+- Inspector script failure
+
+**Debug:**
+```bash
+# Check server serial console (via BMC)
+# Look for:
+# - Kernel boot messages
+# - Network configuration
+# - Script errors
+
+# Check controller logs for inspection reports
+kubectl logs -n beskar7-system deployment/beskar7-controller-manager | grep inspection
+
+# Check HTTP server logs
+sudo tail -f /var/log/nginx/boot-access.log
+```
+
+**Solution:**
+- Review serial console output
+- Fix network connectivity issues
+- Verify inspection image is working
+- Increase timeout if hardware is slow
+
+### 6. Hardware Validation Failed
+
+**Symptom:** Machine stuck with validation error
+
+**Check:**
+```bash
+# View inspection report
+kubectl get physicalhost <name> -o jsonpath='{.status.inspectionReport}' | jq
+
+# View requirements
+kubectl get beskar7machine <name> -o jsonpath='{.spec.hardwareRequirements}' | jq
+```
+
+**Solution:**
+
+Option 1: Adjust requirements
+```yaml
+spec:
+  hardwareRequirements:
+    minCPUCores: 4    # Lower if needed
+    minMemoryGB: 8    # Lower if needed
+    minDiskGB: 50     # Lower if needed
+```
+
+Option 2: Use different hardware that meets requirements
+
+### 7. Power Operations Fail
+
+**Symptom:** Can't power on/off server
+
+**Check:**
+```bash
+# Check PhysicalHost power state
+kubectl get physicalhost <name> -o jsonpath='{.status.observedPowerState}'
+
+# Check controller logs
+kubectl logs -n beskar7-system deployment/beskar7-controller-manager | grep -i power
+```
+
+**Common Causes:**
+
+#### A. Insufficient Permissions
+
+**Solution:**
+- Verify BMC user has power management privileges
+- Dell iDRAC: User needs "Configure Manager" role
+- HPE iLO: User needs "Virtual Power and Reset" privilege
+- Lenovo XCC: User needs "Supervisor" role
+
+#### B. BMC Licensing
+
+**Solution:**
+- Some vendors require license for remote power control
+- Check BMC license status
+- Upgrade license if necessary
+
+#### C. Hardware Interlocks
+
+**Solution:**
+- Ensure chassis is closed (some servers have safety interlocks)
+- Check physical power button isn't locked
+- Verify power supplies are connected
+
+### 8. Machine Never Becomes Ready
+
+**Symptom:** Beskar7Machine stays in "Provisioning" or "Inspecting" phase
+
+**Check Workflow:**
+```bash
+# 1. Check PhysicalHost was claimed
+kubectl get physicalhost <name> -o jsonpath='{.spec.consumerRef}'
+
+# 2. Check inspection completed
+kubectl get physicalhost <name> -o jsonpath='{.status.inspectionPhase}'
+# Should be: Complete
+
+# 3. Check inspection report exists
+kubectl get physicalhost <name> -o jsonpath='{.status.inspectionReport}'
+
+# 4. Check machine phase
+kubectl get beskar7machine <name> -o jsonpath='{.status.phase}'
+
+# 5. Check for errors
+kubectl describe beskar7machine <name>
+kubectl describe physicalhost <name>
+```
+
+**Solution:** Depends on which step failed (see above sections)
+
+## Debugging Tools
+
+### Enable Verbose Logging
+
+```bash
+# Edit controller deployment
+kubectl edit deployment beskar7-controller-manager -n beskar7-system
+
+# Add to container args:
+spec:
+  containers:
+  - name: manager
+    args:
+    - --leader-elect
+    - -v=5  # Add this line (1-10, higher = more verbose)
+```
+
+### Watch Events
+
+```bash
+# Watch all events
+kubectl get events -A -w
+
+# Watch specific resource events
+kubectl get events --field-selector involvedObject.name=<resource-name> -w
+```
+
+### Serial Console
+
+Access server serial console through BMC:
+- Dell iDRAC: Launch Virtual Console
+- HPE iLO: Launch Remote Console
+- Lenovo XCC: Launch Remote Console
+- Supermicro: Launch SOL
+
+Watch boot process to debug:
+- PXE boot failures
+- Kernel panics
+- Inspection script errors
+
+### Network Capture
+
+Capture network traffic to debug DHCP/PXE:
+```bash
+# On boot server
+sudo tcpdump -i eth0 port 67 or port 68 or port 69 -w boot-debug.pcap
+
+# Analyze with Wireshark
+wireshark boot-debug.pcap
+```
+
+## Controller Logs Reference
+
+### Normal Startup
+
+```
+Starting Beskar7Controller Manager
+Starting EventSource controller=physicalhost
+Starting Controller controller=physicalhost
+Starting workers worker count=1
+```
+
+### Successful PhysicalHost Enrollment
+
+```
+Enrolling PhysicalHost host=server-01
+Connected to Redfish endpoint host=server-01
+PhysicalHost transitioned to Available host=server-01
+```
+
+### Successful Inspection
+
+```
+Starting inspection host=server-01 machine=worker-01
+Setting PXE boot source host=server-01
+Powering on host host=server-01
+Inspection report received host=server-01
+Hardware validation passed host=server-01
+PhysicalHost ready host=server-01
+```
+
+### Error Examples
+
+```
+# Redfish connection failed
+Failed to connect to Redfish endpoint: dial tcp: i/o timeout
+
+# Invalid credentials
+Failed to authenticate: 401 Unauthorized
+
+# Power operation failed
+Failed to set power state: operation not permitted
+
+# Inspection timeout
+Inspection timed out after 10m0s
+```
+
+## Health Checks
+
+### Controller Health
+
+```bash
+# Check controller is running
+kubectl get deployment -n beskar7-system beskar7-controller-manager
+# Should show: READY 1/1
+
+# Check controller logs for errors
+kubectl logs -n beskar7-system deployment/beskar7-controller-manager --tail=100 | grep -i error
+
+# Check webhook is healthy
+kubectl get endpoints -n beskar7-system beskar7-webhook-service
+```
+
+### PhysicalHost Health
+
+```bash
+# List all hosts
+kubectl get physicalhost -o wide
+
+# Check for hosts in error state
+kubectl get physicalhost -o json | jq '.items[] | select(.status.state=="Error")'
+
+# Check Redfish connectivity
+kubectl get physicalhost -o json | jq '.items[] | select(.status.conditions[]? | select(.type=="RedfishConnected" and .status=="False"))'
+```
+
+### Beskar7Machine Health
+
+```bash
+# List all machines
+kubectl get beskar7machine -o wide
+
+# Check for machines not ready
+kubectl get beskar7machine -o json | jq '.items[] | select(.status.ready==false)'
+
+# Check phases
+kubectl get beskar7machine -o custom-columns=NAME:.metadata.name,PHASE:.status.phase
+```
+
+## Performance Issues
+
+### Slow Reconciliation
+
+**Symptom:** Resources take long time to update
+
+**Solution:**
+```bash
+# Increase worker count
+kubectl edit deployment -n beskar7-system beskar7-controller-manager
+
+# Add to container args:
+- --max-concurrent-reconciles-physicalhost=5  # Default: 1
+- --max-concurrent-reconciles-beskar7machine=5
+```
+
+### High CPU/Memory Usage
+
+**Symptom:** Controller pod consuming too many resources
+
+**Solution:**
+```bash
+# Check resource usage
+kubectl top pod -n beskar7-system
+
+# Set resource limits
+kubectl edit deployment -n beskar7-system beskar7-controller-manager
+
+# Add resources:
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+```
+
+## Getting Help
+
+If you can't resolve your issue:
+
+### 1. Gather Information
+
+```bash
+# Controller logs
+kubectl logs -n beskar7-system deployment/beskar7-controller-manager > controller-logs.txt
+
+# Resource dumps
+kubectl get physicalhost -o yaml > physicalhosts.yaml
+kubectl get beskar7machine -o yaml > beskar7machines.yaml
+
+# Events
+kubectl get events -A > events.txt
+
+# Redfish test
+curl -k -u admin:password https://BMC_IP/redfish/v1/ > redfish-test.json
+```
+
+### 2. Open an Issue
+
+https://github.com/wrkode/beskar7/issues
+
+Include:
+- Beskar7 version
+- Kubernetes version
+- Hardware details (vendor, BMC version)
+- What you were trying to do
+- What happened instead
+- Logs and resource dumps
+- Steps to reproduce
+
+### 3. Community Support
+
+- GitHub Discussions: https://github.com/wrkode/beskar7/discussions
+- Check existing issues for similar problems
+- Join community chat (if available)
+
+## Best Practices
+
+### Avoid Common Mistakes
+
+1. **Don't skip Cluster API installation** - Required prerequisite
+2. **Don't skip cert-manager installation** - Required for webhooks
+3. **Don't use production hardware for testing** - Test with dedicated hardware first
+4. **Don't ignore inspection reports** - They show real hardware capabilities
+5. **Don't set unrealistic hardware requirements** - Match to your actual hardware
+
+### Test Incrementally
+
+1. Deploy controller
+2. Register ONE PhysicalHost
+3. Verify it becomes Available
+4. Create ONE Beskar7Machine
+5. Monitor inspection process
+6. Verify provisioning completes
+7. THEN scale up
+
+### Monitor Actively
+
+```bash
+# Watch everything
+watch kubectl get physicalhost,beskar7machine -o wide
+
+# Follow logs continuously
+kubectl logs -n beskar7-system deployment/beskar7-controller-manager -f
+```
+
+## FAQ
+
+**Q: Why is my PhysicalHost stuck in Enrolling for 5 minutes?**
+A: Controller has exponential backoff for Redfish connection failures. Check connectivity and credentials.
+
+**Q: Inspection keeps timing out, can I increase the timeout?**
+A: Currently hardcoded to 10 minutes. If hardware is slow, consider filing an issue for configurable timeout.
+
+**Q: Can I manually trigger inspection again?**
+A: Delete and recreate the Beskar7Machine to trigger new inspection.
+
+**Q: How do I reset a PhysicalHost?**
+A: Delete the Beskar7Machine that claimed it, and it will return to Available state.
+
+**Q: Controller logs are too verbose, how do I reduce them?**
+A: Remove the `-v=X` flag or set to `-v=1` for minimal logging.
+
+---
+
+**Still stuck?** Open an issue: https://github.com/wrkode/beskar7/issues

@@ -1,0 +1,49 @@
+# Minimal Test Example for Beskar7
+#
+# This is the simplest possible example to test Beskar7:
+# - 1 physical host
+# - 1 machine  
+# - Inspection enabled
+# - No hardware requirements
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: test-bmc-creds
+  namespace: default
+type: Opaque
+stringData:
+  username: "admin"
+  password: "password"
+
+---
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+kind: PhysicalHost
+metadata:
+  name: test-server
+  namespace: default
+spec:
+  redfishConnection:
+    address: "https://192.168.1.100"
+    credentialsSecretRef: "test-bmc-creds"
+    insecureSkipVerify: true
+
+---
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+kind: Beskar7Machine
+metadata:
+  name: test-machine
+  namespace: default
+spec:
+  inspectionImageURL: "http://boot-server.local/ipxe/inspect.ipxe"
+  targetImageURL: "http://boot-server.local/images/kairos-alpine-v2.8.1.tar.gz"
+  configurationURL: "http://boot-server.local/configs/test-config.yaml"
+
+---
+# Monitor with:
+# kubectl get physicalhost test-server -w
+# kubectl get beskar7machine test-machine -w
+# kubectl describe physicalhost test-server
+# kubectl get physicalhost test-server -o jsonpath='{.status.inspectionReport}' | jq
+

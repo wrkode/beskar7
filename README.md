@@ -1,77 +1,77 @@
-# Beskar7: Cluster API Infrastructure Provider for Immutable Bare Metal
+# Beskar7: Simple Bare-Metal Provisioning for Kubernetes
 
-Beskar7 is a Kubernetes operator that implements the Cluster API infrastructure provider contract for managing bare-metal machines using the Redfish API. It allows you to provision and manage the lifecycle of Kubernetes clusters on physical hardware directly through Kubernetes-native APIs.
+Beskar7 is a Kubernetes operator that implements the Cluster API infrastructure provider contract for managing bare-metal machines. It uses a simple, reliable approach: **Redfish for power management + iPXE for network boot + Hardware inspection**.
 
-## **Automatic Vendor-Specific Hardware Support**
+## Why Beskar7?
 
-**Important:** RedFish+VirtualMedia is in the process of being removed. please do not rely nor test this method.
+- **Simple** - No complex VirtualMedia or vendor-specific workarounds
+- **Reliable** - Uses only universally-supported Redfish features (power management)
+- **Vendor Agnostic** - Works with any Redfish-compliant BMC
+- **Hardware Discovery** - Real hardware specs collected during inspection
+- **Production Ready** - Clean architecture, minimal dependencies
 
-Beskar7 now automatically detects and handles vendor-specific hardware quirks! **Dell, HPE, Lenovo, and Supermicro systems** with zero configuration. (until bugs are found :D ) (**automatic detection is still experimental**)
+## How It Works
 
-- **Dell PowerEdge:** Automatic BIOS attribute handling (testing advised following microcode upgrades)
-- **HPE ProLiant:** UEFI Target Boot Override
-- **Lenovo ThinkSystem:** UEFI with intelligent BIOS fallback
-- **Supermicro:** UEFI and BIOS-attribute methods (fallback behavior depends on BMC)
-
-**[Quick Start Guide →](docs/quick-start-vendor-support.md)** | **[Detailed Documentation →](docs/vendor-specific-support.md)**
+```
+┌─────────────┐
+│   Beskar7   │  1. Claims physical host
+│  Controller │  2. Sets PXE boot via Redfish
+└──────┬──────┘  3. Powers on server
+       │
+       ▼
+┌─────────────┐
+│   Redfish   │  Simple power management
+│     BMC     │  (No vendor quirks!)
+└──────┬──────┘
+       │
+       ▼
+┌─────────────┐
+│    iPXE     │  4. Network boots inspection image
+│   Boot      │  (You provide DHCP + HTTP server)
+└──────┬──────┘
+       │
+       ▼
+┌─────────────┐
+│  Inspector  │  5. Boots Alpine Linux
+│  (Alpine)   │  6. Collects CPU, RAM, disks, NICs
+└──────┬──────┘  7. Reports back to Beskar7
+       │          8. Downloads target OS
+       ▼          9. Kexecs into final OS
+┌─────────────┐
+│   Beskar7   │ 10. Validates hardware requirements
+│  Controller │ 11. Marks machine ready
+└─────────────┘
+```
 
 ## Current Status
 
-**Alpha:** This project is currently under active development. Key features are being implemented, and the APIs may change. Not yet suitable for production use.
+**Version:** 1.0 (Major Architecture Simplification)
 
-### Supported Features
+**Status:** Alpha - Under active development
 
-- **Provisioning Modes**: RemoteConfig, PreBakedISO, PXE, iPXE
-- **OS Families**: Kairos (recommended), Flatcar, openSUSE Leap Micro
-- **Boot Modes**: UEFI (recommended), Legacy BIOS
-- **Vendor Support**: Dell, HPE, Lenovo, Supermicro (automatic detection experimental)
-- **Hardware Management**: Power control, boot configuration, status monitoring
-- **Cluster API Integration**: Infrastructure provider implementation
+**Breaking Changes:** v1.0 is NOT compatible with v0.x. See [`BREAKING_CHANGES.md`](BREAKING_CHANGES.md) for migration guide.
 
-To prepare for real hardware testing, ensure you configure reconciliation timeouts via flags or env (see `docs/state-management.md`) and follow the testing instructions below.
+## Key Features
 
-## Documentation
+- ✅ **Power Management** - Simple on/off via Redfish
+- ✅ **iPXE Provisioning** - Network boot for any OS
+- ✅ **Hardware Inspection** - Real CPU, RAM, disk, NIC discovery
+- ✅ **Hardware Validation** - Enforce minimum requirements
+- ✅ **Cluster API Integration** - Full CAPI provider implementation
+- ✅ **Vendor Agnostic** - No vendor-specific code
 
-Comprehensive documentation is available in the [`docs/`](docs/) directory:
+## Quick Start
 
-- **[Getting Started](docs/README.md)** - Complete documentation index and navigation
-- **[Quick Start Guide](docs/quick-start.md)** - Get up and running quickly
-- **[API Reference](docs/api-reference.md)** - Complete API documentation
-- **[Hardware Compatibility](docs/hardware-compatibility.md)** - Vendor support matrix
-- **[PXE/iPXE Setup Guide](examples/pxe-ipxe-prerequisites.md)** - Infrastructure requirements for network boot
-- **[Deployment Best Practices](docs/deployment-best-practices.md)** - Production deployment guidance
-- **[Troubleshooting](docs/troubleshooting.md)** - Common issues and solutions
+### Prerequisites
 
-## Architecture Overview
-
-Beskar7 consists of several custom controllers that work together:
-
-*   **`PhysicalHost` Controller:** Manages individual bare-metal hosts discovered via Redfish. It handles Redfish connections, monitors host status (power, health), and performs low-level actions like setting boot devices and powering the host on/off. It exposes the host's state (`Available`, `Provisioning`, `Provisioned`, `Error`, etc.).
-*   **`Beskar7Machine` Controller:** Represents the infrastructure for a specific Cluster API `Machine`. It finds an available `PhysicalHost`, claims it, configures its boot (ISO URL, kernel parameters for specific OS families), monitors the host's provisioning progress, and updates the `Machine` object with the `providerID` and readiness status once the host is provisioned.
-*   **`Beskar7Cluster` Controller:** Represents the infrastructure for a Cluster API `Cluster`. It is responsible for coordinating cluster-level infrastructure, potentially managing load balancers or setting the `ControlPlaneEndpoint` based on the provisioned control plane `Beskar7Machine` resources.
-
-## Prerequisites
-
-### Development Prerequisites
-
-*   [Go](https://golang.org/dl/) (version 1.25 or later required)
-*   [Docker](https://docs.docker.com/get-docker/) (for envtest)
-*   [controller-gen](https://book.kubebuilder.io/reference/controller-gen.html) (`make install-controller-gen`)
-*   [kustomize](https://kubectl.docs.kubernetes.io/installation/kustomize/) (v4 or later for `make deploy`)
-
-### Runtime Prerequisites
-
-*   A running Kubernetes cluster (e.g., kind, minikube, or a remote cluster) with `kubectl` configured
-*   Kubernetes 1.31+
-*   Helm 3.2.0+ (for Helm installation method)
-*   **Cluster API v1.4.0+ (REQUIRED)** - See installation below
-*   **cert-manager (REQUIRED)** - See installation below
+1. **Kubernetes Cluster** - v1.31+ with kubectl configured
+2. **Cluster API** - v1.10+ installed ([install guide](#install-cluster-api))
+3. **cert-manager** - For webhook certificates ([install guide](#install-cert-manager))
+4. **iPXE Infrastructure** - DHCP + HTTP server ([setup guide](docs/ipxe-setup.md))
+5. **Inspection Image** - beskar7-inspector deployed ([inspector repo](https://github.com/wrkode/beskar7-inspector))
 
 ### Install Cluster API (Required)
 
-**⚠️ IMPORTANT:** Beskar7 is a Cluster API Infrastructure Provider and requires Cluster API core components to be installed first.
-
-**Option 1: Using clusterctl (Recommended)**
 ```bash
 # Install clusterctl
 curl -L https://github.com/kubernetes-sigs/cluster-api/releases/download/v1.10.0/clusterctl-linux-amd64 -o clusterctl
@@ -82,172 +82,56 @@ sudo mv clusterctl /usr/local/bin/
 clusterctl init
 ```
 
-**Option 2: Manual Installation**
-```bash
-# Install CAPI core components
-kubectl apply -f https://github.com/kubernetes-sigs/cluster-api/releases/download/v1.10.0/cluster-api-components.yaml
-
-# Install bootstrap provider (kubeadm)
-kubectl apply -f https://github.com/kubernetes-sigs/cluster-api/releases/download/v1.10.0/bootstrap-components.yaml
-
-# Install control plane provider (kubeadm)
-kubectl apply -f https://github.com/kubernetes-sigs/cluster-api/releases/download/v1.10.0/control-plane-components.yaml
-
-# Wait for components to be ready
-kubectl wait --for=condition=Available --timeout=300s deployment/capi-controller-manager -n capi-system
-kubectl wait --for=condition=Available --timeout=300s deployment/capi-kubeadm-bootstrap-controller-manager -n capi-kubeadm-bootstrap-system
-kubectl wait --for=condition=Available --timeout=300s deployment/capi-kubeadm-control-plane-controller-manager -n capi-kubeadm-control-plane-system
-```
-
-Verify CAPI installation:
-```bash
-kubectl get pods -n capi-system
-kubectl get pods -n capi-kubeadm-bootstrap-system
-kubectl get pods -n capi-kubeadm-control-plane-system
-```
-
 ### Install cert-manager (Required)
 
-Beskar7 requires cert-manager to be installed in your cluster to manage webhook TLS certificates. Install cert-manager and its CRDs before deploying Beskar7:
-
 ```bash
-kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.16.2/cert-manager.crds.yaml
 kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.16.2/cert-manager.yaml
-```
-
-Wait for all cert-manager pods to be running:
-
-```bash
 kubectl wait --for=condition=Available --timeout=300s deployment/cert-manager -n cert-manager
-kubectl wait --for=condition=Available --timeout=300s deployment/cert-manager-webhook -n cert-manager
-kubectl wait --for=condition=Available --timeout=300s deployment/cert-manager-cainjector -n cert-manager
 ```
 
-## Getting Started
+### Install Beskar7
 
-1.  **Clone the repository:**
-    ```bash
-    git clone https://github.com/wrkode/beskar7.git
-    cd beskar7 
-    ```
-
-2.  **Install Development Tools:**
-    ```bash
-    make install-controller-gen
-    ```
-
-3.  **Build and Push Container Image (Required for deployment):**
-    You need to push the manager image to a container registry accessible by your Kubernetes cluster.
-    ```bash
-    # Login to GitHub Container Registry (or your chosen registry)
-    # export CR_PAT=YOUR_GITHUB_PAT # Use a PAT with write:packages scope
-    # echo $CR_PAT | docker login ghcr.io -u USERNAME --password-stdin
-
-    # Build and push the image (uses values from Makefile: ghcr.io/wrkode/beskar7/beskar7:${VERSION})
-    make docker-build docker-push 
-    ```
-    *(Note: If using a different registry/repo/tag, override Makefile variables: `make docker-push IMG=my-registry/my-repo:my-tag`)*
-
-4.  **Generate Code & Manifests (If you made code changes):**
-    ```bash
-    make manifests
-    ```
-
-5.  **Build the Manager (Local Binary - Optional):**
-    ```bash
-    make build
-    ```
-
-6.  **Run Tests:**
-    ```bash
-    make test
-    ```
-
-## Installation / Deployment
-
-### Using Helm
-
-#### Add the Helm repository
+**Option 1: Using Helm (Recommended)**
 
 ```bash
+# Add Helm repository
 helm repo add beskar7 https://wrkode.github.io/beskar7
 helm repo update
-```
 
-#### Install the chart
-
-```bash
-# Install with default values
+# Install
 helm install beskar7 beskar7/beskar7 --namespace beskar7-system --create-namespace
 
-# Install with custom values
-helm install beskar7 beskar7/beskar7 -f values.yaml --namespace beskar7-system --create-namespace
-
-# Wait for deployment to be ready
+# Wait for deployment
 kubectl wait --for=condition=available --timeout=600s deployment/beskar7-controller-manager -n beskar7-system
 ```
 
-### Manual Deployment using Kustomize:
+**Option 2: Using Release Manifests**
 
-This provides more control if you need to customize the deployment.
+```bash
+# Download and apply release manifest
+kubectl apply -f https://github.com/wrkode/beskar7/releases/download/v1.0.0/beskar7-manifests-v1.0.0.yaml
+```
 
-1.  **Build and push the manager image** as described in "Getting Started" step 3.
-2.  **Install CRDs:**
-    ```bash
-    make install
-    ```
-3.  **Apply Base Manifests using Kustomize:**
-    Navigate to the directory containing the checked-out code.
-    ```bash
-    # Apply the default configuration (ensure IMG in Makefile is correct or customize)
-    kustomize build config/default | kubectl apply -f -
-    ```
-    *Alternatively, create your own Kustomize overlay pointing to `config/default` and set the image there.* 
+## Usage
 
-### Deploying from a Release Manifest Bundle:
-
-Each GitHub release will include a `beskar7-manifests-$(VERSION).yaml` file. This bundle contains all necessary CRDs, RBAC, and the Deployment for the controller manager, pre-configured with the correct image for that release.
-
-**Important:** You must install cert-manager and its CRDs before applying the Beskar7 manifest bundle. See the "Install cert-manager (Required)" section above.
-
-1.  **Download the release manifest** (e.g., `beskar7-manifests-${VERSION}.yaml`) from the [GitHub Releases page](https://github.com/wrkode/beskar7/releases).
-2.  **Apply the manifest to your cluster:**
-    ```bash
-    kubectl apply -f beskar7-manifests-${VERSION}.yaml
-    ```
-    This will create the `beskar7-system` namespace and all required Beskar7 components.
-
-## Usage Examples
-
-### 1. Create Redfish Credentials Secret
-
-First, create a Kubernetes Secret containing the username and password for your Redfish BMC.
-
-<details>
-<summary>Example: `redfish-credentials-secret.yaml`</summary>
+### 1. Create BMC Credentials Secret
 
 ```yaml
 apiVersion: v1
 kind: Secret
 metadata:
-  name: my-bmc-credentials
-  namespace: default # Or your target namespace
+  name: bmc-credentials
+  namespace: default
 stringData:
-  username: "your-bmc-username"
+  username: "admin"
   password: "your-bmc-password"
 ```
-</details>
 
 ```bash
-kubectl apply -f redfish-credentials-secret.yaml
+kubectl apply -f bmc-credentials.yaml
 ```
 
-### 2. Create a `PhysicalHost` Resource
-
-This resource tells Beskar7 about a physical server it can manage.
-
-<details>
-<summary>Example: `physicalhost.yaml`</summary>
+### 2. Register Physical Hosts
 
 ```yaml
 apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
@@ -257,260 +141,354 @@ metadata:
   namespace: default
 spec:
   redfishConnection:
-    address: "https://192.168.1.123" # Replace with your BMC IP/hostname
-    credentialsSecretRef: "my-bmc-credentials"
-    # insecureSkipVerify: true # Optional: use for self-signed certs, not recommended for production
+    address: "https://192.168.1.100"  # BMC IP address
+    credentialsSecretRef: "bmc-credentials"
 ```
-</details>
 
 ```bash
 kubectl apply -f physicalhost.yaml
-```
 
-After a short while, the `PhysicalHost` should transition to an `Available` state if the connection is successful:
-```bash
+# Check status
 kubectl get physicalhost server-01 -o wide
 ```
 
-If the PhysicalHost doesn't reach `Available` state, see the **[Troubleshooting Guide](docs/troubleshooting.md)** for common issues and solutions.
-
-### 3. Create a `Beskar7Machine` (Multiple Provisioning Modes)
-
-Beskar7 supports four provisioning modes. Choose the one that fits your infrastructure:
-
-#### Mode 1: Pre-Baked ISO (Self-Contained)
-
-Use this when you have an ISO with OS and configuration pre-built.
-
-<details>
-<summary>Example: `b7machine-prebaked.yaml`</summary>
+### 3. Create a Machine
 
 ```yaml
 apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
 kind: Beskar7Machine
 metadata:
-  name: node-01
+  name: worker-01
   namespace: default
 spec:
-  osFamily: "kairos"  # kairos, flatcar, or LeapMicro
-  imageURL: "http://example.com/my-kairos-prebaked.iso"
-  provisioningMode: "PreBakedISO"
-  bootMode: "UEFI"  # UEFI (recommended) or Legacy
+  # iPXE boot script URL (boots inspection image)
+  inspectionImageURL: "http://boot-server/beskar7-inspector/boot"
+  
+  # Final OS image URL (for kexec after inspection)
+  targetImageURL: "http://boot-server/kairos/v2.8.1.tar.gz"
+  
+  # Optional: OS configuration
+  configurationURL: "http://config-server/worker-config.yaml"
+  
+  # Optional: Hardware requirements
+  hardwareRequirements:
+    minCPUCores: 4
+    minMemoryGB: 16
+    minDiskGB: 100
 ```
-</details>
 
-#### Mode 2: Remote Config (Dynamic Configuration)
+```bash
+kubectl apply -f beskar7machine.yaml
 
-Use this with a generic ISO and external configuration URL.
-
-<details>
-<summary>Example: `b7machine-remoteconfig.yaml`</summary>
-
-```yaml
-apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
-kind: Beskar7Machine
-metadata:
-  name: node-02
-  namespace: default
-spec:
-  osFamily: "kairos"  # kairos, flatcar, or LeapMicro
-  imageURL: "https://github.com/kairos-io/kairos/releases/download/v2.8.1/kairos-alpine-v2.8.1-amd64.iso"
-  provisioningMode: "RemoteConfig"
-  configURL: "https://your-server.com/kairos-config.yaml"  # Required for RemoteConfig
-  bootMode: "UEFI"
+# Monitor provisioning
+kubectl get beskar7machine worker-01 -o wide
+kubectl describe beskar7machine worker-01
 ```
-</details>
 
-**Configuration URL Parameters by OS:**
-- **Kairos**: `config_url=<ConfigURL>`
-- **Flatcar**: `flatcar.ignition.config.url=<ConfigURL>`
-- **Leap Micro**: `combustion.path=<ConfigURL>`
+### 4. Monitor Inspection
 
-#### Mode 3: PXE Boot (Traditional Network Boot)
+```bash
+# Check PhysicalHost for inspection report
+kubectl get physicalhost server-01 -o jsonpath='{.status.inspectionReport}' | jq
 
-Use this with existing PXE infrastructure.
-
-<details>
-<summary>Example: `b7machine-pxe.yaml`</summary>
-
-```yaml
-apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
-kind: Beskar7Machine
-metadata:
-  name: node-03
-  namespace: default
-spec:
-  osFamily: "flatcar"
-  imageURL: "http://pxe-server.example.com/flatcar.iso"  # Reference
-  provisioningMode: "PXE"
-  bootMode: "UEFI"
+# Example output:
+# {
+#   "cpus": {
+#     "count": 2,
+#     "cores": 16,
+#     "model": "Intel Xeon E5-2640"
+#   },
+#   "memory": {
+#     "totalGB": 64
+#   },
+#   "disks": [
+#     {
+#       "device": "/dev/sda",
+#       "sizeGB": 500,
+#       "type": "SSD"
+#     }
+#   ]
+# }
 ```
-</details>
 
-**Prerequisites:** DHCP, TFTP, and PXE infrastructure must be configured. See [PXE Setup Guide](examples/pxe-ipxe-prerequisites.md).
+## Complete Example
 
-#### Mode 4: iPXE Boot (Modern Network Boot)
+See [`examples/simple-cluster.yaml`](examples/simple-cluster.yaml) for a complete working example with:
+- BMC credentials
+- Physical host registration  
+- Control plane machine
+- Worker machines
+- Hardware requirements
 
-Use this with iPXE infrastructure for faster, HTTP-based boot.
+## Architecture
 
-<details>
-<summary>Example: `b7machine-ipxe.yaml`</summary>
+### Components
 
-```yaml
-apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
-kind: Beskar7Machine
-metadata:
-  name: node-04
-  namespace: default
-spec:
-  osFamily: "kairos"
-  imageURL: "http://ipxe-server.example.com/boot.ipxe"  # iPXE script URL
-  provisioningMode: "iPXE"
-  bootMode: "UEFI"
+**PhysicalHost Controller**
+- Connects to BMC via Redfish
+- Monitors power state
+- Manages basic hardware info
+- Tracks inspection reports
+
+**Beskar7Machine Controller**
+- Claims available PhysicalHost
+- Triggers inspection boot via iPXE
+- Validates hardware requirements
+- Monitors provisioning progress
+- Reports to Cluster API
+
+**Beskar7Cluster Controller**
+- Manages cluster-level infrastructure
+- Sets control plane endpoint
+- Coordinates machine lifecycle
+
+### States
+
+**PhysicalHost States:**
+- `Enrolling` - Connecting to BMC
+- `Available` - Ready to be claimed
+- `InUse` - Claimed by a machine
+- `Inspecting` - Running inspection image
+- `Ready` - Inspection complete, validated
+- `Error` - Something went wrong
+
+**Inspection Phases:**
+- `Pending` - Not started
+- `Booting` - Inspection image booting
+- `InProgress` - Collecting hardware info
+- `Complete` - Report submitted
+- `Failed` - Inspection error
+- `Timeout` - Took too long (>10 minutes)
+
+## Infrastructure Requirements
+
+### iPXE Setup
+
+You must provide iPXE infrastructure. See [`docs/ipxe-setup.md`](docs/ipxe-setup.md) for complete guide.
+
+**Required Services:**
+1. **DHCP Server** - Configured to chainload iPXE
+2. **HTTP Server** - Serves iPXE boot scripts
+3. **Boot Server** - Hosts inspection and OS images
+
+**Quick Setup Example:**
+
+```bash
+# DHCP configuration (dnsmasq)
+dhcp-match=set:efi-x86_64,option:client-arch,7
+dhcp-boot=tag:efi-x86_64,ipxe.efi
+
+# HTTP server (nginx)
+server {
+    listen 80;
+    server_name boot-server;
+    root /var/www/boot;
+    
+    location /beskar7-inspector/ {
+        # Serve iPXE boot scripts
+    }
+    
+    location /images/ {
+        # Serve OS images
+    }
+}
 ```
-</details>
 
-**Prerequisites:** DHCP and HTTP server with iPXE scripts. See [iPXE Setup Guide](examples/pxe-ipxe-prerequisites.md).
+### Inspection Image
 
-### 4. Complete Examples
-
-For complete cluster deployments with multiple nodes, see the [`examples/`](examples/) directory:
-
-- **[Minimal Test Cluster](examples/minimal-test-cluster.yaml)** - Single-node testing
-- **[Complete Cluster](examples/complete-cluster.yaml)** - Multi-node with HA
-- **[PXE Provisioning](examples/pxe-provisioning-example.yaml)** - Full PXE cluster
-- **[iPXE Provisioning](examples/ipxe-provisioning-example.yaml)** - Full iPXE cluster
-- **[Examples README](examples/README.md)** - Overview of all examples
+Deploy the beskar7-inspector image. See [beskar7-inspector repository](https://github.com/wrkode/beskar7-inspector) for:
+- Alpine Linux-based inspection image
+- Hardware detection scripts
+- Kexec boot scripts
+- Configuration guide
 
 ## Hardware Compatibility
 
-### Supported Hardware Vendors
+Beskar7 works with **any Redfish-compliant BMC** because it only uses:
+- Power management (On/Off/Reset)
+- PXE boot flag setting
+- System information queries
 
-Beskar7 supports any Redfish-compliant BMC with **automatic vendor detection**:
+**Tested Vendors:**
+- Dell (iDRAC)
+- HPE (iLO)
+- Lenovo (XCC)
+- Supermicro
+- Generic Redfish BMCs
 
-- **Dell Technologies** (iDRAC9+) - Full support with automatic BIOS attribute handling
-- **HPE** (iLO 5+) - Full support with UEFI Target Boot Override  
-- **Lenovo** (XCC) - Full support with intelligent BIOS fallback
-- **Supermicro** (BMC) - Good support, X12+ series recommended
+**No vendor-specific code needed!**
 
-### Supported Operating Systems
+## Supported Operating Systems
 
-Beskar7 supports the following immutable OS families:
+Any OS that can be deployed via network boot:
+- **Kairos** (recommended) - Cloud-native, immutable
+- **Flatcar** - Container-optimized
+- **Talos** - Kubernetes-optimized
+- **Ubuntu** - Traditional Linux
+- **RHEL/Rocky/Alma** - Enterprise Linux
+- **Custom** - Build your own image
 
-| OS Family | Provisioning Modes | Status |
-|-----------|-------------------|--------|
-| **Kairos** (Alpine, Ubuntu) | All modes | Recommended |
-| **Flatcar Container Linux** | All modes | untested |
-| **openSUSE Leap Micro** | All modes | supported |
+The inspection image uses Alpine Linux, and the final OS is determined by your `targetImageURL`.
 
-**Note:** Traditional Linux distributions (Ubuntu, RHEL, CentOS, etc.) are not currently supported. Only immutable, cloud-native OS families with built-in provisioning mechanisms are supported.
+## Documentation
 
-For detailed compatibility information, hardware-specific workarounds, and testing procedures, see the **[Hardware Compatibility Matrix](docs/hardware-compatibility.md)**.
+- **[Breaking Changes](BREAKING_CHANGES.md)** - v1.0 migration guide
+- **[iPXE Setup Guide](docs/ipxe-setup.md)** - Infrastructure requirements
+- **[API Reference](docs/api-reference.md)** - Complete API documentation
+- **[Examples](examples/)** - Working configuration examples
+- **[Troubleshooting](docs/troubleshooting.md)** - Common issues and solutions
 
-## Production Deployment
+## Development
 
-For deployments, review:
+### Build from Source
 
-- **[Deployment Best Practices](docs/deployment-best-practices.md)** - Security, scaling, and operational guidance
-- **[Troubleshooting Guide](docs/troubleshooting.md)** - Common issues and vendor-specific solutions
-- **[Metrics Documentation](docs/metrics.md)** - Monitoring and observability setup
+```bash
+# Clone repository
+git clone https://github.com/wrkode/beskar7.git
+cd beskar7
+
+# Build
+make build
+
+# Run tests
+make test
+
+# Build and push container
+make docker-build docker-push IMG=your-registry/beskar7:tag
+
+# Deploy to cluster
+make deploy IMG=your-registry/beskar7:tag
+```
+
+### Project Structure
+
+```
+beskar7/
+├── api/v1beta1/              # CRD types
+│   ├── beskar7machine_types.go
+│   ├── physicalhost_types.go
+│   └── beskar7cluster_types.go
+├── controllers/              # Controllers
+│   ├── beskar7machine_controller.go
+│   ├── physicalhost_controller.go
+│   └── beskar7cluster_controller.go
+├── internal/
+│   ├── redfish/             # Redfish client (simplified)
+│   └── coordination/        # Host claiming logic
+├── docs/                    # Documentation
+├── examples/                # Example YAMLs
+└── config/                  # Kustomize manifests
+```
+
+## Comparison with v0.x
+
+### What Changed?
+
+**v0.x (VirtualMedia):**
+- Complex vendor-specific workarounds
+- ISO mounting via VirtualMedia
+- BIOS attribute manipulation
+- Boot parameter injection
+- 2,250 lines of code
+
+**v1.0 (iPXE + Inspection):**
+- Simple power management only
+- Network boot via iPXE
+- Hardware discovery via inspection
+- No vendor-specific code
+- 950 lines of code (58% reduction!)
+
+### Why the Change?
+
+1. **VirtualMedia is unreliable** - Implementations vary wildly across vendors
+2. **Vendor quirks are complex** - Hard to maintain and debug
+3. **Network boot is universal** - Works the same everywhere
+4. **Hardware discovery is better** - Get real specs, not guesses
+
+See [`BREAKING_CHANGES.md`](BREAKING_CHANGES.md) for complete details.
+
+## Troubleshooting
+
+### PhysicalHost Stuck in Enrolling
+
+**Symptoms:** Host doesn't transition to Available
+
+**Checks:**
+```bash
+# Check controller logs
+kubectl logs -n beskar7-system deployment/beskar7-controller-manager -f
+
+# Check PhysicalHost status
+kubectl describe physicalhost <name>
+
+# Test Redfish connectivity
+curl -k -u username:password https://BMC_IP/redfish/v1/
+```
+
+**Common Causes:**
+- BMC not reachable from controller pod
+- Invalid credentials
+- Firewall blocking Redfish port (443)
+
+### Inspection Timeout
+
+**Symptoms:** InspectionPhase shows "Timeout"
+
+**Checks:**
+```bash
+# Check PhysicalHost inspection status
+kubectl get physicalhost <name> -o jsonpath='{.status.inspectionPhase}'
+
+# Check iPXE infrastructure
+curl http://boot-server/beskar7-inspector/boot
+```
+
+**Common Causes:**
+- iPXE infrastructure not configured
+- Inspection image URL incorrect
+- Server can't reach boot server
+- Network boot disabled in BIOS
+
+### Hardware Validation Failed
+
+**Symptoms:** Machine stuck with validation error
+
+**Checks:**
+```bash
+# Check inspection report
+kubectl get physicalhost <name> -o jsonpath='{.status.inspectionReport}' | jq
+
+# Check requirements
+kubectl get beskar7machine <name> -o jsonpath='{.spec.hardwareRequirements}' | jq
+```
+
+**Solution:** Adjust `hardwareRequirements` or use different hardware.
 
 ## Contributing
 
-Contributions are welcome! For information about contributing to Beskar7, see the issue tracker at https://github.com/wrkode/beskar7/issues.
-
-## Project Status and Roadmap
-
-For detailed information about the project's current status and future plans, please see the **[GitHub Issues](https://github.com/wrkode/beskar7/issues)** and **[GitHub Projects](https://github.com/wrkode/beskar7/projects)** pages.
-
-## Running Tests
-
-Before running the tests, you need to download the required CRDs and set up envtest assets. Unit tests and controller tests run without real hardware; integration and emulation tests can be run with build tags.
-
-```bash
-# Download test CRDs (once)
-./hack/download-test-crds.sh
-
-# Set up envtest assets (Kubernetes API server binaries)
-export KUBEBUILDER_ASSETS=$(go run sigs.k8s.io/controller-runtime/tools/setup-envtest@latest use 1.31.x -p path)
-
-# Run unit and controller tests
-go test ./controllers/... -v -ginkgo.v --timeout=10m
-go test ./internal/... -v --timeout=10m
-
-# Run integration tests (envtest) — excludes emulation unless tagged
-go test -tags=integration ./test/integration/... -v --timeout=30m
-
-# Optional: Run hardware emulation tests (no real hardware required)
-# Note: The emulation tests use a mock Redfish server and skip TLS verification.
-go test -tags=integration ./test/emulation/... -v --timeout=30m
-```
-
-The test setup is designed to be portable and work across different systems. All required CRDs are downloaded locally and referenced from the repository, ensuring consistent test behavior across different environments.
-
-## Uninstalling
-
-### Using Helm
-
-```bash
-helm uninstall beskar7 --namespace beskar7-system
-```
-
-### Manual Uninstallation
-
-1. **Undeploy the controller**
-
-   ```bash
-   make undeploy
-   ```
-
-2. **Uninstall CRDs**
-
-   ```bash
-   make uninstall
-   ```
-
-## Upgrading
-
-### Using Helm
-
-```bash
-helm upgrade beskar7 beskar7/beskar7 --namespace beskar7-system
-```
-
-## Quick Reference
-
-### Provisioning Modes
-
-| Mode | Use Case | Infrastructure Required |
-|------|----------|------------------------|
-| **PreBakedISO** | Pre-configured ISO | HTTP/HTTPS server for ISO hosting |
-| **RemoteConfig** | Generic ISO + config URL | HTTP/HTTPS server for ISO and config |
-| **PXE** | Traditional network boot | DHCP, TFTP, PXE infrastructure |
-| **iPXE** | Modern network boot | DHCP, HTTP, iPXE infrastructure |
-
-### Supported OS Families
-
-- **kairos** - Cloud-native, immutable OS (recommended)
-- **flatcar** - Container-optimized Linux
-- **LeapMicro** - openSUSE Leap Micro
-
-### Key Resources
-
-- **PhysicalHost** - Represents a bare-metal server
-- **Beskar7Machine** - CAPI Machine infrastructure
-- **Beskar7Cluster** - CAPI Cluster infrastructure
-- **Beskar7MachineTemplate** - Template for machine configs
-
-### Getting Help
-
-- 📖 [Complete Documentation](docs/README.md)
-- 🐛 [Issue Tracker](https://github.com/wrkode/beskar7/issues)
-- 💬 [Discussions](https://github.com/wrkode/beskar7/discussions)
-- 📚 [Examples](examples/)
-
-See [CHANGELOG.md](CHANGELOG.md) for complete release notes and breaking changes.
+Contributions are welcome! Please:
+1. Open an issue to discuss major changes
+2. Follow existing code style
+3. Add tests for new features
+4. Update documentation
 
 ## License
 
-This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
+Apache License 2.0 - See [LICENSE](LICENSE) file for details.
+
+## Support
+
+- **Issues:** https://github.com/wrkode/beskar7/issues
+- **Discussions:** https://github.com/wrkode/beskar7/discussions
+- **Documentation:** https://github.com/wrkode/beskar7/tree/main/docs
+
+## Acknowledgments
+
+This project was inspired by and learns from:
+- [Tinkerbell](https://tinkerbell.org/) - Network boot provisioning
+- [Metal³](https://metal3.io/) - Kubernetes bare-metal
+- [Cluster API](https://cluster-api.sigs.k8s.io/) - Kubernetes cluster lifecycle
+
+---
+
+**Beskar7** - Simple, reliable bare-metal provisioning for Kubernetes.

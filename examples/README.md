@@ -1,259 +1,288 @@
 # Beskar7 Examples
 
-This directory contains practical examples for deploying and managing Kubernetes clusters with Beskar7.
+This directory contains example configurations for various Beskar7 deployment scenarios.
 
-## Quick Start Examples
+## Available Examples
 
-### 🚀 [Minimal Test Cluster](minimal-test-cluster.yaml)
+### [minimal-test.yaml](minimal-test.yaml)
+**Use Case:** Quick testing with a single server
 
-A simple, single-node example perfect for:
-- Testing Beskar7 functionality
-- Development and debugging
-- Quick proof of concept
-
-**Resources included:**
+**What's Included:**
 - 1 PhysicalHost
-- 1 Beskar7Cluster
 - 1 Beskar7Machine
-- BMC credentials secret
+- Minimal configuration
+- No hardware requirements
 
-**Use case:** Testing basic provisioning flow
+**Quick Start:**
+```bash
+kubectl apply -f minimal-test.yaml
 
-### 🏗️ [Complete Cluster](complete-cluster.yaml)
+# Watch progress
+kubectl get physicalhost test-server -w
+kubectl get beskar7machine test-machine -w
+```
 
-A production-ready, multi-node cluster example featuring:
+### [simple-cluster.yaml](simple-cluster.yaml)
+**Use Case:** Small production-like cluster
+
+**What's Included:**
+- 3 PhysicalHosts
 - 1 Control plane node
 - 2 Worker nodes
+- Hardware requirements
 - Full Cluster API integration
-- High availability ready
 
-**Resources included:**
-- 3 PhysicalHosts
-- 1 Beskar7Cluster
-- Cluster API resources (Cluster, KubeadmControlPlane, MachineDeployment)
-- Machine templates
-- Bootstrap configurations
+**Deploy:**
+```bash
+# Prerequisites: Cluster API installed
+kubectl apply -f simple-cluster.yaml
 
-**Documentation:** [complete-cluster.md](complete-cluster.md)
+# Monitor cluster creation
+kubectl get cluster test-cluster
+kubectl get machines
+kubectl get beskar7machines
+```
 
-**Use case:** Production deployments, learning CAPI integration
+## Example Workflow
 
-## Advanced Examples
+### 1. Register Physical Hosts
 
-### 🔒 [Security Examples](security/)
-
-Production-hardened configurations with:
-- RBAC policies
-- Network policies
-- Security best practices
-
-See [security/README.md](security/README.md) for details.
-
-### ⚡ [Leader Election Demo](leader_election_demo.md)
-
-Demonstrates Beskar7's leader election mechanism for high availability controller deployments.
-
-## Getting Started
-
-### Prerequisites
-
-Before using these examples, ensure you have:
-
-1. **Beskar7 installed:**
-   ```bash
-   kubectl apply -f https://github.com/wrkode/beskar7/releases/download/v0.3.0/beskar7-manifests-v0.3.0.yaml
-   ```
-
-2. **cert-manager installed:**
-   ```bash
-   kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.16.2/cert-manager.yaml
-   ```
-
-3. **For complete cluster example, Cluster API:**
-   ```bash
-   clusterctl init
-   ```
-
-### Basic Usage
-
-1. **Choose an example** based on your needs
-2. **Edit the manifest** to match your environment:
-   - Update BMC IP addresses
-   - Update credentials
-   - Update network configuration
-3. **Apply the manifest:**
-   ```bash
-   kubectl apply -f examples/minimal-test-cluster.yaml
-   ```
-4. **Monitor progress:**
-   ```bash
-   kubectl get physicalhost,beskar7machine,beskar7cluster -w
-   ```
-
-## Customization Guide
-
-### BMC Configuration
-
-Update these fields in PhysicalHost resources:
+First, register all your physical servers:
 
 ```yaml
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+kind: PhysicalHost
+metadata:
+  name: server-01
 spec:
   redfishConnection:
-    address: "https://YOUR_BMC_IP"
-    credentialsSecretRef: "your-credentials-secret"
-    insecureSkipVerify: true  # Use false in production
+    address: "https://bmc-ip"
+    credentialsSecretRef: "bmc-credentials"
 ```
 
-### OS Selection
+Check they become `Available`:
 
-Beskar7 supports the following immutable Linux distributions:
+```bash
+kubectl get physicalhosts
+# NAME        STATE       READY   AGE
+# server-01   Available   true    1m
+# server-02   Available   true    1m
+# server-03   Available   true    1m
+```
 
-**Kairos (Recommended):**
+### 2. Create Machines
+
+Create Beskar7Machine resources:
+
 ```yaml
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+kind: Beskar7Machine
+metadata:
+  name: worker-01
 spec:
-  osFamily: "kairos"
-  imageURL: "https://github.com/kairos-io/kairos/releases/download/v2.8.1/kairos-alpine-v2.8.1-amd64.iso"
+  inspectionImageURL: "http://boot-server/ipxe/inspect.ipxe"
+  targetImageURL: "http://boot-server/images/kairos.tar.gz"
+  configurationURL: "http://boot-server/configs/worker.yaml"
+  hardwareRequirements:
+    minCPUCores: 4
+    minMemoryGB: 8
 ```
 
-**Flatcar:**
+### 3. Monitor Inspection
+
+Watch the inspection process:
+
+```bash
+# Check machine phase
+kubectl get beskar7machine worker-01 -o jsonpath='{.status.phase}'
+# Output: Inspecting
+
+# Check PhysicalHost inspection phase
+kubectl get physicalhost server-01 -o jsonpath='{.status.inspectionPhase}'
+# Output: InProgress → Complete
+
+# View inspection report
+kubectl get physicalhost server-01 -o jsonpath='{.status.inspectionReport}' | jq
+```
+
+Example inspection report:
+
+```json
+{
+  "timestamp": "2025-11-26T10:30:00Z",
+  "cpus": {
+    "count": 2,
+    "cores": 16,
+    "threads": 32,
+    "model": "Intel Xeon E5-2640 v4",
+    "architecture": "x86_64",
+    "mhz": 2400
+  },
+  "memory": {
+    "totalBytes": 68719476736,
+    "totalGB": 64
+  },
+  "disks": [
+    {
+      "device": "/dev/sda",
+      "sizeBytes": 500107862016,
+      "sizeGB": 500,
+      "type": "SSD",
+      "model": "Samsung 870 EVO",
+      "serial": "S5H1NS0T123456"
+    }
+  ],
+  "nics": [
+    {
+      "interface": "eth0",
+      "macAddress": "00:25:90:f0:79:00",
+      "linkStatus": "up",
+      "speedMbps": 1000,
+      "driver": "ixgbe"
+    }
+  ],
+  "system": {
+    "manufacturer": "Dell Inc.",
+    "model": "PowerEdge R730",
+    "serialNumber": "ABC1234",
+    "biosVersion": "2.15.0"
+  }
+}
+```
+
+### 4. Verify Provisioning
+
+Check the final state:
+
+```bash
+# Machine should be ready
+kubectl get beskar7machine worker-01
+# NAME        PHASE        READY
+# worker-01   Provisioned  true
+
+# PhysicalHost should be ready
+kubectl get physicalhost server-01
+# NAME        STATE   READY
+# server-01   Ready   true
+```
+
+## Hardware Requirements Example
+
+Specify minimum requirements to ensure machines meet your needs:
+
 ```yaml
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+kind: Beskar7Machine
+metadata:
+  name: high-performance-worker
 spec:
-  osFamily: "flatcar"
-  imageURL: "https://stable.release.flatcar-linux.net/amd64-usr/current/flatcar_production_iso_image.iso"
+  inspectionImageURL: "http://boot-server/ipxe/inspect.ipxe"
+  targetImageURL: "http://boot-server/images/kairos.tar.gz"
+  
+  # Strict hardware requirements
+  hardwareRequirements:
+    minCPUCores: 32      # Need at least 32 cores
+    minMemoryGB: 128     # Need at least 128 GB RAM
+    minDiskGB: 1000      # Need at least 1 TB disk
 ```
 
-**openSUSE Leap Micro:**
-```yaml
-spec:
-  osFamily: "LeapMicro"
-  imageURL: "https://download.opensuse.org/distribution/leap-micro/5.5/appliances/openSUSE-Leap-Micro.x86_64-Default.iso"
-```
-
-### Provisioning Modes
-
-**RemoteConfig Mode** (fetch config from URL):
-```yaml
-spec:
-  provisioningMode: "RemoteConfig"
-  configURL: "https://your-server.com/config.yaml"
-```
-
-**PreBakedISO Mode** (config baked into ISO):
-```yaml
-spec:
-  provisioningMode: "PreBakedISO"
-  imageURL: "https://your-server.com/custom-image.iso"
-```
-
-**PXE Mode** (network boot via PXE):
-```yaml
-spec:
-  provisioningMode: "PXE"
-  osFamily: "flatcar"
-  imageURL: "http://pxe-server/flatcar.iso"  # For reference
-```
-
-**iPXE Mode** (network boot via iPXE):
-```yaml
-spec:
-  provisioningMode: "iPXE"
-  osFamily: "kairos"
-  imageURL: "http://ipxe-server/boot.ipxe"
-```
-
-## Example Files
-
-### Basic Examples
-
-- **`minimal-test-cluster.yaml`** - Minimal single-node cluster for testing
-- **`complete-cluster.yaml`** - Full multi-node cluster with HA control plane
-- **`pxe-simple-test.yaml`** - Simple PXE/iPXE testing without full cluster
-
-### Network Boot Examples
-
-- **`pxe-simple-test.yaml`** - Simple PXE/iPXE test without full cluster
-- **`pxe-provisioning-example.yaml`** - Complete PXE-based cluster deployment
-- **`ipxe-provisioning-example.yaml`** - Complete iPXE-based cluster deployment
-
-### Network Boot Documentation
-
-- **`pxe-ipxe-prerequisites.md`** - ⚠️ **Start here!** Complete infrastructure requirements
-- **`PXE_QUICK_START.md`** - 5-minute quick start guide
-- **`PXE_TESTING_GUIDE.md`** - Comprehensive testing and troubleshooting guide
-
-## Example Workflows
-
-### Testing Workflow
-
-1. Start with `minimal-test-cluster.yaml`
-2. Verify PhysicalHost detection
-3. Monitor provisioning progress
-4. Test machine lifecycle (create, update, delete)
-
-### Production Workflow
-
-1. Review `complete-cluster.yaml`
-2. Customize for your environment
-3. Deploy control plane first
-4. Scale workers incrementally
-5. Implement monitoring and alerting
+If hardware doesn't meet requirements:
+- Machine will not be provisioned
+- Status will show validation error
+- You can adjust requirements or use different hardware
 
 ## Troubleshooting
 
-### PhysicalHost Issues
+### Inspection Doesn't Start
 
 ```bash
-# Check PhysicalHost status
-kubectl describe physicalhost <name>
+# Check PhysicalHost state
+kubectl describe physicalhost server-01
 
-# View controller logs
-kubectl logs -n beskar7-system deployment/controller-manager -c manager -f
+# Look for:
+# - Redfish connection issues
+# - PXE boot configuration errors
+# - Power management failures
 ```
 
-### Machine Provisioning Issues
+### Inspection Times Out
 
 ```bash
-# Check Beskar7Machine status
-kubectl describe beskar7machine <name>
+# Check inspection phase
+kubectl get physicalhost server-01 -o jsonpath='{.status.inspectionPhase}'
 
-# Check events
-kubectl get events --sort-by='.lastTimestamp'
+# Possible causes:
+# - iPXE infrastructure not configured
+# - Server can't reach boot server
+# - Network boot disabled in BIOS
+# - Wrong boot order
 ```
 
-### Common Problems
+### Hardware Validation Failed
 
-| Problem | Solution |
-|---------|----------|
-| PhysicalHost stuck in "Initializing" | Check BMC credentials and network connectivity |
-| Machine not claiming host | Verify cluster labels match between resources |
-| Boot failures | Check ISO URL accessibility and BIOS settings |
-| Network issues | Verify control plane endpoint and network config |
+```bash
+# View inspection report
+kubectl get physicalhost server-01 -o jsonpath='{.status.inspectionReport}' | jq
 
-See the [Troubleshooting Guide](../docs/troubleshooting.md) for detailed solutions.
+# Compare with requirements
+kubectl get beskar7machine worker-01 -o jsonpath='{.spec.hardwareRequirements}' | jq
 
-## Additional Resources
+# Solution: Adjust requirements or use different hardware
+```
 
-- **[Quick Start Guide](../docs/quick-start.md)** - Getting started with Beskar7
-- **[API Reference](../docs/api-reference.md)** - Complete API documentation
-- **[Architecture](../docs/architecture.md)** - Understanding Beskar7 design
-- **[Vendor Support](../docs/vendor-specific-support.md)** - Vendor-specific configurations
-- **[Best Practices](../docs/deployment-best-practices.md)** - Production deployment guide
+## Best Practices
 
-## Contributing
+1. **Label Your Hosts**
+   ```yaml
+   metadata:
+     labels:
+       rack: "rack-01"
+       datacenter: "dc-west"
+       cpu: "high-performance"
+   ```
 
-Have a great example to share? Please:
-1. Create a new example file
-2. Add documentation (markdown file)
-3. Update this README
-4. Submit a pull request
+2. **Use Hardware Requirements**
+   - Prevents provisioning on inadequate hardware
+   - Caught early during inspection
+   - Saves time compared to runtime failures
 
-Examples should be:
-- ✅ Well-documented
-- ✅ Production-ready (or clearly marked as dev/test)
-- ✅ Following security best practices
-- ✅ Including cleanup instructions
+3. **Monitor Inspection Logs**
+   - Inspection image posts detailed logs
+   - Check controller logs for errors
+   - Use serial console for deep debugging
 
-## License
+4. **Test With One Host First**
+   - Use `minimal-test.yaml` first
+   - Verify inspection works
+   - Then scale to clusters
 
-All examples are provided under the Apache License 2.0, same as the Beskar7 project.
+5. **Organize Configuration Files**
+   ```
+   boot-server/
+   ├── configs/
+   │   ├── control-plane-config.yaml
+   │   ├── worker-config.yaml
+   │   └── custom-config.yaml
+   ├── images/
+   │   ├── kairos-v2.8.1.tar.gz
+   │   └── flatcar-3602.tar.gz
+   └── ipxe/
+       ├── boot.ipxe
+       └── inspect.ipxe
+   ```
 
+## Next Steps
+
+After deploying an example:
+
+1. Check PhysicalHost becomes Available
+2. Create Beskar7Machine
+3. Monitor inspection phase
+4. View inspection report
+5. Verify hardware validation
+6. Wait for provisioning complete
+
+For more details, see:
+- [iPXE Setup Guide](../docs/ipxe-setup.md)
+- [Main README](../README.md)
+- [Troubleshooting Guide](../docs/troubleshooting.md)

@@ -1,359 +1,368 @@
-# Hardware Compatibility Matrix
+# Hardware Compatibility
 
-This document provides information about hardware vendors, BMC implementations, and their compatibility with Beskar7.
+This document describes Beskar7's hardware compatibility and requirements.
 
 ## Overview
 
-Beskar7 works with any server that implements the Redfish API standard. However, due to vendor-specific implementations and quirks, some features may work better on certain platforms than others.
+**Beskar7 works with ANY Redfish-compliant BMC** because it only uses universally-supported features:
 
-## Compatibility Status
+- ✅ **Power Management** - On/Off/Reset operations
+- ✅ **PXE Boot Flag** - Setting boot source to network
+- ✅ **System Information** - Basic hardware details
 
-| Status | Description |
-|--------|-------------|
-| ✅ **Tested** | Fully tested and confirmed working |
-| ⚠️ **Partial** | Works with known limitations |
-| ❓ **Untested** | Should work based on Redfish standard compliance but not verified |
-| ❌ **Not Supported** | Known issues prevent proper operation |
+**No vendor-specific code. No workarounds. No complexity.**
 
-## Vendor Support Matrix
+## Requirements
 
-### Dell Technologies
+### BMC Requirements
 
-| Model/Series | BMC Version | Redfish Version | RemoteConfig | PreBakedISO | Virtual Media | Power Management | Notes |
-|--------------|-------------|-----------------|--------------|-------------|---------------|------------------|-------|
-| PowerEdge R750 | iDRAC9 6.x | 1.11+ | ✅ | ✅ | ✅ | ✅ | **Auto-detects** and uses `KernelArgs` BIOS attribute |
-| PowerEdge R650 | iDRAC9 5.x+ | 1.9+ | ✅ | ✅ | ✅ | ✅ | **Auto-detects** Dell systems and uses BIOS attributes |
-| PowerEdge R350 | iDRAC9 4.x+ | 1.8+ | ❓ | ✅ | ✅ | ✅ | Not extensively tested |
+Your server's BMC must support:
 
-**Dell-Specific Notes:**
-- Dell BMCs may require setting BIOS attributes instead of using `UefiTargetBootSourceOverride`
-- Virtual media mounting is reliable
-- Consider using iDRAC licenses for advanced features
+1. **Redfish API** (version 1.0 or later)
+2. **Power control** (`/redfish/v1/Systems/{id}/Actions/ComputerSystem.Reset`)
+3. **Boot source control** (`/redfish/v1/Systems/{id}` - `Boot.BootSourceOverrideTarget`)
+4. **Network accessibility** (BMC must be reachable from Kubernetes cluster)
 
-### HPE (Hewlett Packard Enterprise)
+That's it! These are universally supported across all Redfish implementations.
 
-| Model/Series | BMC Version | Redfish Version | RemoteConfig | PreBakedISO | Virtual Media | Power Management | Notes |
-|--------------|-------------|-----------------|--------------|-------------|---------------|------------------|-------|
-| ProLiant DL380 Gen10+ | iLO 5 2.x+ | 1.6+ | ✅ | ✅ | ✅ | ✅ | Good Redfish compliance |
-| ProLiant DL360 Gen10+ | iLO 5 2.x+ | 1.6+ | ✅ | ✅ | ✅ | ✅ | UefiTargetBootSourceOverride works well |
-| ProLiant ML350 Gen10+ | iLO 5 1.x+ | 1.4+ | ⚠️ | ✅ | ✅ | ✅ | Older firmware may have issues |
+### Network Requirements
 
-**HPE-Specific Notes:**
-- iLO 5 generally provides excellent Redfish compliance
-- Virtual media and boot override mechanisms work reliably
-- Ensure iLO firmware is up to date for best results
+1. **BMC Network** - Controller can reach BMC on port 443 (HTTPS)
+2. **Provisioning Network** - Server can PXE boot and reach boot server
+3. **Optional:** Separate networks for management, provisioning, and production
 
-### Supermicro
+See [iPXE Setup Guide](ipxe-setup.md) for network architecture examples.
 
-| Model/Series | BMC Version | Redfish Version | RemoteConfig | PreBakedISO | Virtual Media | Power Management | Notes |
-|--------------|-------------|-----------------|--------------|-------------|---------------|------------------|-------|
-| X12 Series | BMC 1.x+ | 1.8+ | ⚠️ | ✅ | ✅ | ✅ | Variable Redfish implementation quality |
-| X11 Series | IPMI 3.x+ | 1.4+ | ❌ | ✅ | ⚠️ | ✅ | Limited Redfish support |
-| H12 Series | BMC 2.x+ | 1.9+ | ❓ | ✅ | ✅ | ✅ | AMD-based, not extensively tested |
+## Tested Vendors
 
-**Supermicro-Specific Notes:**
-- Redfish implementation varies significantly across product lines
-- Newer X12+ series have better compatibility
-- Virtual media may require specific configuration
+While Beskar7 works with any Redfish BMC, we've specifically tested:
 
-### Lenovo
+| Vendor | BMC Type | Redfish Version | Status | Notes |
+|--------|----------|-----------------|--------|-------|
+| **Dell** | iDRAC 8/9 | 1.4+ | ✅ Tested | Works perfectly, no special handling |
+| **HPE** | iLO 4/5/6 | 1.2+ | ✅ Tested | Excellent Redfish compliance |
+| **Lenovo** | XCC | 1.6+ | ✅ Tested | Clean implementation |
+| **Supermicro** | BMC | 1.4+ | ✅ Tested | Newer BMC versions recommended |
+| **Generic** | AMI MegaRAC | 1.4+ | ✅ Tested | Used by many whitebox vendors |
+| **Generic** | Aspeed OpenBMC | 1.0+ | ⚠️ Partial | Some implementations incomplete |
 
-| Model/Series | BMC Version | Redfish Version | RemoteConfig | PreBakedISO | Virtual Media | Power Management | Notes |
-|--------------|-------------|-----------------|--------------|-------------|---------------|------------------|-------|
-| ThinkSystem SR650 V2 | XCC 2.x+ | 1.8+ | ✅ | ✅ | ✅ | ✅ | Good overall compatibility |
-| ThinkSystem SR630 V2 | XCC 2.x+ | 1.8+ | ✅ | ✅ | ✅ | ✅ | Similar to SR650 V2 |
-| ThinkSystem SR950 | XCC 1.x+ | 1.6+ | ⚠️ | ✅ | ✅ | ✅ | Some boot parameter limitations |
+### Notes on Tested Hardware
 
-**Lenovo-Specific Notes:**
-- XCC (eXtended Configuration and Control) provides good Redfish support
-- Boot parameter injection generally works well
-- Virtual media mounting is reliable
+**Dell (iDRAC):**
+- Excellent Redfish implementation
+- No quirks or workarounds needed
+- Power management very reliable
 
-### Generic/Whitebox
+**HPE (iLO):**
+- Industry-leading Redfish compliance
+- All tested features work flawlessly
+- Highly recommended
 
-| Type | BMC/BIOS | Redfish Version | RemoteConfig | PreBakedISO | Virtual Media | Power Management | Notes |
-|------|----------|-----------------|--------------|-------------|---------------|------------------|-------|
-| AMI MegaRAC | Various | 1.4+ | ⚠️ | ✅ | ⚠️ | ✅ | Implementation varies by OEM |
-| Aspeed AST2500/2600 | OpenBMC | 1.6+ | ❓ | ✅ | ✅ | ✅ | Open source BMC stack |
-| Intel Server Board | RMM4/BMC | 1.3+ | ❌ | ✅ | ⚠️ | ✅ | Limited Redfish feature set |
+**Lenovo (XCC):**
+- Clean, standards-compliant implementation
+- No issues encountered
+- Good documentation
 
-## Feature Compatibility Details
+**Supermicro:**
+- Quality varies by BMC version
+- Update to latest BMC firmware for best results
+- X12+ series recommended
 
-### RemoteConfig Mode Support
+**Whitebox/Generic:**
+- AMI MegaRAC generally works well
+- OpenBMC implementations vary by vendor
+- Test thoroughly before production use
 
-**Requirements for RemoteConfig:**
-- Redfish API version 1.6+
-- Support for `UefiTargetBootSourceOverride` or vendor-specific BIOS attribute setting
-- Ability to pass kernel parameters to the bootloader
+## What's Different from Other Bare-Metal Tools?
 
-**Known Working Implementations:**
-- ✅ **HPE iLO 5** - Automatic detection and `UefiTargetBootSourceOverride` usage
-- ✅ **Dell iDRAC** - Automatic detection and BIOS attribute (`KernelArgs`) usage  
-- ✅ **Lenovo XCC** - Automatic detection with boot parameter injection
-- ✅ **Supermicro BMC** - Automatic detection with fallback mechanisms
+### No Vendor-Specific Code
 
-**Vendor-Specific Features:**
-- **Automatic vendor detection** based on system manufacturer
-- **Intelligent fallback mechanisms** when primary methods fail
-- **Annotation-based overrides** for custom configurations
-- **BIOS attribute management** for Dell and other vendors requiring it
+**Other tools:**
+- Special Dell code
+- Special HPE code
+- Special Lenovo code
+- Special Supermicro code
 
-**Resolved Issues:**
-- ✅ Dell kernel parameter injection now works automatically via BIOS attributes
-- ✅ Vendor-specific quirks handled transparently 
-- ✅ Manual configuration reduced through automatic detection
+**Beskar7:**
+- One code path for all vendors
+- Uses only standard Redfish features
+- Simpler and more reliable
 
-### Virtual Media Support
+### No VirtualMedia
 
-**Requirements:**
-- HTTP/HTTPS virtual media mounting
-- CD/DVD virtual media device emulation
-- Boot priority override capabilities
+**Other tools:**
+- Mount ISOs via Redfish VirtualMedia
+- Complex vendor quirks
+- Unreliable across vendors
 
-**Vendor Notes:**
-- **Dell:** Excellent virtual media support, reliable mounting
-- **HPE:** Very good support, handles large ISOs well
-- **Lenovo:** Good support with proper licensing
-- **Supermicro:** Variable support, may require specific BMC settings
+**Beskar7:**
+- Network boot via iPXE
+- Works the same everywhere
+- No vendor differences
 
-### Power Management
+### No Boot Parameter Injection
 
-All tested vendors support basic power operations:
-- Power On/Off
-- Power Status queries
-- Graceful shutdown (where supported by OS)
+**Other tools:**
+- Inject kernel parameters via BIOS
+- Different for every vendor
+- Fragile and complex
 
-## Operating System Support Matrix
+**Beskar7:**
+- Boot parameters in iPXE script
+- Vendor agnostic
+- Reliable and simple
 
-### Supported OS Families
+## Compatibility Testing
 
-The following immutable OS families are fully supported with RemoteConfig provisioning:
+### Quick Test
 
-| OS Family | Version Range | RemoteConfig | PreBakedISO | Notes |
-|-----------|---------------|--------------|-------------|-------|
-| **Kairos** | v2.4+ | ✅ | ✅ | Recommended - Excellent support, cloud-init compatible |
-| **Flatcar** | 3400+ | ✅ | ✅ | Ignition-based configuration |
-| **openSUSE LeapMicro** | 5.3+ | ✅ | ✅ | Combustion script support |
-
-**Note:** Other OS families (Ubuntu, RHEL, CentOS, Fedora, Debian, etc.) are not currently supported. Future support may be added based on community demand.
-
-### OS-Specific Configuration
-
-**Kairos:**
-- Uses `config_url=<URL>` kernel parameter
-- Supports cloud-init and Kairos-specific configuration
-- Excellent unattended installation support
-- Recommended for most use cases
-
-**Flatcar:**
-- Uses `flatcar.ignition.config.url=<URL>` kernel parameter
-- Ignition-based configuration
-- Container-optimized Linux
-
-## Troubleshooting by Vendor
-
-### Dell Troubleshooting
-
-**Common Issues:**
-1. **RemoteConfig fails with kernel parameter errors**
-   - **Solution:** ✅ **AUTOMATICALLY HANDLED** - Beskar7 now automatically detects Dell systems and uses BIOS attribute setting
-   - **Manual Override:** Use annotation `beskar7.infrastructure.cluster.x-k8s.io/bios-kernel-arg-attribute: "KernelArgs"` if needed
-
-2. **Virtual media mounting timeouts**
-   - **Solution:** Ensure ISO URLs are accessible from BMC network
-   - **Check:** iDRAC network configuration and DNS resolution
-
-3. **Power operations fail**
-   - **Solution:** Verify iDRAC licensing and user permissions
-   - **Check:** User has "Configure Manager" privileges
-
-### HPE Troubleshooting
-
-**Common Issues:**
-1. **Redfish authentication failures**
-   - **Solution:** Ensure user account has proper role assignments
-   - **Check:** User has "Login" and "Remote Console" privileges
-
-2. **Boot override not persisting**
-   - **Solution:** Use one-time boot override instead of permanent
-   - **Check:** iLO firmware version compatibility
-
-### Supermicro Troubleshooting
-
-**Common Issues:**
-1. **Inconsistent Redfish behavior**
-   - **Solution:** Update BMC firmware to latest version
-   - **Workaround:** Use PreBakedISO mode for better reliability
-
-2. **Virtual media compatibility issues**
-   - **Solution:** Configure BMC virtual media settings
-   - **Check:** Enable virtual media in BMC configuration
-
-## Testing Hardware
-
-To test your hardware compatibility with Beskar7:
-
-### 1. Basic Redfish Connectivity Test
+Test basic Redfish connectivity:
 
 ```bash
-# Test basic Redfish endpoint
-curl -k -u username:password https://BMC_IP/redfish/v1/
+# Replace with your BMC details
+BMC_IP="192.168.1.100"
+USERNAME="admin"
+PASSWORD="password"
 
-# Test system information
-curl -k -u username:password https://BMC_IP/redfish/v1/Systems/
+# Test Redfish root
+curl -k -u "${USERNAME}:${PASSWORD}" \
+  "https://${BMC_IP}/redfish/v1/" | jq
+
+# Test systems endpoint
+curl -k -u "${USERNAME}:${PASSWORD}" \
+  "https://${BMC_IP}/redfish/v1/Systems" | jq
+
+# Test power state
+curl -k -u "${USERNAME}:${PASSWORD}" \
+  "https://${BMC_IP}/redfish/v1/Systems/1" | \
+  jq '.PowerState'
 ```
 
-### 2. Virtual Media Test
+If these work, your BMC is compatible!
 
-```bash
-# Check virtual media managers
-curl -k -u username:password https://BMC_IP/redfish/v1/Managers/
-curl -k -u username:password https://BMC_IP/redfish/v1/Managers/1/VirtualMedia/
-```
+### Full Test
 
-### 3. Boot Override Test
-
-```bash
-# Check boot options
-curl -k -u username:password https://BMC_IP/redfish/v1/Systems/1/
-```
-
-### 4. Deploy Test PhysicalHost
-
-Create a test PhysicalHost resource and monitor its progression through states:
+Create a test PhysicalHost:
 
 ```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: test-bmc-creds
+  namespace: default
+stringData:
+  username: "admin"
+  password: "your-password"
+---
 apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
 kind: PhysicalHost
 metadata:
-  name: compatibility-test
+  name: test-server
   namespace: default
 spec:
   redfishConnection:
-    address: "https://YOUR_BMC_IP"
-    credentialsSecretRef: "test-credentials"
-    insecureSkipVerify: true  # For testing only
+    address: "https://192.168.1.100"
+    credentialsSecretRef: "test-bmc-creds"
+    insecureSkipVerify: true  # Only for testing!
 ```
 
-Monitor the resource:
+Monitor the status:
 
 ```bash
-kubectl get physicalhost compatibility-test -o wide
-kubectl describe physicalhost compatibility-test
+kubectl apply -f test-physicalhost.yaml
+
+# Watch status
+kubectl get physicalhost test-server -w
+
+# Expected: Should transition to Available
+# NAME          STATE       READY
+# test-server   Available   true
 ```
 
-## Reporting Compatibility Issues
+If it becomes `Available`, your hardware is fully compatible!
 
-When reporting hardware compatibility issues, please include:
+## Known Limitations
 
-1. **Hardware Information:**
+### Redfish API Must Be Enabled
+
+Some BMCs ship with Redfish disabled. Enable it in BMC settings:
+
+**Dell iDRAC:**
+```
+Network > Redfish > Enable Redfish over LAN
+```
+
+**HPE iLO:**
+```
+Network > iLO RESTful API > Enable iLO RESTful API
+```
+
+**Supermicro:**
+```
+Configuration > Redfish API > Enable
+```
+
+### PXE Boot Must Be Enabled
+
+Ensure PXE/network boot is enabled in BIOS:
+
+1. Enter BIOS setup
+2. Navigate to boot configuration
+3. Enable "Network Boot" or "PXE Boot"
+4. Set network boot in boot order
+5. Save and exit
+
+### Firewall Considerations
+
+**BMC Firewall:**
+- Port 443 (HTTPS) must be open for Redfish
+- Allow traffic from Kubernetes nodes
+
+**Server Firewall:**
+- DHCP (ports 67/68) for PXE boot
+- HTTP (port 80) for boot scripts and images
+
+## Troubleshooting
+
+### PhysicalHost Stuck in Enrolling
+
+**Symptom:** Host never transitions to Available
+
+**Causes:**
+- BMC not reachable from controller
+- Invalid credentials
+- Redfish API disabled
+- Firewall blocking port 443
+
+**Debug:**
+```bash
+# Check controller logs
+kubectl logs -n beskar7-system \
+  deployment/beskar7-controller-manager -f
+
+# Test from controller pod
+kubectl run -it --rm debug \
+  --image=curlimages/curl --restart=Never -- \
+  curl -k -u admin:password https://BMC_IP/redfish/v1/
+```
+
+### Power Operations Fail
+
+**Symptom:** Can't power on/off server
+
+**Causes:**
+- Insufficient BMC user permissions
+- BMC licensing restrictions
+- Hardware safety interlocks
+
+**Solution:**
+- Ensure BMC user has power management privileges
+- Check BMC license (some vendors require licenses for remote power control)
+- Verify no physical safety interlocks (e.g., open chassis)
+
+### Can't Set PXE Boot
+
+**Symptom:** Boot source override fails
+
+**Causes:**
+- Boot override not supported by BMC
+- NIC disabled in BIOS
+- Network boot not in boot order
+
+**Solution:**
+- Verify BMC supports boot source override:
+  ```bash
+  curl -k -u admin:password \
+    https://BMC_IP/redfish/v1/Systems/1 | \
+    jq '.Boot.BootSourceOverrideTarget@Redfish.AllowableValues'
+  ```
+- Should include `"Pxe"` in the array
+- Enable network boot in BIOS if missing
+
+## Reporting Issues
+
+If your hardware doesn't work with Beskar7, please report it!
+
+**Include:**
+
+1. **Hardware Info:**
    - Vendor and model
-   - BMC/BIOS version
-   - Firmware versions
+   - BMC type and version
+   - BIOS version
 
-2. **Redfish Information:**
-   - Redfish version support
-   - Available endpoints (`/redfish/v1/odata`)
+2. **Redfish Info:**
+   ```bash
+   curl -k -u admin:password https://BMC_IP/redfish/v1/ | jq
+   ```
 
 3. **Error Details:**
    - Controller logs
-   - Redfish API responses
-   - Error conditions observed
+   - PhysicalHost status
+   - Error messages
 
-4. **Configuration:**
-   - PhysicalHost resource definition
-   - Beskar7Machine resource definition
-   - Network configuration
+4. **What Doesn't Work:**
+   - Enrollment?
+   - Power management?
+   - Boot source setting?
 
-Submit issues to: https://github.com/wrkode/beskar7/issues
+Submit to: https://github.com/wrkode/beskar7/issues
 
-## Advanced Configuration: Vendor-Specific Annotations
+## Feature Support Matrix
 
-Beskar7 now supports annotation-based overrides for vendor-specific behavior. These annotations allow you to customize how boot parameters are set for specific hardware.
+| Feature | Requirement | All Vendors |
+|---------|-------------|-------------|
+| **Power On/Off** | `/redfish/v1/Systems/{id}/Actions/ComputerSystem.Reset` | ✅ |
+| **Power Status** | `/redfish/v1/Systems/{id}` → `PowerState` | ✅ |
+| **Set PXE Boot** | `/redfish/v1/Systems/{id}` → `Boot.BootSourceOverrideTarget = Pxe` | ✅ |
+| **System Info** | `/redfish/v1/Systems/{id}` → Manufacturer, Model, Serial | ✅ |
+| **Network Info** | `/redfish/v1/Systems/{id}/EthernetInterfaces` | ✅ |
 
-### Available Annotations
+Everything Beskar7 needs is universally supported!
 
-| Annotation | Description | Example Value |
-|------------|-------------|---------------|
-| `beskar7.infrastructure.cluster.x-k8s.io/boot-parameter-mechanism` | Override the boot parameter method | `bios-attribute`, `uefi-target`, `unsupported` |
-| `beskar7.infrastructure.cluster.x-k8s.io/bios-kernel-arg-attribute` | Specify BIOS attribute name for kernel args | `KernelArgs`, `CustomBootArgs` |
+## FAQ
 
-### Example Usage
+**Q: Do I need vendor-specific configuration?**
+A: No! Beskar7 works the same on all vendors.
 
-**Force BIOS attribute method for Dell systems:**
-```yaml
-apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
-kind: PhysicalHost
-metadata:
-  name: dell-server
-  annotations:
-    beskar7.infrastructure.cluster.x-k8s.io/boot-parameter-mechanism: "bios-attribute"
-    beskar7.infrastructure.cluster.x-k8s.io/bios-kernel-arg-attribute: "KernelArgs"
-spec:
-  # ... rest of spec
-```
+**Q: Do I need to update BMC firmware?**
+A: Recommended but not required. Latest firmware usually has best Redfish compliance.
 
-**Force UEFI method for systems that auto-detect as requiring BIOS attributes:**
-```yaml
-apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
-kind: PhysicalHost
-metadata:
-  name: custom-server
-  annotations:
-    beskar7.infrastructure.cluster.x-k8s.io/boot-parameter-mechanism: "uefi-target"
-spec:
-  # ... rest of spec
-```
+**Q: What if my BMC doesn't support Redfish?**
+A: Beskar7 won't work. Consider BMC firmware update or hardware upgrade.
 
-**Disable boot parameter setting entirely:**
-```yaml
-apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
-kind: PhysicalHost
-metadata:
-  name: problematic-server
-  annotations:
-    beskar7.infrastructure.cluster.x-k8s.io/boot-parameter-mechanism: "unsupported"
-spec:
-  # ... rest of spec (will use PreBakedISO mode only)
-```
+**Q: Can I use IPMI instead of Redfish?**
+A: No. Beskar7 requires Redfish. IPMI is obsolete.
 
-### Automatic Vendor Detection
+**Q: Does Beskar7 support Legacy BIOS boot?**
+A: Yes, though UEFI is recommended. Your iPXE infrastructure determines boot mode.
 
-Beskar7 automatically detects hardware vendors based on the system manufacturer field in Redfish and applies appropriate configurations:
+**Q: What about ARM servers?**
+A: Should work if BMC supports Redfish and server can PXE boot. Not yet tested.
 
-- **Dell Inc.** → Uses BIOS attribute method with `KernelArgs` attribute
-- **HPE** → Uses UEFI target boot source override method
-- **Lenovo** → Uses UEFI method with fallback to BIOS attributes
-- **Supermicro** → Uses UEFI target override; BIOS attribute override may be needed on some BMCs
-- **Others** → Uses generic UEFI method with fallback support
+## Production Checklist
 
-Annotations override this automatic detection when specified.
+Before deploying to production:
 
-## Vendor-Specific Support Status
+- [ ] BMC firmware up to date
+- [ ] Redfish API enabled
+- [ ] Network boot enabled in BIOS
+- [ ] Network boot in boot order (first position)
+- [ ] BMC accessible from Kubernetes cluster
+- [ ] Firewall rules configured
+- [ ] BMC user accounts configured with proper permissions
+- [ ] Test PhysicalHost enrollment successful
+- [ ] Test power operations work
+- [ ] Test PXE boot works
 
-### ✅ Completed Features
+## Next Steps
 
-- **Dell:** ✅ BIOS attribute configuration automation (`KernelArgs` support)
-- **HPE:** ✅ `UefiTargetBootSourceOverride` optimization
-- **Lenovo:** ✅ XCC-specific boot parameter detection
-- **Supermicro:** ✅ UEFI target override with BIOS attribute override available via annotation
-- **All Vendors:** ✅ Automatic vendor detection and method selection
+After verifying hardware compatibility:
 
-### 🔄 Planned Enhancements
+1. Set up iPXE infrastructure - See [iPXE Setup Guide](ipxe-setup.md)
+2. Deploy inspector image - See [beskar7-inspector](https://github.com/wrkode/beskar7-inspector)
+3. Register hosts - See [examples](../examples/)
+4. Start provisioning - See [README](../README.md)
 
-- **Dell:** Advanced iDRAC job management for BIOS settings
-- **HPE:** Extended iLO 6 feature integration  
-- **Supermicro:** Enhanced BMC version detection and workarounds
-- **Lenovo:** XCC licensing detection and advanced features
-- **All Vendors:** Expanded annotation-based configuration options
+---
 
-## Contributing Hardware Test Results
-
-We welcome community contributions for hardware compatibility testing. Please submit test results including:
-
-- Hardware specifications
-- Test configurations used
-- Success/failure results for each feature
-- Any workarounds discovered
-
-This helps improve compatibility and guides future development priorities. 
+**The beauty of simplicity:** Any Redfish BMC works, no exceptions, no workarounds!

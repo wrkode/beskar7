@@ -1,0 +1,272 @@
+# Simple Beskar7 Cluster Example
+#
+# This example demonstrates a minimal working cluster with:
+# - 1 control plane node
+# - 2 worker nodes
+# - Hardware inspection enabled
+# - Minimum hardware requirements
+
+---
+# Step 1: Create BMC credentials secret
+apiVersion: v1
+kind: Secret
+metadata:
+  name: bmc-credentials
+  namespace: default
+type: Opaque
+stringData:
+  username: "admin"
+  password: "changeme"  # Replace with your BMC password
+
+---
+# Step 2: Register physical hosts
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+kind: PhysicalHost
+metadata:
+  name: server-01
+  namespace: default
+spec:
+  redfishConnection:
+    address: "https://192.168.1.100"
+    credentialsSecretRef: "bmc-credentials"
+    insecureSkipVerify: true  # Only for testing!
+
+---
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+kind: PhysicalHost
+metadata:
+  name: server-02
+  namespace: default
+spec:
+  redfishConnection:
+    address: "https://192.168.1.101"
+    credentialsSecretRef: "bmc-credentials"
+    insecureSkipVerify: true
+
+---
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+kind: PhysicalHost
+metadata:
+  name: server-03
+  namespace: default
+spec:
+  redfishConnection:
+    address: "https://192.168.1.102"
+    credentialsSecretRef: "bmc-credentials"
+    insecureSkipVerify: true
+
+---
+# Step 3: Create cluster infrastructure
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+kind: Beskar7Cluster
+metadata:
+  name: test-cluster
+  namespace: default
+spec:
+  controlPlaneEndpoint:
+    host: ""  # Will be filled by controller
+    port: 6443
+
+---
+# Step 4: Create Cluster API cluster
+apiVersion: cluster.x-k8s.io/v1beta1
+kind: Cluster
+metadata:
+  name: test-cluster
+  namespace: default
+spec:
+  clusterNetwork:
+    pods:
+      cidrBlocks:
+        - 10.244.0.0/16
+    services:
+      cidrBlocks:
+        - 10.96.0.0/16
+  infrastructureRef:
+    apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+    kind: Beskar7Cluster
+    name: test-cluster
+    namespace: default
+  controlPlaneRef:
+    apiVersion: controlplane.cluster.x-k8s.io/v1beta1
+    kind: KubeadmControlPlane
+    name: test-cluster-control-plane
+    namespace: default
+
+---
+# Step 5: Create control plane machine
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+kind: Beskar7Machine
+metadata:
+  name: control-plane-01
+  namespace: default
+  labels:
+    cluster.x-k8s.io/cluster-name: test-cluster
+    cluster.x-k8s.io/control-plane: "true"
+spec:
+  # Inspector boot via iPXE
+  inspectionImageURL: "http://boot-server.local/ipxe/inspect.ipxe"
+  
+  # Final OS (Kairos example)
+  targetImageURL: "http://boot-server.local/images/kairos-alpine-v2.8.1.tar.gz"
+  
+  # OS configuration
+  configurationURL: "http://boot-server.local/configs/control-plane-config.yaml"
+  
+  # Hardware requirements for control plane
+  hardwareRequirements:
+    minCPUCores: 4
+    minMemoryGB: 16
+    minDiskGB: 100
+
+---
+# Step 6: Create worker machines
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+kind: Beskar7Machine
+metadata:
+  name: worker-01
+  namespace: default
+  labels:
+    cluster.x-k8s.io/cluster-name: test-cluster
+    cluster.x-k8s.io/worker: "true"
+spec:
+  inspectionImageURL: "http://boot-server.local/ipxe/inspect.ipxe"
+  targetImageURL: "http://boot-server.local/images/kairos-alpine-v2.8.1.tar.gz"
+  configurationURL: "http://boot-server.local/configs/worker-config.yaml"
+  hardwareRequirements:
+    minCPUCores: 4
+    minMemoryGB: 8
+    minDiskGB: 50
+
+---
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+kind: Beskar7Machine
+metadata:
+  name: worker-02
+  namespace: default
+  labels:
+    cluster.x-k8s.io/cluster-name: test-cluster
+    cluster.x-k8s.io/worker: "true"
+spec:
+  inspectionImageURL: "http://boot-server.local/ipxe/inspect.ipxe"
+  targetImageURL: "http://boot-server.local/images/kairos-alpine-v2.8.1.tar.gz"
+  configurationURL: "http://boot-server.local/configs/worker-config.yaml"
+  hardwareRequirements:
+    minCPUCores: 4
+    minMemoryGB: 8
+    minDiskGB: 50
+
+---
+# Step 7: Create corresponding Cluster API Machines
+apiVersion: cluster.x-k8s.io/v1beta1
+kind: Machine
+metadata:
+  name: control-plane-01
+  namespace: default
+  labels:
+    cluster.x-k8s.io/cluster-name: test-cluster
+    cluster.x-k8s.io/control-plane: "true"
+spec:
+  clusterName: test-cluster
+  version: v1.28.0
+  bootstrap:
+    configRef:
+      apiVersion: bootstrap.cluster.x-k8s.io/v1beta1
+      kind: KubeadmConfig
+      name: control-plane-01-bootstrap
+  infrastructureRef:
+    apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+    kind: Beskar7Machine
+    name: control-plane-01
+
+---
+apiVersion: cluster.x-k8s.io/v1beta1
+kind: Machine
+metadata:
+  name: worker-01
+  namespace: default
+  labels:
+    cluster.x-k8s.io/cluster-name: test-cluster
+spec:
+  clusterName: test-cluster
+  version: v1.28.0
+  bootstrap:
+    configRef:
+      apiVersion: bootstrap.cluster.x-k8s.io/v1beta1
+      kind: KubeadmConfig
+      name: worker-01-bootstrap
+  infrastructureRef:
+    apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+    kind: Beskar7Machine
+    name: worker-01
+
+---
+apiVersion: cluster.x-k8s.io/v1beta1
+kind: Machine
+metadata:
+  name: worker-02
+  namespace: default
+  labels:
+    cluster.x-k8s.io/cluster-name: test-cluster
+spec:
+  clusterName: test-cluster
+  version: v1.28.0
+  bootstrap:
+    configRef:
+      apiVersion: bootstrap.cluster.x-k8s.io/v1beta1
+      kind: KubeadmConfig
+      name: worker-02-bootstrap
+  infrastructureRef:
+    apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+    kind: Beskar7Machine
+    name: worker-02
+
+---
+# Bootstrap configurations (kubeadm)
+# Note: These should be customized for your environment
+apiVersion: bootstrap.cluster.x-k8s.io/v1beta1
+kind: KubeadmConfig
+metadata:
+  name: control-plane-01-bootstrap
+  namespace: default
+spec:
+  initConfiguration:
+    nodeRegistration:
+      criSocket: /run/containerd/containerd.sock
+      kubeletExtraArgs:
+        cloud-provider: external
+  clusterConfiguration:
+    apiServer:
+      certSANs:
+        - localhost
+        - 127.0.0.1
+    controllerManager:
+      extraArgs:
+        enable-hostpath-provisioner: "true"
+
+---
+apiVersion: bootstrap.cluster.x-k8s.io/v1beta1
+kind: KubeadmConfig
+metadata:
+  name: worker-01-bootstrap
+  namespace: default
+spec:
+  joinConfiguration:
+    nodeRegistration:
+      criSocket: /run/containerd/containerd.sock
+      kubeletExtraArgs:
+        cloud-provider: external
+
+---
+apiVersion: bootstrap.cluster.x-k8s.io/v1beta1
+kind: KubeadmConfig
+metadata:
+  name: worker-02-bootstrap
+  namespace: default
+spec:
+  joinConfiguration:
+    nodeRegistration:
+      criSocket: /run/containerd/containerd.sock
+      kubeletExtraArgs:
+        cloud-provider: external
+
