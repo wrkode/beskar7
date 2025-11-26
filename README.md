@@ -1,4 +1,4 @@
-# Beskar7: Simple Bare-Metal Provisioning for Kubernetes
+# Beskar7: Bare-Metal Provisioning for Immutable Kubernetes
 
 Beskar7 is a Kubernetes operator that implements the Cluster API infrastructure provider contract for managing bare-metal machines. It uses a simple, reliable approach: **Redfish for power management + iPXE for network boot + Hardware inspection**.
 
@@ -27,7 +27,7 @@ Beskar7 is a Kubernetes operator that implements the Cluster API infrastructure 
        ▼
 ┌─────────────┐
 │    iPXE     │  4. Network boots inspection image
-│   Boot      │  (You provide DHCP + HTTP server)
+│   Boot      │  (for the moment - You provide DHCP + HTTP server)
 └──────┬──────┘
        │
        ▼
@@ -53,12 +53,12 @@ Beskar7 is a Kubernetes operator that implements the Cluster API infrastructure 
 
 ## Key Features
 
-- ✅ **Power Management** - Simple on/off via Redfish
-- ✅ **iPXE Provisioning** - Network boot for any OS
-- ✅ **Hardware Inspection** - Real CPU, RAM, disk, NIC discovery
-- ✅ **Hardware Validation** - Enforce minimum requirements
-- ✅ **Cluster API Integration** - Full CAPI provider implementation
-- ✅ **Vendor Agnostic** - No vendor-specific code
+- **Power Management** - Simple on/off via Redfish
+- **iPXE Provisioning** - Network boot for any OS
+- **Hardware Inspection** - Real CPU, RAM, disk, NIC discovery
+- **Hardware Validation** - Enforce minimum requirements
+- **Cluster API Integration** - Full CAPI provider implementation
+- **Vendor Agnostic** - No vendor-specific code
 
 ## Quick Start
 
