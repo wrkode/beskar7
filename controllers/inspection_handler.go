@@ -114,10 +114,12 @@ func (h *InspectionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	log.Info("Successfully updated PhysicalHost with inspection report")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{
-		"status": "success",
+	if err := json.NewEncoder(w).Encode(map[string]string{
+		"status":  "success",
 		"message": "Inspection report received and processed",
-	})
+	}); err != nil {
+		log.Error(err, "Failed to encode response")
+	}
 }
 
 // updatePhysicalHost updates the PhysicalHost with inspection report data
@@ -212,7 +214,9 @@ func SetupInspectionServer(mgr ctrl.Manager, port int) error {
 	mux.Handle("/api/v1/inspection", handler)
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("ok"))
+		if _, err := w.Write([]byte("ok")); err != nil {
+			ctrl.Log.WithName("inspection-server").Error(err, "Failed to write health check response")
+		}
 	})
 
 	server := &http.Server{
@@ -232,7 +236,9 @@ func SetupInspectionServer(mgr ctrl.Manager, port int) error {
 	}()
 
 	// Register shutdown with manager
-	mgr.Add(&inspectionServerRunnable{server: server})
+	if err := mgr.Add(&inspectionServerRunnable{server: server}); err != nil {
+		return fmt.Errorf("failed to add inspection server to manager: %w", err)
+	}
 
 	return nil
 }

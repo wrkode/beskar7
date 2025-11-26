@@ -337,7 +337,10 @@ func (r *Beskar7MachineReconciler) validateInspectionReport(ctx context.Context,
 		for _, mem := range report.Memory {
 			// Parse capacity string (e.g., "32GB" -> 32)
 			var memGB int
-			fmt.Sscanf(mem.Capacity, "%d", &memGB)
+			if _, err := fmt.Sscanf(mem.Capacity, "%d", &memGB); err != nil {
+				logger.Error(err, "Failed to parse memory capacity", "capacity", mem.Capacity)
+				continue
+			}
 			totalMemoryGB += memGB
 		}
 
