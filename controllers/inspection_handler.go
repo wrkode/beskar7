@@ -30,11 +30,11 @@ type InspectionReportRequest struct {
 	HostName  string `json:"hostName"`
 
 	// Hardware information from inspection
-	Manufacturer string    `json:"manufacturer,omitempty"`
-	Model        string    `json:"model,omitempty"`
-	SerialNumber string    `json:"serialNumber,omitempty"`
-	CPUs         []CPUData `json:"cpus,omitempty"`
-	Memory       []MemData `json:"memory,omitempty"`
+	Manufacturer string     `json:"manufacturer,omitempty"`
+	Model        string     `json:"model,omitempty"`
+	SerialNumber string     `json:"serialNumber,omitempty"`
+	CPUs         []CPUData  `json:"cpus,omitempty"`
+	Memory       []MemData  `json:"memory,omitempty"`
 	Disks        []DiskData `json:"disks,omitempty"`
 	NICs         []NICData  `json:"nics,omitempty"`
 
@@ -255,4 +255,3 @@ func (r *inspectionServerRunnable) Start(ctx context.Context) error {
 	defer cancel()
 	return r.server.Shutdown(shutdownCtx)
 }
-

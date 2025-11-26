@@ -24,12 +24,12 @@ type MockClient struct {
 	GetNetworkAddressesFunc func(ctx context.Context) ([]NetworkAddress, error)
 
 	// Counters (optional, for verification)
-	CloseCalled             bool
-	GetSystemInfoCalled     bool
-	GetPowerStateCalled     bool
-	SetPowerStateCalled     bool
-	SetBootSourcePXECalled  bool
-	ResetCalled             bool
+	CloseCalled               bool
+	GetSystemInfoCalled       bool
+	GetPowerStateCalled       bool
+	SetPowerStateCalled       bool
+	SetBootSourcePXECalled    bool
+	ResetCalled               bool
 	GetNetworkAddressesCalled bool
 }
 
