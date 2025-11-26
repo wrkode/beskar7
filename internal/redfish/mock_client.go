@@ -2,7 +2,6 @@ package redfish
 
 import (
 	"context"
-	"fmt"
 	"sync"
 
 	"github.com/stmcginnis/gofish/common"
@@ -10,6 +9,7 @@ import (
 )
 
 // MockClient provides a mock implementation of the Client interface for testing.
+// Simplified for iPXE + inspection workflow (no VirtualMedia).
 type MockClient struct {
 	mu sync.Mutex // Protect access to mock state
 
@@ -17,8 +17,6 @@ type MockClient struct {
 	SystemInfo      *SystemInfo
 	PowerState      redfish.PowerState
 	ShouldFail      map[string]error // Map method name to error to simulate failures
-	InsertedISO     string
-	BootSourceIsISO bool
 	BootSourceIsPXE bool
 
 	// Network address fields
@@ -26,21 +24,13 @@ type MockClient struct {
 	GetNetworkAddressesFunc func(ctx context.Context) ([]NetworkAddress, error)
 
 	// Counters (optional, for verification)
-	CloseCalled         bool
-	GetSystemInfoCalled bool
-	GetPowerStateCalled bool
-	SetPowerStateCalled bool
-	SetBootSourceCalled bool
-	EjectMediaCalled    bool
-	// Add fields for SetBootParameters
-	SetBootParametersFunc     func(ctx context.Context, params []string) error
-	SetBootParametersCalled   bool
-	StoredBootParams          []string // To store the parameters for assertion
+	CloseCalled             bool
+	GetSystemInfoCalled     bool
+	GetPowerStateCalled     bool
+	SetPowerStateCalled     bool
+	SetBootSourcePXECalled  bool
+	ResetCalled             bool
 	GetNetworkAddressesCalled bool
-
-	// New fields for SetBootParametersWithAnnotations
-	SetBootParametersWithAnnotationsFunc   func(ctx context.Context, params []string, annotations map[string]string) error
-	SetBootParametersWithAnnotationsCalled bool
 }
 
 // NewMockClient creates a new mock client with default values.
@@ -54,8 +44,6 @@ func NewMockClient() *MockClient {
 		},
 		PowerState: redfish.OffPowerState,
 		ShouldFail: make(map[string]error),
-		// Initialize new fields
-		StoredBootParams: nil,
 	}
 }
 
@@ -109,29 +97,10 @@ func (m *MockClient) SetPowerState(ctx context.Context, state redfish.PowerState
 	return nil
 }
 
-// SetBootSourceISO mock implementation.
-func (m *MockClient) SetBootSourceISO(ctx context.Context, isoURL string) error {
-	m.mu.Lock()
-	m.SetBootSourceCalled = true
-	m.mu.Unlock()
-	if err := m.failIfNeeded("SetBootSourceISO"); err != nil {
-		return err
-	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.InsertedISO != "" && m.InsertedISO != isoURL {
-		return fmt.Errorf("mock error: different media already inserted (%s)", m.InsertedISO)
-	}
-	m.InsertedISO = isoURL
-	m.BootSourceIsISO = true
-	m.BootSourceIsPXE = false
-	return nil
-}
-
 // SetBootSourcePXE mock implementation.
 func (m *MockClient) SetBootSourcePXE(ctx context.Context) error {
 	m.mu.Lock()
-	m.SetBootSourceCalled = true
+	m.SetBootSourcePXECalled = true
 	m.mu.Unlock()
 	if err := m.failIfNeeded("SetBootSourcePXE"); err != nil {
 		return err
@@ -139,58 +108,21 @@ func (m *MockClient) SetBootSourcePXE(ctx context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.BootSourceIsPXE = true
-	m.BootSourceIsISO = false
 	return nil
 }
 
-// EjectVirtualMedia mock implementation.
-func (m *MockClient) EjectVirtualMedia(ctx context.Context) error {
+// Reset mock implementation.
+func (m *MockClient) Reset(ctx context.Context) error {
 	m.mu.Lock()
-	m.EjectMediaCalled = true
+	m.ResetCalled = true
 	m.mu.Unlock()
-	if err := m.failIfNeeded("EjectVirtualMedia"); err != nil {
+	if err := m.failIfNeeded("Reset"); err != nil {
 		return err
 	}
+	// Simulate a reset by cycling power state
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.InsertedISO = ""
-	m.BootSourceIsISO = false
-	return nil
-}
-
-// SetBootParameters mock implementation.
-func (m *MockClient) SetBootParameters(ctx context.Context, params []string) error {
-	m.mu.Lock()
-	m.SetBootParametersCalled = true
-	// Store a copy of the params. If params is nil, StoredBootParams will be nil.
-	if params != nil {
-		m.StoredBootParams = make([]string, len(params))
-		copy(m.StoredBootParams, params)
-	} else {
-		m.StoredBootParams = nil
-	}
-	m.mu.Unlock()
-
-	if err := m.failIfNeeded("SetBootParameters"); err != nil {
-		return err
-	}
-	if m.SetBootParametersFunc != nil {
-		return m.SetBootParametersFunc(ctx, params)
-	}
-	return nil
-}
-
-// SetBootParametersWithAnnotations mock implementation.
-func (m *MockClient) SetBootParametersWithAnnotations(ctx context.Context, params []string, annotations map[string]string) error {
-	m.mu.Lock()
-	m.SetBootParametersWithAnnotationsCalled = true
-	m.mu.Unlock()
-	if err := m.failIfNeeded("SetBootParametersWithAnnotations"); err != nil {
-		return err
-	}
-	if m.SetBootParametersWithAnnotationsFunc != nil {
-		return m.SetBootParametersWithAnnotationsFunc(ctx, params, annotations)
-	}
+	m.PowerState = redfish.OnPowerState
 	return nil
 }
 

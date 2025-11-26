@@ -5,17 +5,13 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"strings"
 
 	"github.com/stmcginnis/gofish"
 	"github.com/stmcginnis/gofish/redfish"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 )
 
-// Common EFI boot loader path
-const DefaultEFIBootLoaderPath = "\\EFI\\BOOT\\BOOTX64.EFI"
-
-// goFishClient implements the Client interface using the gofish library.
+// gofishClient implements the Client interface using the gofish library.
 type gofishClient struct {
 	gofishClient *gofish.APIClient
 	apiEndpoint  string // Store the original endpoint address
@@ -55,7 +51,6 @@ func NewClient(ctx context.Context, address, username, password string, insecure
 		Password:  password,
 		Insecure:  insecure,
 		BasicAuth: true,
-		// Cannot pass httpClient directly, gofish creates its own based on these settings.
 	}
 
 	// Log the final config before connecting
@@ -66,9 +61,9 @@ func NewClient(ctx context.Context, address, username, password string, insecure
 		"Insecure", config.Insecure,
 		"BasicAuth", config.BasicAuth)
 
-	c, err := gofish.ConnectContext(ctx, config) // gofish uses the config fields internally
+	c, err := gofish.ConnectContext(ctx, config)
 	if err != nil {
-		logger.Error(err, "Failed to connect to Redfish endpoint", "address", endpointURL) // Log the processed URL
+		logger.Error(err, "Failed to connect to Redfish endpoint", "address", endpointURL)
 		return nil, fmt.Errorf("failed to connect to Redfish endpoint %s: %w", endpointURL, err)
 	}
 
@@ -76,7 +71,7 @@ func NewClient(ctx context.Context, address, username, password string, insecure
 
 	return &gofishClient{
 		gofishClient: c,
-		apiEndpoint:  endpointURL, // Store the processed URL
+		apiEndpoint:  endpointURL,
 	}, nil
 }
 
@@ -164,7 +159,7 @@ func (c *gofishClient) SetPowerState(ctx context.Context, state redfish.PowerSta
 	case redfish.OnPowerState:
 		resetType = redfish.OnResetType
 	case redfish.OffPowerState:
-		resetType = redfish.ForceOffResetType // Or OffResetType?
+		resetType = redfish.ForceOffResetType
 	default:
 		// Try direct conversion if it matches a ResetType
 		switch redfish.ResetType(state) {
@@ -176,7 +171,7 @@ func (c *gofishClient) SetPowerState(ctx context.Context, state redfish.PowerSta
 	}
 
 	log.Info("Attempting to set power state", "desiredState", state, "resetType", resetType)
-	err = system.Reset(resetType) // Use Reset method with correct ResetType
+	err = system.Reset(resetType)
 	if err != nil {
 		log.Error(err, "Failed to set power state", "desiredState", state)
 		return fmt.Errorf("failed to set power state to %s: %w", state, err)
@@ -185,142 +180,7 @@ func (c *gofishClient) SetPowerState(ctx context.Context, state redfish.PowerSta
 	return nil
 }
 
-// findFirstVirtualMedia finds the first available virtual media device (CD or DVD type).
-// It tries finding the manager via the system's ManagedBy links first, then falls back
-// to searching all managers from the service root.
-func (c *gofishClient) findFirstVirtualMedia(ctx context.Context) (*redfish.VirtualMedia, error) {
-	if c.gofishClient == nil {
-		return nil, fmt.Errorf("redfish client is not connected")
-	}
-	logger := logf.FromContext(ctx)
-
-	// Helper function to search virtual media within a specific manager
-	searchManagerVM := func(mgr *redfish.Manager) (*redfish.VirtualMedia, error) {
-		virtualMedia, err := mgr.VirtualMedia()
-		if err != nil {
-			logger.Error(err, "Failed to retrieve virtual media collection", "manager", mgr.ID)
-			// Don't return error, just skip this manager
-			return nil, nil
-		}
-		for _, vm := range virtualMedia {
-			for _, mediaType := range vm.MediaTypes {
-				if mediaType == redfish.CDMediaType || mediaType == redfish.DVDMediaType {
-					logger.Info("Found suitable virtual media device via manager", "vmID", vm.ID, "managerID", mgr.ID)
-					return vm, nil
-				}
-			}
-		}
-		return nil, nil // Not found in this manager
-	}
-
-	// Attempt 1: Via System.ManagedBy
-	logger.V(1).Info("Attempting to find manager via System.ManagedBy")
-	system, err := c.getSystemService(ctx)
-	if err != nil {
-		logger.Error(err, "Failed to get system when searching for virtual media manager")
-		// Fallback to searching all managers if getting system fails
-	} else {
-		mgrLinks, err := system.ManagedBy()
-		if err != nil {
-			logger.Error(err, "Failed to get ManagedBy links from system", "systemID", system.ID)
-		} else if len(mgrLinks) == 0 {
-			logger.Info("System reported no ManagedBy links", "systemID", system.ID)
-		} else {
-			for _, link := range mgrLinks {
-				mgr, err := redfish.GetManager(c.gofishClient, link.ODataID)
-				if err != nil {
-					logger.Error(err, "Failed to get manager from ManagedBy link", "link", link.ODataID)
-					continue
-				}
-				vm, _ := searchManagerVM(mgr) // Error already logged in helper
-				if vm != nil {
-					return vm, nil // Found it!
-				}
-			}
-		}
-	}
-
-	// Attempt 2: Via ServiceRoot.Managers
-	logger.Info("Falling back to searching all managers from service root for virtual media")
-	managers, err := c.gofishClient.Service.Managers()
-	if err != nil {
-		logger.Error(err, "Failed to retrieve managers from service root")
-		return nil, fmt.Errorf("failed to get managers from service root: %w", err)
-	}
-	if len(managers) == 0 {
-		logger.Error(nil, "No managers found at service root")
-		return nil, fmt.Errorf("no managers found at service root")
-	}
-
-	for _, mgr := range managers {
-		vm, _ := searchManagerVM(mgr) // Error already logged in helper
-		if vm != nil {
-			return vm, nil // Found it!
-		}
-	}
-
-	logger.Error(nil, "No suitable virtual media device (CD/DVD) found after checking all managers.")
-	return nil, fmt.Errorf("no suitable virtual media (CD/DVD) found")
-}
-
-// SetBootSourceISO configures the system to boot from a given ISO URL via VirtualMedia.
-func (c *gofishClient) SetBootSourceISO(ctx context.Context, isoURL string) error {
-	vm, err := c.findFirstVirtualMedia(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to find virtual media device: %w", err)
-	}
-
-	log.Info("Attempting to insert virtual media", "vmID", vm.ID, "isoURL", isoURL)
-	err = vm.InsertMedia(isoURL, true, false) // Insert, make it bootable
-	if err != nil {
-		// Check if media is already inserted - some BMCs might return an error
-		if vm.MediaTypes != nil && vm.Image != "" {
-			log.Info("Virtual media possibly already inserted", "vmID", vm.ID, "currentImage", vm.Image)
-			if vm.Image == isoURL {
-				log.Info("Correct ISO already inserted.")
-				// Still need to ensure boot order
-			} else {
-				log.Info("Different media inserted, attempting eject first", "vmID", vm.ID)
-				if ejectErr := vm.EjectMedia(); ejectErr != nil {
-					log.Error(ejectErr, "Failed to eject existing media before inserting new ISO", "vmID", vm.ID)
-					// Proceeding with insert might still work or fail cleanly
-				}
-				err = vm.InsertMedia(isoURL, true, false) // Retry insert
-				if err != nil {
-					log.Error(err, "Failed to insert virtual media after eject attempt", "vmID", vm.ID, "isoURL", isoURL)
-					return fmt.Errorf("failed to insert virtual media %s: %w", isoURL, err)
-				}
-			}
-		} else {
-			log.Error(err, "Failed to insert virtual media", "vmID", vm.ID, "isoURL", isoURL)
-			return fmt.Errorf("failed to insert virtual media %s: %w", isoURL, err)
-		}
-	}
-
-	// Set boot order to boot from CD/DVD once
-	system, err := c.getSystemService(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to get system to set boot order: %w", err)
-	}
-
-	boot := redfish.Boot{
-		BootSourceOverrideTarget:  redfish.CdBootSourceOverrideTarget,    // Target CD/DVD
-		BootSourceOverrideEnabled: redfish.OnceBootSourceOverrideEnabled, // Boot from it once
-		// BootSourceOverrideMode indicates UEFI or BIOS. Assuming UEFI is default or desired.
-		// BootSourceOverrideMode: redfish.UEFIBootSourceOverrideMode,
-	}
-	log.Info("Attempting to set boot source override", "target", boot.BootSourceOverrideTarget, "enabled", boot.BootSourceOverrideEnabled)
-	err = system.SetBoot(boot)
-	if err != nil {
-		log.Error(err, "Failed to set boot source override")
-		return fmt.Errorf("failed to set boot source override: %w", err)
-	}
-
-	log.Info("Successfully set boot source to virtual media ISO", "vmID", vm.ID, "isoURL", isoURL)
-	return nil
-}
-
-// SetBootSourcePXE configures the system to boot from PXE/network.
+// SetBootSourcePXE configures the system to boot from PXE/network for iPXE.
 func (c *gofishClient) SetBootSourcePXE(ctx context.Context) error {
 	system, err := c.getSystemService(ctx)
 	if err != nil {
@@ -328,8 +188,8 @@ func (c *gofishClient) SetBootSourcePXE(ctx context.Context) error {
 	}
 
 	boot := redfish.Boot{
-		BootSourceOverrideTarget:  redfish.PxeBootSourceOverrideTarget,   // Target PXE
-		BootSourceOverrideEnabled: redfish.OnceBootSourceOverrideEnabled, // Boot from it once
+		BootSourceOverrideTarget:  redfish.PxeBootSourceOverrideTarget,
+		BootSourceOverrideEnabled: redfish.OnceBootSourceOverrideEnabled,
 	}
 	log.Info("Attempting to set boot source override to PXE", "target", boot.BootSourceOverrideTarget, "enabled", boot.BootSourceOverrideEnabled)
 	err = system.SetBoot(boot)
@@ -342,161 +202,20 @@ func (c *gofishClient) SetBootSourcePXE(ctx context.Context) error {
 	return nil
 }
 
-// EjectVirtualMedia ejects any inserted virtual media.
-func (c *gofishClient) EjectVirtualMedia(ctx context.Context) error {
-	vm, err := c.findFirstVirtualMedia(ctx)
-	if err != nil {
-		// If no suitable VM device is found, maybe that's okay for eject?
-		if strings.Contains(err.Error(), "no suitable virtual media") {
-			log.Info("No suitable virtual media device found to eject from.")
-			return nil
-		}
-		return fmt.Errorf("failed to find virtual media device for eject: %w", err)
-	}
-
-	// Check if media is inserted by looking at the Image field
-	if vm.Image == "" {
-		log.Info("No virtual media currently inserted.", "vmID", vm.ID)
-		return nil
-	}
-
-	log.Info("Attempting to eject virtual media", "vmID", vm.ID, "currentImage", vm.Image)
-	err = vm.EjectMedia()
-	if err != nil {
-		log.Error(err, "Failed to eject virtual media", "vmID", vm.ID)
-		return fmt.Errorf("failed to eject virtual media on %s: %w", vm.ID, err)
-	}
-
-	log.Info("Successfully ejected virtual media", "vmID", vm.ID)
-	return nil
-}
-
-// SetBootParameters configures kernel command line parameters for the next boot.
-// This implementation uses vendor-specific methods when possible, with fallback
-// to the standard UEFI method.
-func (c *gofishClient) SetBootParameters(ctx context.Context, params []string) error {
-	return c.SetBootParametersWithAnnotations(ctx, params, nil)
-}
-
-// SetBootParametersWithAnnotations configures kernel command line parameters for the next boot
-// with vendor-specific support based on annotations.
-func (c *gofishClient) SetBootParametersWithAnnotations(ctx context.Context, params []string, annotations map[string]string) error {
-	log := logf.FromContext(ctx)
-	log.Info("Attempting to set boot parameters with vendor-specific support", "Params", params)
-
-	// Create vendor-specific boot manager
-	vendorBootMgr := NewVendorSpecificBootManager(c)
-
-	// Try vendor-specific boot parameter setting first
-	// This will automatically detect the vendor and use the appropriate method
-	err := vendorBootMgr.SetBootParametersWithVendorSupport(ctx, params, annotations)
-	if err != nil {
-		log.Error(err, "Vendor-specific boot parameter setting failed, trying fallback")
-
-		// Fallback to the original UEFI method
-		return c.setBootParametersUEFI(ctx, params)
-	}
-
-	log.Info("Successfully set boot parameters using vendor-specific method")
-	return nil
-}
-
-// setBootParametersUEFI is the original UEFI boot parameter implementation
-func (c *gofishClient) setBootParametersUEFI(ctx context.Context, params []string) error {
-	log := logf.FromContext(ctx)
-	log.V(1).Info("Attempting boot parameter setting via UefiTargetBootSourceOverride")
-
+// Reset performs a system reset.
+func (c *gofishClient) Reset(ctx context.Context) error {
 	system, err := c.getSystemService(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to get system to set boot parameters: %w", err)
+		return fmt.Errorf("failed to get system for reset: %w", err)
 	}
 
-	var uefiBootSettings redfish.Boot
-	if len(params) == 0 {
-		// Clear parameters: Disable override and set target to None.
-		uefiBootSettings = redfish.Boot{
-			BootSourceOverrideEnabled:    redfish.DisabledBootSourceOverrideEnabled,
-			BootSourceOverrideTarget:     redfish.NoneBootSourceOverrideTarget,
-			UefiTargetBootSourceOverride: "",
-		}
-	} else {
-		// Default EFI bootloader path. This is a guess and might need to be configurable.
-		efiBootloaderPath := DefaultEFIBootLoaderPath
-		fullBootString := efiBootloaderPath + " " + strings.Join(params, " ")
-		uefiBootSettings = redfish.Boot{
-			BootSourceOverrideTarget:     redfish.UefiTargetBootSourceOverrideTarget,
-			BootSourceOverrideEnabled:    redfish.OnceBootSourceOverrideEnabled,
-			UefiTargetBootSourceOverride: fullBootString,
-		}
-	}
-
-	log.Info("Applying boot settings via UefiTargetBootSourceOverride", "Settings", uefiBootSettings)
-	uerr := system.SetBoot(uefiBootSettings)
-	if uerr == nil {
-		log.Info("Successfully applied boot settings via UefiTargetBootSourceOverride.")
-		return nil // Success!
-	}
-
-	// UEFI Target method failed, log details and consider alternatives.
-	log.Error(uerr, "Failed to set boot settings via UefiTargetBootSourceOverride", "Settings", uefiBootSettings)
-	return fmt.Errorf("failed to set boot parameters using UefiTargetBootSourceOverride: %w", uerr)
-}
-
-// setBootParametersViaBootOptions attempts to set boot parameters using UEFI BootOptions/BootNext,
-// by locating a suitable BootOption (e.g., the virtual CD/DVD) and setting BootNext for a one-time boot.
-// Note: Kernel parameters are generally not supported via BootOptions; this is a fallback to select
-// a proper boot source when UefiTargetBootSourceOverride is not reliable.
-func (c *gofishClient) setBootParametersViaBootOptions(ctx context.Context) error {
-	log := logf.FromContext(ctx)
-	log.V(1).Info("Attempting to set boot via BootOptions/BootNext")
-
-	system, err := c.getSystemService(ctx)
+	log.Info("Attempting to reset system")
+	err = system.Reset(redfish.ForceRestartResetType)
 	if err != nil {
-		return fmt.Errorf("failed to get system for boot options: %w", err)
+		log.Error(err, "Failed to reset system")
+		return fmt.Errorf("failed to reset system: %w", err)
 	}
-
-	// Fetch available BootOptions
-	bootOptions, err := system.BootOptions()
-	if err != nil {
-		log.Error(err, "Failed to list BootOptions")
-		return fmt.Errorf("failed to list boot options: %w", err)
-	}
-	if len(bootOptions) == 0 {
-		return fmt.Errorf("no BootOptions available on system")
-	}
-
-	// Heuristic: prefer a CD/DVD or virtual media BootOption; fallback to first option.
-	var ref string
-	for _, bo := range bootOptions {
-		if bo == nil {
-			continue
-		}
-		// Many implementations encode media type in reference or description; be conservative
-		if strings.Contains(strings.ToLower(bo.BootOptionReference), "cd") ||
-			strings.Contains(strings.ToLower(bo.BootOptionReference), "dvd") ||
-			strings.Contains(strings.ToLower(bo.BootOptionReference), "virtual") {
-			ref = bo.BootOptionReference
-			break
-		}
-	}
-	if ref == "" {
-		// Fallback to first option
-		ref = bootOptions[0].BootOptionReference
-	}
-
-	// Set one-time boot using BootNext
-	current := system.Boot
-	current.BootSourceOverrideTarget = redfish.UefiBootNextBootSourceOverrideTarget
-	current.BootSourceOverrideEnabled = redfish.OnceBootSourceOverrideEnabled
-	current.BootNext = ref
-
-	log.Info("Applying boot via BootNext", "BootNext", ref)
-	if err := system.SetBoot(current); err != nil {
-		log.Error(err, "Failed to set BootNext via SetBoot")
-		return fmt.Errorf("failed to set BootNext via SetBoot: %w", err)
-	}
-
-	log.Info("Successfully set one-time boot via BootNext", "BootNext", ref)
+	log.Info("Successfully reset system")
 	return nil
 }
 

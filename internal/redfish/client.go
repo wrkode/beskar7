@@ -9,7 +9,7 @@ import (
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 )
 
-// Client represents a Redfish client
+// Client represents a Redfish client - simplified for power management and iPXE boot only
 type Client interface {
 	// Close closes the client connection
 	Close(ctx context.Context)
@@ -23,20 +23,11 @@ type Client interface {
 	// SetPowerState sets the power state
 	SetPowerState(ctx context.Context, state redfish.PowerState) error
 
-	// SetBootSourceISO configures the system to boot from an ISO
-	SetBootSourceISO(ctx context.Context, isoURL string) error
-
-	// SetBootSourcePXE configures the system to boot from PXE/network
+	// SetBootSourcePXE configures the system to boot from PXE/network (iPXE)
 	SetBootSourcePXE(ctx context.Context) error
 
-	// EjectVirtualMedia ejects any inserted virtual media
-	EjectVirtualMedia(ctx context.Context) error
-
-	// SetBootParameters configures kernel command line parameters
-	SetBootParameters(ctx context.Context, params []string) error
-
-	// SetBootParametersWithAnnotations configures kernel command line parameters with vendor-specific support
-	SetBootParametersWithAnnotations(ctx context.Context, params []string, annotations map[string]string) error
+	// Reset performs a system reset
+	Reset(ctx context.Context) error
 
 	// GetNetworkAddresses retrieves network interface addresses
 	GetNetworkAddresses(ctx context.Context) ([]NetworkAddress, error)

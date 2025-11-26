@@ -6,26 +6,24 @@ import (
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 )
 
-// PhysicalHost states
+// PhysicalHost states - simplified for iPXE + inspection workflow
 const (
 	// StateNone is the default state before reconciliation
 	StateNone = ""
+	// StateUnknown indicates the host state could not be determined
+	StateUnknown = "Unknown"
 	// StateEnrolling indicates the controller is trying to establish connection
 	StateEnrolling = "Enrolling"
 	// StateAvailable indicates the host is ready to be claimed
 	StateAvailable = "Available"
-	// StateClaimed indicates the host is reserved by a consumer
-	StateClaimed = "Claimed"
-	// StateProvisioning indicates the host is being configured
-	StateProvisioning = "Provisioning"
-	// StateProvisioned indicates the host has been successfully configured
-	StateProvisioned = "Provisioned"
-	// StateDeprovisioning indicates the host is being cleaned up
-	StateDeprovisioning = "Deprovisioning"
+	// StateInUse indicates the host is claimed and being used by a Beskar7Machine
+	StateInUse = "InUse"
+	// StateInspecting indicates the inspection image is running on the host
+	StateInspecting = "Inspecting"
+	// StateReady indicates inspection is complete and host is ready for provisioning
+	StateReady = "Ready"
 	// StateError indicates the host is in an error state
 	StateError = "Error"
-	// StateUnknown indicates the host state could not be determined
-	StateUnknown = "Unknown"
 )
 
 // RedfishConnection contains the information needed to connect to a Redfish service
@@ -77,6 +75,7 @@ type HardwareStatus struct {
 }
 
 // PhysicalHostSpec defines the desired state of PhysicalHost
+// Simplified for power management only - provisioning happens via iPXE + inspection.
 type PhysicalHostSpec struct {
 	// RedfishConnection contains the connection details for the Redfish endpoint
 	RedfishConnection RedfishConnection `json:"redfishConnection"`
@@ -84,14 +83,156 @@ type PhysicalHostSpec struct {
 	// ConsumerRef is a reference to the Beskar7Machine that is using this host
 	// +optional
 	ConsumerRef *corev1.ObjectReference `json:"consumerRef,omitempty"`
+}
 
-	// BootISOSource is the URL of the ISO image to use for provisioning
-	// +optional
-	BootISOSource *string `json:"bootIsoSource,omitempty"`
+// InspectionPhase represents the current phase of hardware inspection
+type InspectionPhase string
 
-	// UserDataSecretRef is a reference to a secret containing cloud-init user data
+const (
+	// InspectionPhasePending indicates inspection has not started
+	InspectionPhasePending InspectionPhase = "Pending"
+	// InspectionPhaseBooting indicates the inspection image is booting
+	InspectionPhaseBooting InspectionPhase = "Booting"
+	// InspectionPhaseInProgress indicates inspection is actively running
+	InspectionPhaseInProgress InspectionPhase = "InProgress"
+	// InspectionPhaseComplete indicates inspection finished successfully
+	InspectionPhaseComplete InspectionPhase = "Complete"
+	// InspectionPhaseFailed indicates inspection encountered an error
+	InspectionPhaseFailed InspectionPhase = "Failed"
+	// InspectionPhaseTimeout indicates inspection did not complete in time
+	InspectionPhaseTimeout InspectionPhase = "Timeout"
+)
+
+// InspectionReport contains hardware information collected during inspection
+type InspectionReport struct {
+	// Timestamp when the inspection was performed
+	Timestamp metav1.Time `json:"timestamp"`
+
+	// CPUs contains CPU information
+	CPUs CPUInfo `json:"cpus"`
+
+	// Memory contains memory information
+	Memory MemoryInfo `json:"memory"`
+
+	// Disks contains information about storage devices
 	// +optional
-	UserDataSecretRef *corev1.ObjectReference `json:"userDataSecretRef,omitempty"`
+	Disks []DiskInfo `json:"disks,omitempty"`
+
+	// NICs contains network interface information
+	// +optional
+	NICs []NICInfo `json:"nics,omitempty"`
+
+	// System contains system/BIOS information
+	System SystemInfo `json:"system"`
+
+	// RawData contains the complete raw inspection output for debugging
+	// +optional
+	RawData string `json:"rawData,omitempty"`
+}
+
+// CPUInfo contains CPU-related information
+type CPUInfo struct {
+	// Count is the number of physical CPU sockets
+	Count int `json:"count"`
+
+	// Cores is the total number of CPU cores
+	Cores int `json:"cores"`
+
+	// Threads is the total number of CPU threads
+	Threads int `json:"threads"`
+
+	// Model is the CPU model name
+	// +optional
+	Model string `json:"model,omitempty"`
+
+	// Architecture is the CPU architecture (e.g., x86_64, aarch64)
+	// +optional
+	Architecture string `json:"architecture,omitempty"`
+
+	// MHz is the CPU frequency in MHz
+	// +optional
+	MHz float64 `json:"mhz,omitempty"`
+}
+
+// MemoryInfo contains memory information
+type MemoryInfo struct {
+	// TotalBytes is the total amount of physical memory in bytes
+	TotalBytes int64 `json:"totalBytes"`
+
+	// AvailableBytes is the available memory in bytes
+	// +optional
+	AvailableBytes int64 `json:"availableBytes,omitempty"`
+
+	// TotalGB is the total memory in GB (derived from TotalBytes)
+	TotalGB int `json:"totalGB"`
+}
+
+// DiskInfo contains information about a storage device
+type DiskInfo struct {
+	// Device is the device name (e.g., /dev/sda, /dev/nvme0n1)
+	Device string `json:"device"`
+
+	// SizeBytes is the size in bytes
+	SizeBytes int64 `json:"sizeBytes"`
+
+	// SizeGB is the size in GB
+	SizeGB int `json:"sizeGB"`
+
+	// Type is the disk type (SSD, HDD, NVMe)
+	// +optional
+	Type string `json:"type,omitempty"`
+
+	// Model is the disk model
+	// +optional
+	Model string `json:"model,omitempty"`
+
+	// Serial is the disk serial number
+	// +optional
+	Serial string `json:"serial,omitempty"`
+}
+
+// NICInfo contains network interface information
+type NICInfo struct {
+	// Interface is the interface name (e.g., eth0, ens3)
+	Interface string `json:"interface"`
+
+	// MACAddress is the MAC address
+	MACAddress string `json:"macAddress"`
+
+	// LinkStatus indicates if the link is up
+	// +optional
+	LinkStatus string `json:"linkStatus,omitempty"`
+
+	// SpeedMbps is the link speed in Mbps
+	// +optional
+	SpeedMbps int `json:"speedMbps,omitempty"`
+
+	// Driver is the network driver name
+	// +optional
+	Driver string `json:"driver,omitempty"`
+}
+
+// SystemInfo contains system/BIOS information
+type SystemInfo struct {
+	// Manufacturer is the system manufacturer
+	// +optional
+	Manufacturer string `json:"manufacturer,omitempty"`
+
+	// Model is the system model
+	// +optional
+	Model string `json:"model,omitempty"`
+
+	// SerialNumber is the system serial number
+	// +optional
+	SerialNumber string `json:"serialNumber,omitempty"`
+
+	// BIOSVersion is the BIOS/UEFI version
+	// +optional
+	BIOSVersion string `json:"biosVersion,omitempty"`
+
+	// BMCAddress is the BMC IP address (if detectable)
+	// +optional
+	BMCAddress string `json:"bmcAddress,omitempty"`
 }
 
 // PhysicalHostStatus defines the observed state of PhysicalHost
@@ -120,16 +261,28 @@ type PhysicalHostStatus struct {
 	// +optional
 	Addresses []clusterv1.MachineAddress `json:"addresses,omitempty"`
 
+	// InspectionReport contains hardware details from the inspection phase
+	// +optional
+	InspectionReport *InspectionReport `json:"inspectionReport,omitempty"`
+
+	// InspectionPhase tracks the current inspection progress
+	// +optional
+	InspectionPhase InspectionPhase `json:"inspectionPhase,omitempty"`
+
+	// InspectionTimestamp is when inspection started
+	// +optional
+	InspectionTimestamp *metav1.Time `json:"inspectionTimestamp,omitempty"`
+
 	// Conditions defines current service state of the PhysicalHost
 	// +optional
 	Conditions clusterv1.Conditions `json:"conditions,omitempty"`
 }
 
-// Redfish and provisioning conditions and reasons
+// Redfish conditions and reasons - simplified for power management only
 const (
 	RedfishConnectionReadyCondition clusterv1.ConditionType = "RedfishConnectionReady"
 	HostAvailableCondition          clusterv1.ConditionType = "HostAvailable"
-	HostProvisionedCondition        clusterv1.ConditionType = "HostProvisioned"
+	HostInspectedCondition          clusterv1.ConditionType = "HostInspected"
 
 	// Reasons
 	MissingCredentialsReason      string = "MissingCredentials"
@@ -138,13 +291,11 @@ const (
 	MissingSecretDataReason       string = "MissingSecretData"
 	RedfishConnectionFailedReason string = "RedfishConnectionFailed"
 	RedfishQueryFailedReason      string = "RedfishQueryFailed"
-	WaitingForBootInfoReason      string = "WaitingForBootInfo"
-	ProvisioningReason            string = "Provisioning"
-	SetBootISOFailedReason        string = "SetBootISOFailed"
 	PowerOnFailedReason           string = "PowerOnFailed"
-	DeprovisioningReason          string = "Deprovisioning"
-	EjectMediaFailedReason        string = "EjectMediaFailed"
 	PowerOffFailedReason          string = "PowerOffFailed"
+	SetBootPXEFailedReason        string = "SetBootPXEFailed"
+	InspectionFailedReason        string = "InspectionFailed"
+	InspectionTimeoutReason       string = "InspectionTimeout"
 )
 
 // RedfishConnectionInfo contains the information needed to connect to a Redfish service
@@ -202,16 +353,6 @@ func (in *PhysicalHostSpec) DeepCopyInto(out *PhysicalHostSpec) {
 		*out = new(corev1.ObjectReference)
 		**out = **in
 	}
-	if in.BootISOSource != nil {
-		in, out := &in.BootISOSource, &out.BootISOSource
-		*out = new(string)
-		**out = **in
-	}
-	if in.UserDataSecretRef != nil {
-		in, out := &in.UserDataSecretRef, &out.UserDataSecretRef
-		*out = new(corev1.ObjectReference)
-		**out = **in
-	}
 }
 
 // DeepCopyInto is an autogenerated deepcopy function, copying the receiver, writing into out. in must be non-nil.
@@ -224,11 +365,49 @@ func (in *PhysicalHostStatus) DeepCopyInto(out *PhysicalHostStatus) {
 		*out = make([]clusterv1.MachineAddress, len(*in))
 		copy(*out, *in)
 	}
+	if in.InspectionReport != nil {
+		in, out := &in.InspectionReport, &out.InspectionReport
+		*out = new(InspectionReport)
+		(*in).DeepCopyInto(*out)
+	}
+	if in.InspectionTimestamp != nil {
+		in, out := &in.InspectionTimestamp, &out.InspectionTimestamp
+		*out = (*in).DeepCopy()
+	}
 	if in.Conditions != nil {
 		in, out := &in.Conditions, &out.Conditions
 		*out = make(clusterv1.Conditions, len(*in))
 		copy(*out, *in)
 	}
+}
+
+// DeepCopyInto is an autogenerated deepcopy function for InspectionReport
+func (in *InspectionReport) DeepCopyInto(out *InspectionReport) {
+	*out = *in
+	in.Timestamp.DeepCopyInto(&out.Timestamp)
+	out.CPUs = in.CPUs
+	out.Memory = in.Memory
+	if in.Disks != nil {
+		in, out := &in.Disks, &out.Disks
+		*out = make([]DiskInfo, len(*in))
+		copy(*out, *in)
+	}
+	if in.NICs != nil {
+		in, out := &in.NICs, &out.NICs
+		*out = make([]NICInfo, len(*in))
+		copy(*out, *in)
+	}
+	out.System = in.System
+}
+
+// DeepCopy is an autogenerated deepcopy function for InspectionReport
+func (in *InspectionReport) DeepCopy() *InspectionReport {
+	if in == nil {
+		return nil
+	}
+	out := new(InspectionReport)
+	in.DeepCopyInto(out)
+	return out
 }
 
 func init() {

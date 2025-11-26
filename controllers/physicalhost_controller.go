@@ -22,7 +22,6 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
-	"github.com/pkg/errors"
 	"github.com/stmcginnis/gofish/redfish"
 	infrastructurev1beta1 "github.com/wrkode/beskar7/api/v1beta1"
 	internalredfish "github.com/wrkode/beskar7/internal/redfish"
@@ -35,705 +34,270 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
-	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	conditions "sigs.k8s.io/cluster-api/util/conditions"
-
-	"github.com/wrkode/beskar7/internal/coordination"
-	internalmetrics "github.com/wrkode/beskar7/internal/metrics"
-	"github.com/wrkode/beskar7/internal/statemachine"
 )
 
 const (
-	// PhysicalHostFinalizer allows PhysicalHostReconciler to clean up resources associated with PhysicalHost before removing it from the apiserver.
+	// PhysicalHostFinalizer allows PhysicalHostReconciler to clean up resources before removal
 	PhysicalHostFinalizer = "physicalhost.infrastructure.cluster.x-k8s.io"
 )
 
-// PhysicalHostReconciler reconciles a PhysicalHost object
+// PhysicalHostReconciler reconciles a PhysicalHost object.
+// Simplified for power management only - provisioning happens via iPXE + inspection.
 type PhysicalHostReconciler struct {
 	client.Client
 	Log                  logr.Logger
 	Scheme               *runtime.Scheme
 	Recorder             record.EventRecorder
 	RedfishClientFactory internalredfish.RedfishClientFactory
-	stateMachine         *statemachine.PhysicalHostStateMachine
-	stateTransitionGuard *statemachine.StateTransitionGuard
-	stateRecoveryManager *statemachine.StateRecoveryManager
-	reconcileTimeout     time.Duration
-	stuckStateTimeout    time.Duration
-	maxRetries           int
-	// ProvisioningQueue manages BMC operations to prevent overload
-	ProvisioningQueue *coordination.ProvisioningQueue
 }
 
-// NewPhysicalHostReconciler creates a fully initialized PhysicalHostReconciler.
-// It configures the state machine, transition guard, recovery manager, recorder,
-// and timing parameters so reconciliation can safely proceed in production.
+// NewPhysicalHostReconciler creates a new PhysicalHostReconciler
 func NewPhysicalHostReconciler(
 	c client.Client,
 	scheme *runtime.Scheme,
 	redfishFactory internalredfish.RedfishClientFactory,
 	logger logr.Logger,
 	recorder record.EventRecorder,
-	queue *coordination.ProvisioningQueue,
-	reconcileTimeout time.Duration,
-	stuckStateTimeout time.Duration,
-	maxRetries int,
 ) *PhysicalHostReconciler {
-	// Initialize state machinery components
-	smLogger := logger.WithName("state-machine")
-	guardLogger := logger.WithName("state-guard")
-	recoveryLogger := logger.WithName("state-recovery")
-
-	sm := statemachine.NewPhysicalHostStateMachine(smLogger)
-	guard := statemachine.NewStateTransitionGuard(c, guardLogger)
-	recovery := statemachine.NewStateRecoveryManager(c, recoveryLogger)
-
 	return &PhysicalHostReconciler{
 		Client:               c,
 		Log:                  logger,
 		Scheme:               scheme,
 		Recorder:             recorder,
 		RedfishClientFactory: redfishFactory,
-		stateMachine:         sm,
-		stateTransitionGuard: guard,
-		stateRecoveryManager: recovery,
-		reconcileTimeout:     reconcileTimeout,
-		stuckStateTimeout:    stuckStateTimeout,
-		maxRetries:           maxRetries,
-		ProvisioningQueue:    queue,
 	}
 }
 
 //+kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=physicalhosts,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=physicalhosts/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=physicalhosts/finalizers,verbs=update
-//+kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch // Needed for Redfish credentials
+//+kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
+//+kubebuilder:rbac:groups="",resources=events,verbs=create;patch
 
-// Reconcile is part of the main kubernetes reconciliation loop which aims to
-// move the current state of the cluster closer to the desired state.
-//
-// For more details, check Reconcile and its Result here:
-// - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.18.4/pkg/reconcile
+// Reconcile handles PhysicalHost reconciliation.
+// Simplified workflow: Connect via Redfish → Verify connection → Report ready.
 func (r *PhysicalHostReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	log := r.Log.WithValues("physicalhost", req.NamespacedName)
-
-	// Set timeout for reconciliation
-	ctx, cancel := context.WithTimeout(ctx, r.reconcileTimeout)
-	defer cancel()
+	logger := r.Log.WithValues("physicalhost", req.NamespacedName)
+	logger.Info("Starting reconciliation")
 
 	// Fetch the PhysicalHost instance
-	host := &infrastructurev1beta1.PhysicalHost{}
-	if err := r.Get(ctx, req.NamespacedName, host); err != nil {
+	physicalHost := &infrastructurev1beta1.PhysicalHost{}
+	if err := r.Get(ctx, req.NamespacedName, physicalHost); err != nil {
 		if apierrors.IsNotFound(err) {
-			log.Info("PhysicalHost resource not found. Ignoring since object must be deleted")
+			logger.Info("PhysicalHost resource not found, ignoring since object must be deleted")
 			return ctrl.Result{}, nil
 		}
-		log.Error(err, "Failed to get PhysicalHost")
+		logger.Error(err, "Unable to fetch PhysicalHost")
 		return ctrl.Result{}, err
 	}
 
-	// Check if the PhysicalHost is paused
-	if isPaused(host) {
-		log.Info("PhysicalHost reconciliation is paused")
-		return ctrl.Result{}, nil
+	// Handle deletion
+	if !physicalHost.ObjectMeta.DeletionTimestamp.IsZero() {
+		return r.reconcileDelete(ctx, logger, physicalHost)
 	}
 
-	// Handle deletion first - no need for state validation if resource is being deleted
-	if !host.DeletionTimestamp.IsZero() {
-		return r.reconcileDelete(ctx, host)
-	}
-
-	// Validate state consistency before proceeding (only for active resources)
-	if err := r.stateMachine.ValidateStateConsistency(host); err != nil {
-		log.Error(err, "State consistency validation failed", "currentState", host.Status.State)
-		r.Recorder.Event(host, corev1.EventTypeWarning, "StateInconsistent",
-			fmt.Sprintf("State consistency validation failed: %v", err))
-
-		// Try to recover from inconsistent state
-		if err := r.recoverFromInconsistentState(ctx, host); err != nil {
-			return ctrl.Result{RequeueAfter: 30 * time.Second}, err
-		}
-	}
-
-	// Check for stuck states and attempt recovery
-	if r.stateRecoveryManager.DetectStuckState(host, r.stuckStateTimeout) {
-		log.Info("Detected stuck state, attempting recovery",
-			"state", host.Status.State,
-			"timeout", r.stuckStateTimeout)
-
-		if err := r.stateRecoveryManager.RecoverStuckState(ctx, host, r.stateMachine); err != nil {
-			log.Error(err, "Failed to recover from stuck state")
-			r.Recorder.Event(host, corev1.EventTypeWarning, "StuckStateRecoveryFailed",
-				fmt.Sprintf("Failed to recover from stuck state: %v", err))
-			return ctrl.Result{RequeueAfter: 1 * time.Minute}, err
-		}
-
-		r.Recorder.Event(host, corev1.EventTypeNormal, "StuckStateRecovered",
-			"Successfully recovered from stuck state")
-		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
-	}
-
-	// Ensure finalizer is present
-	if !controllerutil.ContainsFinalizer(host, PhysicalHostFinalizer) {
-		controllerutil.AddFinalizer(host, PhysicalHostFinalizer)
-		if err := r.Update(ctx, host); err != nil {
+	// Add finalizer if not present
+	if !controllerutil.ContainsFinalizer(physicalHost, PhysicalHostFinalizer) {
+		controllerutil.AddFinalizer(physicalHost, PhysicalHostFinalizer)
+		if err := r.Update(ctx, physicalHost); err != nil {
+			logger.Error(err, "Failed to add finalizer")
 			return ctrl.Result{}, err
 		}
 		return ctrl.Result{Requeue: true}, nil
 	}
 
-	// Main reconciliation logic with state machine validation
-	return r.reconcileNormal(ctx, log, host)
+	// Reconcile normal operation
+	return r.reconcileNormal(ctx, logger, physicalHost)
 }
 
-// safeStateTransition performs a validated state transition with retries
-func (r *PhysicalHostReconciler) safeStateTransition(
-	ctx context.Context,
-	host *infrastructurev1beta1.PhysicalHost,
-	newState string,
-	reason string,
-) error {
-	return r.stateTransitionGuard.SafeStateTransition(
-		ctx,
-		host,
-		r.stateMachine,
-		newState,
-		reason,
-		r.maxRetries,
-	)
-}
-
-// recoverFromInconsistentState attempts to recover from an inconsistent state
-func (r *PhysicalHostReconciler) recoverFromInconsistentState(
-	ctx context.Context,
-	host *infrastructurev1beta1.PhysicalHost,
-) error {
-	log := r.Log.WithValues("physicalhost", client.ObjectKeyFromObject(host))
-
-	// Determine the correct state based on current spec
-	var targetState string
-
-	if host.Spec.ConsumerRef != nil && host.Spec.BootISOSource != nil && *host.Spec.BootISOSource != "" {
-		// Host has both consumer and boot source - should be claimed first, then provisioning
-		// Use Claimed as intermediate state to follow proper transition flow
-		targetState = infrastructurev1beta1.StateClaimed
-	} else if host.Spec.ConsumerRef != nil {
-		// Host has consumer but no boot source - should be claimed
-		targetState = infrastructurev1beta1.StateClaimed
-	} else {
-		// Host has no consumer - should be available
-		targetState = infrastructurev1beta1.StateAvailable
-	}
-
-	log.Info("Attempting to recover from inconsistent state",
-		"currentState", host.Status.State,
-		"targetState", targetState)
-
-	return r.safeStateTransition(ctx, host, targetState, "RecoveringFromInconsistentState")
-}
-
-// reconcileNormal handles the logic when the PhysicalHost is not being deleted.
+// reconcileNormal handles normal (non-deletion) reconciliation.
 func (r *PhysicalHostReconciler) reconcileNormal(ctx context.Context, logger logr.Logger, physicalHost *infrastructurev1beta1.PhysicalHost) (ctrl.Result, error) {
-	logger = logger.WithValues(
-		"currentState", physicalHost.Status.State,
-		"consumerRef", physicalHost.Spec.ConsumerRef,
-		"bootIsoSource", physicalHost.Spec.BootISOSource,
-	)
-	logger.Info("Starting normal reconciliation")
+	logger.Info("Reconciling PhysicalHost", "currentState", physicalHost.Status.State)
 
-	// Ensure the object has a finalizer for cleanup
-	if controllerutil.AddFinalizer(physicalHost, PhysicalHostFinalizer) {
-		logger.Info("Adding Finalizer")
-		return ctrl.Result{Requeue: true}, nil
-	}
-
-	// --- Fetch Redfish Credentials ---
-	secretName := physicalHost.Spec.RedfishConnection.CredentialsSecretRef
-	if secretName == "" {
-		// This is a permanent error, validated by the webhook. No need to requeue.
-		logger.Info("Missing credentials reference, setting terminal condition")
-		conditions.MarkFalse(physicalHost, infrastructurev1beta1.RedfishConnectionReadyCondition, infrastructurev1beta1.MissingCredentialsReason, clusterv1.ConditionSeverityError, "CredentialsSecretRef is not set in Spec")
-		internalmetrics.RecordRedfishConnection(physicalHost.Namespace, internalmetrics.ProvisioningOutcomeFailed, internalmetrics.ErrorTypeValidation)
-		return ctrl.Result{}, nil
-	}
-
-	credentialsSecret := &corev1.Secret{}
-	secretKey := client.ObjectKey{Namespace: physicalHost.Namespace, Name: secretName}
-	if err := r.Get(ctx, secretKey, credentialsSecret); err != nil {
-		if apierrors.IsNotFound(err) {
-			// Transient error: Secret might be created later. Requeue with backoff.
-			logger.Info("Credentials secret not found, waiting for it to be created")
-			conditions.MarkFalse(physicalHost, infrastructurev1beta1.RedfishConnectionReadyCondition, infrastructurev1beta1.SecretNotFoundReason, clusterv1.ConditionSeverityWarning, "Credentials secret %q not found, waiting.", secretName)
-			internalmetrics.RecordRedfishConnection(physicalHost.Namespace, internalmetrics.ProvisioningOutcomeFailed, internalmetrics.ErrorTypeTransient)
-
-			// Update status to persist condition changes
-			if updateErr := r.Status().Update(ctx, physicalHost); updateErr != nil {
-				logger.Error(updateErr, "Failed to update PhysicalHost status after secret not found")
-			}
-
-			return ctrl.Result{}, err // Requeue with exponential backoff
-		}
-		// Other transient Get error
-		logger.Error(err, "Failed to fetch credentials secret")
-		conditions.MarkFalse(physicalHost, infrastructurev1beta1.RedfishConnectionReadyCondition, infrastructurev1beta1.SecretGetFailedReason, clusterv1.ConditionSeverityWarning, "Failed to get credentials secret: %s", err.Error())
-		internalmetrics.RecordRedfishConnection(physicalHost.Namespace, internalmetrics.ProvisioningOutcomeFailed, internalmetrics.ErrorTypeTransient)
-
-		// Update status to persist condition changes
-		if updateErr := r.Status().Update(ctx, physicalHost); updateErr != nil {
-			logger.Error(updateErr, "Failed to update PhysicalHost status after secret get failure")
-		}
-
-		return ctrl.Result{}, err
-	}
-
-	usernameBytes, okUser := credentialsSecret.Data["username"]
-	passwordBytes, okPass := credentialsSecret.Data["password"]
-	if !okUser || !okPass {
-		// This is a permanent error. The secret content is invalid.
-		logger.Info("Username or password missing in credentials secret, setting terminal condition")
-		conditions.MarkFalse(physicalHost, infrastructurev1beta1.RedfishConnectionReadyCondition, infrastructurev1beta1.MissingSecretDataReason, clusterv1.ConditionSeverityError, "Username or password missing in credentials secret data")
-		internalmetrics.RecordRedfishConnection(physicalHost.Namespace, internalmetrics.ProvisioningOutcomeFailed, internalmetrics.ErrorTypeValidation)
-
-		// Update status to persist condition changes
-		if updateErr := r.Status().Update(ctx, physicalHost); updateErr != nil {
-			logger.Error(updateErr, "Failed to update PhysicalHost status after invalid secret data")
-		}
-
-		return ctrl.Result{}, nil
-	}
-	username := string(usernameBytes)
-	password := string(passwordBytes)
-	// --- End Fetch Redfish Credentials ---
-
-	// --- Connect to Redfish ---
-	// Throttle BMC operations via ProvisioningQueue to avoid overloading BMCs
-	if r.ProvisioningQueue != nil {
-		if err := r.ProvisioningQueue.AcquireBMCPermit(ctx, physicalHost); err != nil {
-			logger.V(1).Info("ProvisioningQueue acquire failed", "error", err)
-			return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
-		}
-		// Ensure release on exit of Redfish section
-		defer r.ProvisioningQueue.ReleaseBMCPermit(physicalHost)
-	}
-	clientFactory := r.RedfishClientFactory
-	if clientFactory == nil {
-		clientFactory = internalredfish.NewClient
-	}
-	insecure := physicalHost.Spec.RedfishConnection.InsecureSkipVerify != nil && *physicalHost.Spec.RedfishConnection.InsecureSkipVerify
-	rfClient, err := clientFactory(ctx, physicalHost.Spec.RedfishConnection.Address, username, password, insecure)
+	// Get Redfish credentials
+	username, password, err := r.getRedfishCredentials(ctx, physicalHost)
 	if err != nil {
-		// Transient error: Redfish endpoint might be temporarily unavailable. Requeue with backoff.
-		logger.Error(err, "Failed to create Redfish client")
-		conditions.MarkFalse(physicalHost, infrastructurev1beta1.RedfishConnectionReadyCondition, infrastructurev1beta1.RedfishConnectionFailedReason, clusterv1.ConditionSeverityWarning, "Failed to connect to Redfish: %v", err)
-		physicalHost.Status.State = infrastructurev1beta1.StateError
-		internalmetrics.RecordRedfishConnection(physicalHost.Namespace, internalmetrics.ProvisioningOutcomeFailed, internalmetrics.ErrorTypeConnection)
-
-		// Update status to persist condition and state changes
+		logger.Error(err, "Failed to get Redfish credentials")
+		r.updateStatus(physicalHost, infrastructurev1beta1.StateError, false, err.Error())
+		conditions.MarkFalse(physicalHost, infrastructurev1beta1.RedfishConnectionReadyCondition,
+			infrastructurev1beta1.MissingCredentialsReason, clusterv1.ConditionSeverityError,
+			"Failed to retrieve credentials: %v", err)
 		if updateErr := r.Status().Update(ctx, physicalHost); updateErr != nil {
-			logger.Error(updateErr, "Failed to update PhysicalHost status after Redfish connection failure")
+			logger.Error(updateErr, "Failed to update status")
+			return ctrl.Result{}, updateErr
 		}
+		return ctrl.Result{RequeueAfter: 1 * time.Minute}, err
+	}
 
-		return ctrl.Result{}, err
+	// Determine insecure setting
+	insecure := false
+	if physicalHost.Spec.RedfishConnection.InsecureSkipVerify != nil {
+		insecure = *physicalHost.Spec.RedfishConnection.InsecureSkipVerify
+	}
+
+	// Create Redfish client
+	rfClient, err := r.RedfishClientFactory(ctx,
+		physicalHost.Spec.RedfishConnection.Address,
+		username,
+		password,
+		insecure,
+	)
+	if err != nil {
+		logger.Error(err, "Failed to create Redfish client")
+		r.updateStatus(physicalHost, infrastructurev1beta1.StateError, false, fmt.Sprintf("Redfish connection failed: %v", err))
+		conditions.MarkFalse(physicalHost, infrastructurev1beta1.RedfishConnectionReadyCondition,
+			infrastructurev1beta1.RedfishConnectionFailedReason, clusterv1.ConditionSeverityError,
+			"Connection failed: %v", err)
+		if updateErr := r.Status().Update(ctx, physicalHost); updateErr != nil {
+			logger.Error(updateErr, "Failed to update status")
+		}
+		return ctrl.Result{RequeueAfter: 1 * time.Minute}, err
 	}
 	defer rfClient.Close(ctx)
-	logger.Info("Successfully connected to Redfish endpoint")
-	conditions.MarkTrue(physicalHost, infrastructurev1beta1.RedfishConnectionReadyCondition)
-	internalmetrics.RecordRedfishConnection(physicalHost.Namespace, internalmetrics.ProvisioningOutcomeSuccess, "")
-	// --- End Connect to Redfish ---
 
-	// --- Reconcile State ---
-	systemInfo, rfErr := rfClient.GetSystemInfo(ctx)
-	powerState, psErr := rfClient.GetPowerState(ctx)
-
-	// Update status with observed info first
-	if systemInfo != nil {
-		physicalHost.Status.HardwareDetails = infrastructurev1beta1.HardwareDetails{
-			Manufacturer: systemInfo.Manufacturer,
-			Model:        systemInfo.Model,
-			SerialNumber: systemInfo.SerialNumber,
-			Status: infrastructurev1beta1.HardwareStatus{
-				Health:       string(systemInfo.Status.Health),
-				HealthRollup: string(systemInfo.Status.HealthRollup),
-				State:        string(systemInfo.Status.State),
-			},
+	// Get system information
+	sysInfo, err := rfClient.GetSystemInfo(ctx)
+	if err != nil {
+		logger.Error(err, "Failed to get system info from Redfish")
+		r.updateStatus(physicalHost, infrastructurev1beta1.StateError, false, fmt.Sprintf("Failed to query system: %v", err))
+		conditions.MarkFalse(physicalHost, infrastructurev1beta1.RedfishConnectionReadyCondition,
+			infrastructurev1beta1.RedfishQueryFailedReason, clusterv1.ConditionSeverityError,
+			"Query failed: %v", err)
+		if updateErr := r.Status().Update(ctx, physicalHost); updateErr != nil {
+			logger.Error(updateErr, "Failed to update status")
 		}
-		logger.Info("Updated hardware details", "manufacturer", systemInfo.Manufacturer, "model", systemInfo.Model, "serialNumber", systemInfo.SerialNumber, "status", systemInfo.Status.State)
-	} else {
-		physicalHost.Status.HardwareDetails = infrastructurev1beta1.HardwareDetails{}
-		logger.Info("No hardware details available")
+		return ctrl.Result{RequeueAfter: 1 * time.Minute}, err
 	}
-	if psErr == nil {
+
+	// Update hardware details
+	physicalHost.Status.HardwareDetails = infrastructurev1beta1.HardwareDetails{
+		Manufacturer: sysInfo.Manufacturer,
+		Model:        sysInfo.Model,
+		SerialNumber: sysInfo.SerialNumber,
+		Status: infrastructurev1beta1.HardwareStatus{
+			Health:       sysInfo.Status.Health.String(),
+			HealthRollup: sysInfo.Status.HealthRollup.String(),
+			State:        sysInfo.Status.State.String(),
+		},
+	}
+
+	// Get power state
+	powerState, err := rfClient.GetPowerState(ctx)
+	if err != nil {
+		logger.Error(err, "Failed to get power state")
+		// Non-fatal, continue
+	} else {
 		physicalHost.Status.ObservedPowerState = string(powerState)
-		logger.Info("Updated power state", "powerState", powerState)
+		logger.Info("Observed power state", "state", powerState)
 	}
 
-	// Check for Redfish query errors - treat as transient
-	if rfErr != nil {
-		logger.Error(rfErr, "Failed to get system info from Redfish")
-		conditions.MarkFalse(physicalHost, infrastructurev1beta1.HostAvailableCondition, infrastructurev1beta1.RedfishQueryFailedReason, clusterv1.ConditionSeverityWarning, "Failed to get system info: %v", rfErr)
-		physicalHost.Status.State = infrastructurev1beta1.StateError
-		internalmetrics.RecordRedfishQuery(physicalHost.Namespace, internalmetrics.ProvisioningOutcomeFailed, internalmetrics.ErrorTypeQuery)
-
-		// Update status to persist condition and state changes
-		if updateErr := r.Status().Update(ctx, physicalHost); updateErr != nil {
-			logger.Error(updateErr, "Failed to update PhysicalHost status after system info query failure")
-		}
-
-		return ctrl.Result{}, rfErr // Requeue with backoff
-	}
-	if psErr != nil {
-		logger.Error(psErr, "Failed to get power state from Redfish")
-		conditions.MarkFalse(physicalHost, infrastructurev1beta1.HostAvailableCondition, infrastructurev1beta1.RedfishQueryFailedReason, clusterv1.ConditionSeverityWarning, "Failed to get power state: %v", psErr)
-		physicalHost.Status.State = infrastructurev1beta1.StateError
-		internalmetrics.RecordRedfishQuery(physicalHost.Namespace, internalmetrics.ProvisioningOutcomeFailed, internalmetrics.ErrorTypeQuery)
-
-		// Update status to persist condition and state changes
-		if updateErr := r.Status().Update(ctx, physicalHost); updateErr != nil {
-			logger.Error(updateErr, "Failed to update PhysicalHost status after power state query failure")
-		}
-
-		return ctrl.Result{}, psErr // Requeue with backoff
-	}
-
-	// --- Address Detection ---
-	// Attempt to detect network addresses from the Redfish endpoint
-	// This is best effort - address detection failures should not prevent normal reconciliation
-	addresses, addrErr := r.detectNetworkAddresses(ctx, logger, rfClient)
-	if addrErr != nil {
-		logger.V(1).Info("Failed to detect network addresses (non-fatal)", "error", addrErr)
-		// Don't treat address detection failure as critical
-		internalmetrics.RecordNetworkAddress(physicalHost.Namespace, internalmetrics.ProvisioningOutcomeFailed, internalmetrics.ErrorTypeAddress)
-	} else if len(addresses) > 0 {
-		physicalHost.Status.Addresses = addresses
-		logger.Info("Updated network addresses", "addressCount", len(addresses))
-		for _, addr := range addresses {
-			logger.V(1).Info("Detected address", "type", addr.Type, "address", addr.Address)
-		}
-		internalmetrics.RecordNetworkAddress(physicalHost.Namespace, internalmetrics.ProvisioningOutcomeSuccess, "")
+	// Detect network addresses
+	addresses, err := rfClient.GetNetworkAddresses(ctx)
+	if err != nil {
+		logger.Error(err, "Failed to get network addresses", "error", err)
+		// Non-fatal, continue without addresses
 	} else {
-		logger.V(1).Info("No network addresses detected from Redfish")
-		internalmetrics.RecordNetworkAddress(physicalHost.Namespace, internalmetrics.ProvisioningOutcomeSuccess, "")
+		physicalHost.Status.Addresses = internalredfish.ConvertToMachineAddresses(addresses)
+		logger.Info("Retrieved network addresses", "count", len(addresses))
 	}
-	// --- End Address Detection ---
 
-	// Determine desired state and update conditions
-	if physicalHost.Spec.ConsumerRef == nil {
-		// Host is being released or is available
-		previousState := physicalHost.Status.State
+	// Connection successful - mark as ready
+	conditions.MarkTrue(physicalHost, infrastructurev1beta1.RedfishConnectionReadyCondition)
 
-		// If transitioning from a provisioned state, ensure host is powered off
-		if previousState == infrastructurev1beta1.StateProvisioned || previousState == infrastructurev1beta1.StateProvisioning {
-			logger.Info("Host being released from provisioned state, ensuring power off",
-				"previousState", previousState, "currentPowerState", powerState)
-
-			if powerState == redfish.OnPowerState {
-				logger.Info("Powering off released host")
-				if err := rfClient.SetPowerState(ctx, redfish.OffPowerState); err != nil {
-					logger.Error(err, "Failed to power off released host")
-					conditions.MarkFalse(physicalHost, infrastructurev1beta1.HostAvailableCondition,
-						infrastructurev1beta1.PowerOffFailedReason, clusterv1.ConditionSeverityWarning,
-						"Failed to power off released host: %v", err)
-					internalmetrics.RecordPowerOperation(physicalHost.Namespace, internalmetrics.ProvisioningOutcomeFailed, internalmetrics.ErrorTypePower)
-					// Don't return error - allow state transition but mark condition
-				} else {
-					logger.Info("Successfully powered off released host")
-					physicalHost.Status.ObservedPowerState = string(redfish.OffPowerState)
-					internalmetrics.RecordPowerOperation(physicalHost.Namespace, internalmetrics.ProvisioningOutcomeSuccess, "")
-				}
-			} else {
-				logger.Info("Host already powered off")
-			}
-
-			// Eject any virtual media when releasing host
-			logger.Info("Ejecting virtual media from released host")
-			if err := rfClient.EjectVirtualMedia(ctx); err != nil {
-				logger.Error(err, "Failed to eject virtual media from released host")
-				// Don't fail the transition, just log
-				internalmetrics.RecordVirtualMediaOperation(physicalHost.Namespace, internalmetrics.ProvisioningOutcomeFailed, internalmetrics.ErrorTypeVirtualMedia)
-			} else {
-				logger.Info("Successfully ejected virtual media from released host")
-				internalmetrics.RecordVirtualMediaOperation(physicalHost.Namespace, internalmetrics.ProvisioningOutcomeSuccess, "")
-			}
+	// Determine state based on ConsumerRef
+	if physicalHost.Spec.ConsumerRef != nil {
+		// Host is claimed
+		if physicalHost.Status.State != infrastructurev1beta1.StateInUse &&
+			physicalHost.Status.State != infrastructurev1beta1.StateInspecting &&
+			physicalHost.Status.State != infrastructurev1beta1.StateReady {
+			logger.Info("Host claimed, transitioning to InUse", "consumer", physicalHost.Spec.ConsumerRef.Name)
+			r.updateStatus(physicalHost, infrastructurev1beta1.StateInUse, true, "")
 		}
-
-		logger.Info("Host is available (no ConsumerRef)", "previousState", previousState, "newState", infrastructurev1beta1.StateAvailable)
-		physicalHost.Status.State = infrastructurev1beta1.StateAvailable
-		conditions.MarkTrue(physicalHost, infrastructurev1beta1.HostAvailableCondition)
-		conditions.Delete(physicalHost, infrastructurev1beta1.HostProvisionedCondition)
-		internalmetrics.RecordPhysicalHostState(string(infrastructurev1beta1.StateAvailable), physicalHost.Namespace, 1)
 	} else {
-		conditions.Delete(physicalHost, infrastructurev1beta1.HostAvailableCondition)
-		if physicalHost.Spec.BootISOSource == nil || *physicalHost.Spec.BootISOSource == "" {
-			logger.Info("Host is claimed but BootISOSource is not set", "previousState", physicalHost.Status.State, "newState", infrastructurev1beta1.StateClaimed)
-			physicalHost.Status.State = infrastructurev1beta1.StateClaimed
-			conditions.MarkFalse(physicalHost, infrastructurev1beta1.HostProvisionedCondition, infrastructurev1beta1.WaitingForBootInfoReason, clusterv1.ConditionSeverityInfo, "Waiting for BootISOSource to be set by consumer")
-			internalmetrics.RecordPhysicalHostState(string(infrastructurev1beta1.StateClaimed), physicalHost.Namespace, 1)
-		} else {
-			// Check if we're already in Provisioning state and operations are complete
-			if physicalHost.Status.State == infrastructurev1beta1.StateProvisioning {
-				// We're already provisioning, check if operations completed successfully
-				logger.Info("Host provisioning initiated successfully", "newState", infrastructurev1beta1.StateProvisioned)
-				physicalHost.Status.State = infrastructurev1beta1.StateProvisioned
-				conditions.MarkTrue(physicalHost, infrastructurev1beta1.HostProvisionedCondition)
-				internalmetrics.RecordPhysicalHostState(string(infrastructurev1beta1.StateProvisioned), physicalHost.Namespace, 1)
-			} else {
-				// Start provisioning process
-				logger.Info("Provisioning requested", "previousState", physicalHost.Status.State, "newState", infrastructurev1beta1.StateProvisioning)
-				physicalHost.Status.State = infrastructurev1beta1.StateProvisioning
-				conditions.MarkFalse(physicalHost, infrastructurev1beta1.HostProvisionedCondition, infrastructurev1beta1.ProvisioningReason, clusterv1.ConditionSeverityInfo, "Setting boot source and powering on")
-				internalmetrics.RecordPhysicalHostState(string(infrastructurev1beta1.StateProvisioning), physicalHost.Namespace, 1)
-
-				isoURL := *physicalHost.Spec.BootISOSource
-				if err := rfClient.SetBootSourceISO(ctx, isoURL); err != nil {
-					logger.Error(err, "Failed to set boot source ISO")
-					conditions.MarkFalse(physicalHost, infrastructurev1beta1.HostProvisionedCondition, infrastructurev1beta1.SetBootISOFailedReason, clusterv1.ConditionSeverityError, "Failed to set boot source ISO: %v", err)
-					physicalHost.Status.State = infrastructurev1beta1.StateError
-					internalmetrics.RecordBootOperation(physicalHost.Namespace, internalmetrics.ProvisioningOutcomeFailed, internalmetrics.ErrorTypeBoot)
-					return ctrl.Result{}, err
-				}
-				logger.Info("Successfully set boot source ISO", "isoURL", isoURL)
-				internalmetrics.RecordBootOperation(physicalHost.Namespace, internalmetrics.ProvisioningOutcomeSuccess, "")
-
-				// Enhanced power management with verification
-				if powerState != redfish.OnPowerState {
-					logger.Info("Attempting to power on host", "currentPowerState", powerState)
-					if err := rfClient.SetPowerState(ctx, redfish.OnPowerState); err != nil {
-						logger.Error(err, "Failed to set power state to On")
-						conditions.MarkFalse(physicalHost, infrastructurev1beta1.HostProvisionedCondition, infrastructurev1beta1.PowerOnFailedReason, clusterv1.ConditionSeverityError, "Failed to power on host: %v", err)
-						physicalHost.Status.State = infrastructurev1beta1.StateError
-						internalmetrics.RecordPowerOperation(physicalHost.Namespace, internalmetrics.ProvisioningOutcomeFailed, internalmetrics.ErrorTypePower)
-						return ctrl.Result{}, err
-					}
-
-					// Update observed power state optimistically
-					physicalHost.Status.ObservedPowerState = string(redfish.OnPowerState)
-					logger.Info("Successfully requested power on - host should be booting")
-
-					// For power operations, we don't immediately verify since it takes time
-					// The next reconciliation will pick up the actual power state
-				} else {
-					logger.Info("Host already powered on")
-				}
-
-				// Update status to persist Provisioning state, then requeue to complete transition
-				if err := r.Status().Update(ctx, physicalHost); err != nil {
-					// Handle resource conflicts by refreshing and retrying once
-					if apierrors.IsConflict(err) {
-						logger.Info("Resource conflict during provisioning status update, refreshing object and retrying")
-
-						// Get the latest version of the object
-						fresh := &infrastructurev1beta1.PhysicalHost{}
-						if getErr := r.Get(ctx, client.ObjectKeyFromObject(physicalHost), fresh); getErr != nil {
-							logger.Error(getErr, "Failed to get latest PhysicalHost after conflict during provisioning")
-							return ctrl.Result{Requeue: true}, nil
-						}
-
-						// Copy our status changes to the fresh object
-						fresh.Status.State = physicalHost.Status.State
-						fresh.Status.Ready = physicalHost.Status.Ready
-						fresh.Status.ObservedPowerState = physicalHost.Status.ObservedPowerState
-						fresh.Status.HardwareDetails = physicalHost.Status.HardwareDetails
-						fresh.Status.Addresses = physicalHost.Status.Addresses
-						fresh.Status.Conditions = physicalHost.Status.Conditions
-
-						// Retry the status update with fresh object
-						if retryErr := r.Status().Update(ctx, fresh); retryErr != nil {
-							logger.Error(retryErr, "Failed to update PhysicalHost status after retry during provisioning")
-							return ctrl.Result{Requeue: true}, nil
-						}
-
-						logger.Info("Successfully updated PhysicalHost provisioning status after conflict resolution")
-					} else {
-						logger.Error(err, "Failed to update PhysicalHost status during provisioning")
-						return ctrl.Result{}, err
-					}
-				}
-
-				// Requeue to complete the transition to Provisioned state
-				logger.Info("Provisioning operations completed, requeuing to transition to Provisioned state")
-				return ctrl.Result{Requeue: true}, nil
-			}
+		// Host is available
+		if physicalHost.Status.State != infrastructurev1beta1.StateAvailable {
+			logger.Info("Host available, transitioning to Available")
+			r.updateStatus(physicalHost, infrastructurev1beta1.StateAvailable, true, "")
+			conditions.MarkTrue(physicalHost, infrastructurev1beta1.HostAvailableCondition)
 		}
 	}
-	// --- End Reconcile State ---
 
-	// Update the status to persist all changes made during reconciliation
-	// (Skip if we already updated during provisioning logic above)
-	if physicalHost.Status.State != infrastructurev1beta1.StateProvisioning ||
-		(physicalHost.Status.State == infrastructurev1beta1.StateProvisioning && physicalHost.Spec.ConsumerRef == nil) {
-		if err := r.Status().Update(ctx, physicalHost); err != nil {
-			// Handle resource conflicts by refreshing and retrying once
-			if apierrors.IsConflict(err) {
-				logger.Info("Resource conflict during status update, refreshing object and retrying")
+	// Update status
+	if err := r.Status().Update(ctx, physicalHost); err != nil {
+		logger.Error(err, "Failed to update status")
+		return ctrl.Result{}, err
+	}
 
-				// Get the latest version of the object
-				fresh := &infrastructurev1beta1.PhysicalHost{}
-				if getErr := r.Get(ctx, client.ObjectKeyFromObject(physicalHost), fresh); getErr != nil {
-					logger.Error(getErr, "Failed to get latest PhysicalHost after conflict")
-					return ctrl.Result{Requeue: true}, nil
-				}
+	logger.Info("Reconciliation complete", "state", physicalHost.Status.State, "ready", physicalHost.Status.Ready)
+	return ctrl.Result{RequeueAfter: 5 * time.Minute}, nil
+}
 
-				// Copy our status changes to the fresh object
-				fresh.Status.State = physicalHost.Status.State
-				fresh.Status.Ready = physicalHost.Status.Ready
-				fresh.Status.ObservedPowerState = physicalHost.Status.ObservedPowerState
-				fresh.Status.HardwareDetails = physicalHost.Status.HardwareDetails
-				fresh.Status.Addresses = physicalHost.Status.Addresses
-				fresh.Status.Conditions = physicalHost.Status.Conditions
+// reconcileDelete handles PhysicalHost deletion.
+func (r *PhysicalHostReconciler) reconcileDelete(ctx context.Context, logger logr.Logger, physicalHost *infrastructurev1beta1.PhysicalHost) (ctrl.Result, error) {
+	logger.Info("Reconciling PhysicalHost deletion")
 
-				// Retry the status update with fresh object
-				if retryErr := r.Status().Update(ctx, fresh); retryErr != nil {
-					logger.Error(retryErr, "Failed to update PhysicalHost status after retry")
-					return ctrl.Result{Requeue: true}, nil
-				}
+	// If still claimed, log warning but allow deletion
+	if physicalHost.Spec.ConsumerRef != nil {
+		logger.Info("Warning: Deleting PhysicalHost that is still claimed", "consumer", physicalHost.Spec.ConsumerRef.Name)
+		r.Recorder.Event(physicalHost, corev1.EventTypeWarning, "DeletingClaimedHost",
+			fmt.Sprintf("Deleting host that is still claimed by %s", physicalHost.Spec.ConsumerRef.Name))
+	}
 
-				logger.Info("Successfully updated PhysicalHost status after conflict resolution")
-				return ctrl.Result{}, nil
-			}
-			logger.Error(err, "Failed to update PhysicalHost status")
+	// Remove finalizer
+	if controllerutil.ContainsFinalizer(physicalHost, PhysicalHostFinalizer) {
+		controllerutil.RemoveFinalizer(physicalHost, PhysicalHostFinalizer)
+		if err := r.Update(ctx, physicalHost); err != nil {
+			logger.Error(err, "Failed to remove finalizer")
 			return ctrl.Result{}, err
 		}
+		logger.Info("Finalizer removed")
 	}
 
 	return ctrl.Result{}, nil
 }
 
-// reconcileDelete handles the cleanup when a PhysicalHost is marked for deletion.
-func (r *PhysicalHostReconciler) reconcileDelete(ctx context.Context, physicalHost *infrastructurev1beta1.PhysicalHost) (ctrl.Result, error) {
-	logger := log.FromContext(ctx).WithValues("physicalhost", physicalHost.Name)
-	logger.Info("Reconciling PhysicalHost deletion")
-
-	// Mark overall HostProvisioned and HostAvailable conditions as False because the host is being deleted.
-	conditions.MarkFalse(physicalHost, infrastructurev1beta1.HostProvisionedCondition, clusterv1.DeletingReason, clusterv1.ConditionSeverityInfo, "PhysicalHost is being deleted")
-	conditions.MarkFalse(physicalHost, infrastructurev1beta1.HostAvailableCondition, clusterv1.DeletingReason, clusterv1.ConditionSeverityInfo, "PhysicalHost is being deleted")
-
-	// Check if host is still provisioned or in use - we should only cleanup if unowned
-	if physicalHost.Spec.ConsumerRef != nil {
-		logger.Info("PhysicalHost still has ConsumerRef, waiting for it to be cleared before cleaning up", "ConsumerRef", physicalHost.Spec.ConsumerRef)
-		conditions.MarkFalse(physicalHost, infrastructurev1beta1.HostProvisionedCondition, "WaitingForConsumerRelease", clusterv1.ConditionSeverityInfo, "Host is claimed by %s, waiting for release.", physicalHost.Spec.ConsumerRef.Name)
-		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
-	}
-
-	// Set state to Deprovisioning and update condition
-	if physicalHost.Status.State != infrastructurev1beta1.StateDeprovisioning {
-		logger.Info("Setting state to Deprovisioning")
-		physicalHost.Status.State = infrastructurev1beta1.StateDeprovisioning
-		physicalHost.Status.Ready = false
-		conditions.MarkFalse(physicalHost, infrastructurev1beta1.HostProvisionedCondition, infrastructurev1beta1.DeprovisioningReason, clusterv1.ConditionSeverityInfo, "Host deprovisioning started.")
-
-		// Update status to persist state and condition changes
-		if updateErr := r.Status().Update(ctx, physicalHost); updateErr != nil {
-			logger.Error(updateErr, "Failed to update PhysicalHost status during deletion")
-			// Continue with deletion even if status update fails
-		}
-	}
-
-	// --- Connect to Redfish for cleanup ---
-	// Need credentials again for delete path
+// getRedfishCredentials retrieves Redfish credentials from the referenced secret.
+func (r *PhysicalHostReconciler) getRedfishCredentials(ctx context.Context, physicalHost *infrastructurev1beta1.PhysicalHost) (string, string, error) {
 	secretName := physicalHost.Spec.RedfishConnection.CredentialsSecretRef
-	username := ""
-	password := ""
-	if secretName != "" {
-		credentialsSecret := &corev1.Secret{}
-		secretKey := client.ObjectKey{Namespace: physicalHost.Namespace, Name: secretName}
-		if err := r.Get(ctx, secretKey, credentialsSecret); err != nil {
-			if client.IgnoreNotFound(err) != nil {
-				logger.Error(err, "Failed to fetch credentials secret during delete", "SecretName", secretName)
-				// Proceed without credentials? Might be okay for finalizer removal, but cleanup will fail.
-			} else {
-				logger.Info("Credentials secret not found during delete", "SecretName", secretName)
-			}
-		} else {
-			if userBytes, ok := credentialsSecret.Data["username"]; ok {
-				username = string(userBytes)
-			}
-			if passBytes, ok := credentialsSecret.Data["password"]; ok {
-				password = string(passBytes)
-			}
-		}
+	if secretName == "" {
+		return "", "", fmt.Errorf("credentials secret reference is empty")
 	}
-	if username == "" || password == "" {
-		logger.Info("Missing credentials, skipping Redfish cleanup operations.")
-		// If we can't connect, we can't confirm deprovisioning, but we should still allow finalizer removal.
-		conditions.MarkFalse(physicalHost, infrastructurev1beta1.HostProvisionedCondition, infrastructurev1beta1.MissingCredentialsReason, clusterv1.ConditionSeverityWarning, "Missing Redfish credentials, cannot perform deprovisioning operations.")
-		internalmetrics.RecordRedfishConnection(physicalHost.Namespace, internalmetrics.ProvisioningOutcomeFailed, internalmetrics.ErrorTypeConnection)
-	} else {
-		// Throttle BMC cleanup operations via ProvisioningQueue
-		if r.ProvisioningQueue != nil {
-			if err := r.ProvisioningQueue.AcquireBMCPermit(ctx, physicalHost); err != nil {
-				logger.Info("ProvisioningQueue acquire failed during delete; skipping cleanup", "error", err)
-			} else {
-				defer r.ProvisioningQueue.ReleaseBMCPermit(physicalHost)
-			}
-		}
-		// Use the factory to create the client
-		clientFactory := r.RedfishClientFactory
-		if clientFactory == nil {
-			clientFactory = internalredfish.NewClient
-		}
-		insecure := physicalHost.Spec.RedfishConnection.InsecureSkipVerify != nil && *physicalHost.Spec.RedfishConnection.InsecureSkipVerify
-		rfClient, err := clientFactory(ctx, physicalHost.Spec.RedfishConnection.Address, username, password, insecure)
-		if err != nil {
-			logger.Error(err, "Failed to create Redfish client during delete, skipping cleanup")
-			conditions.MarkFalse(physicalHost, infrastructurev1beta1.HostProvisionedCondition, infrastructurev1beta1.RedfishConnectionFailedReason, clusterv1.ConditionSeverityError, "Failed to connect to Redfish for deprovisioning: %v", err)
-			internalmetrics.RecordRedfishConnection(physicalHost.Namespace, internalmetrics.ProvisioningOutcomeFailed, internalmetrics.ErrorTypeConnection)
-		} else {
-			defer rfClient.Close(ctx)
-			logger.Info("Connected to Redfish for cleanup")
 
-			// Eject Virtual Media
-			logger.Info("Attempting to eject virtual media during delete")
-			if err := rfClient.EjectVirtualMedia(ctx); err != nil {
-				logger.Error(err, "Failed to eject virtual media during delete")
-				conditions.MarkFalse(physicalHost, infrastructurev1beta1.HostProvisionedCondition, infrastructurev1beta1.EjectMediaFailedReason, clusterv1.ConditionSeverityWarning, "Failed to eject virtual media: %v", err)
-				// Log error but continue cleanup
-				internalmetrics.RecordVirtualMediaOperation(physicalHost.Namespace, internalmetrics.ProvisioningOutcomeFailed, internalmetrics.ErrorTypeVirtualMedia)
-			}
-			// Successfully ejected virtual media or no media was present
-
-			// Power Off the host
-			logger.Info("Attempting to power off host during delete")
-			powerState, psErr := rfClient.GetPowerState(ctx)
-			if psErr != nil {
-				logger.Error(psErr, "Failed to get power state before power off attempt")
-				conditions.MarkFalse(physicalHost, infrastructurev1beta1.HostProvisionedCondition, infrastructurev1beta1.RedfishQueryFailedReason, clusterv1.ConditionSeverityWarning, "Failed to get power state for power off: %v", psErr)
-				// Continue with cleanup even if we can't check power state
-			} else if powerState != redfish.OffPowerState {
-				logger.Info("Host is powered on, attempting graceful power off", "currentPowerState", powerState)
-				if err := rfClient.SetPowerState(ctx, redfish.OffPowerState); err != nil {
-					logger.Error(err, "Failed to power off host during delete")
-					conditions.MarkFalse(physicalHost, infrastructurev1beta1.HostProvisionedCondition, infrastructurev1beta1.PowerOffFailedReason, clusterv1.ConditionSeverityError, "Failed to power off host: %v", err)
-					// Log error but continue cleanup - we don't want to block finalizer removal
-					internalmetrics.RecordPowerOperation(physicalHost.Namespace, internalmetrics.ProvisioningOutcomeFailed, internalmetrics.ErrorTypePower)
-				} else {
-					logger.Info("Successfully requested power off during deletion")
-					physicalHost.Status.ObservedPowerState = string(redfish.OffPowerState)
-					// Note: We don't verify power state change here since this is cleanup
-					// and we want to allow finalizer removal even if power off is slow
-				}
-			} else {
-				logger.Info("Host already powered off")
-			}
-			logger.Info("Redfish cleanup steps attempted")
-			internalmetrics.RecordDeprovisioningOperation(physicalHost.Namespace, internalmetrics.ProvisioningOutcomeSuccess, "")
-		}
+	secret := &corev1.Secret{}
+	secretKey := types.NamespacedName{
+		Namespace: physicalHost.Namespace,
+		Name:      secretName,
 	}
-	// --- End Redfish Connection ---
 
-	// Cleanup finished (or skipped), remove the finalizer
-	logger.Info("Removing finalizer")
-	if controllerutil.RemoveFinalizer(physicalHost, PhysicalHostFinalizer) {
-		logger.Info("Finalizer removed from object, saving changes")
-		if err := r.Update(ctx, physicalHost); err != nil {
-			logger.Error(err, "Failed to remove finalizer from PhysicalHost")
-			return ctrl.Result{}, err
+	if err := r.Get(ctx, secretKey, secret); err != nil {
+		if apierrors.IsNotFound(err) {
+			return "", "", fmt.Errorf("credentials secret %q not found", secretName)
 		}
-		logger.Info("Successfully removed finalizer")
+		return "", "", fmt.Errorf("failed to get credentials secret: %w", err)
 	}
-	return ctrl.Result{}, nil
+
+	username, ok := secret.Data["username"]
+	if !ok {
+		return "", "", fmt.Errorf("username not found in secret %q", secretName)
+	}
+
+	password, ok := secret.Data["password"]
+	if !ok {
+		return "", "", fmt.Errorf("password not found in secret %q", secretName)
+	}
+
+	return string(username), string(password), nil
+}
+
+// updateStatus is a helper to update PhysicalHost status fields.
+func (r *PhysicalHostReconciler) updateStatus(ph *infrastructurev1beta1.PhysicalHost, state string, ready bool, errorMsg string) {
+	ph.Status.State = state
+	ph.Status.Ready = ready
+	ph.Status.ErrorMessage = errorMsg
 }
 
 // SetupWithManager sets up the controller with the Manager.
@@ -747,56 +311,32 @@ func (r *PhysicalHostReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Complete(r)
 }
 
-// SecretToPhysicalHosts maps a Secret event to reconcile requests for any PhysicalHost
-// that references the Secret.
+// SecretToPhysicalHosts maps Secret changes to PhysicalHost reconcile requests.
 func (r *PhysicalHostReconciler) SecretToPhysicalHosts(ctx context.Context, obj client.Object) []reconcile.Request {
-	log := log.FromContext(ctx).WithValues("mapping", "SecretToPhysicalHosts")
 	secret, ok := obj.(*corev1.Secret)
 	if !ok {
-		log.Error(errors.New("unexpected type"), "Expected a Secret but got a %T", obj)
+		r.Log.Error(nil, "Expected a Secret but got something else", "object", obj)
 		return nil
 	}
 
-	phList := &infrastructurev1beta1.PhysicalHostList{}
-	if err := r.List(ctx, phList, client.InNamespace(secret.Namespace)); err != nil {
-		log.Error(err, "failed to list PhysicalHosts in namespace", "namespace", secret.Namespace)
+	// Find all PhysicalHosts in the same namespace that reference this secret
+	physicalHostList := &infrastructurev1beta1.PhysicalHostList{}
+	if err := r.List(ctx, physicalHostList, client.InNamespace(secret.Namespace)); err != nil {
+		r.Log.Error(err, "Failed to list PhysicalHosts for Secret watch", "secret", secret.Name)
 		return nil
 	}
 
 	var requests []reconcile.Request
-	for _, ph := range phList.Items {
+	for _, ph := range physicalHostList.Items {
 		if ph.Spec.RedfishConnection.CredentialsSecretRef == secret.Name {
 			requests = append(requests, reconcile.Request{
 				NamespacedName: types.NamespacedName{
-					Name:      ph.Name,
 					Namespace: ph.Namespace,
+					Name:      ph.Name,
 				},
 			})
 		}
 	}
-	if len(requests) > 0 {
-		log.Info("Triggering reconciliation for PhysicalHosts due to secret change", "secret", secret.Name, "count", len(requests))
-	}
+
 	return requests
-}
-
-// detectNetworkAddresses attempts to retrieve network addresses from the Redfish endpoint.
-func (r *PhysicalHostReconciler) detectNetworkAddresses(ctx context.Context, logger logr.Logger, rfClient internalredfish.Client) ([]clusterv1.MachineAddress, error) {
-	logger.V(1).Info("Attempting to detect network addresses from Redfish")
-
-	// Get network addresses from the Redfish client
-	networkAddresses, err := rfClient.GetNetworkAddresses(ctx)
-	if err != nil {
-		logger.V(1).Info("Failed to retrieve network addresses from Redfish", "error", err)
-		return nil, err
-	}
-
-	// Convert to Cluster API MachineAddress format
-	machineAddresses := internalredfish.ConvertToMachineAddresses(networkAddresses)
-
-	logger.V(1).Info("Successfully converted network addresses",
-		"networkAddressCount", len(networkAddresses),
-		"machineAddressCount", len(machineAddresses))
-
-	return machineAddresses, nil
 }
