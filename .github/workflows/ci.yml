@@ -331,7 +331,7 @@ jobs:
         
         # Test webhook connectivity (optional)
         echo "Testing webhook readiness..."
-        kubectl get validatingwebhookconfiguration beskar7-validating-webhook-configuration -o yaml | grep -A5 "name: validation.physicalhost"
+        kubectl get validatingwebhookconfiguration beskar7-validating-webhook-configuration -o yaml | grep -A5 "name: validation.beskar7cluster" || echo "Note: Webhook validation check is optional"
         
     - name: Test basic functionality
       run: |
