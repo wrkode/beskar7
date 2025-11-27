@@ -38,12 +38,9 @@ spec:
         - /manager
         args:
         - --leader-elect
-        - --enable-security-monitoring=true
-        - --metrics-bind-address=:8080
+        - --enable-webhook=true
+        - --metrics-bind-address=127.0.0.1:8080
         - --health-probe-bind-address=:8081
-        - --reconcile-timeout=$(RECONCILE_TIMEOUT)
-        - --stuck-state-timeout=$(STUCK_STATE_TIMEOUT)
-        - --max-retries=$(MAX_RETRIES)
         image: controller
         imagePullPolicy: Always
         name: manager
@@ -61,12 +58,6 @@ spec:
         env:
         - name: GODEBUG
           value: "netdns=go"
-        - name: RECONCILE_TIMEOUT
-          value: "2m"
-        - name: STUCK_STATE_TIMEOUT
-          value: "15m"
-        - name: MAX_RETRIES
-          value: "3"
         - name: GOMAXPROCS
           valueFrom:
             resourceFieldRef:
