@@ -45,11 +45,11 @@ Beskar7 is a Kubernetes operator that implements the Cluster API infrastructure 
 
 ## Current Status
 
-**Version:** 1.0 (Major Architecture Simplification)
+**Version:** v0.4.0-alpha (Major Architecture Simplification)
 
 **Status:** Alpha - Under active development
 
-**Breaking Changes:** v1.0 is NOT compatible with v0.x. See [`BREAKING_CHANGES.md`](BREAKING_CHANGES.md) for migration guide.
+**Breaking Changes:** v0.4.0 is NOT compatible with v0.3.x. See CHANGELOG.md for complete migration guide.
 
 ## Key Features
 
@@ -109,7 +109,7 @@ kubectl wait --for=condition=available --timeout=600s deployment/beskar7-control
 
 ```bash
 # Download and apply release manifest
-kubectl apply -f https://github.com/wrkode/beskar7/releases/download/v1.0.0/beskar7-manifests-v1.0.0.yaml
+kubectl apply -f https://github.com/wrkode/beskar7/releases/download/v0.4.0-alpha/beskar7-manifests-v0.4.0-alpha.yaml
 ```
 
 ## Usage
@@ -364,10 +364,11 @@ beskar7/
 ├── controllers/              # Controllers
 │   ├── beskar7machine_controller.go
 │   ├── physicalhost_controller.go
-│   └── beskar7cluster_controller.go
+│   ├── beskar7cluster_controller.go
+│   └── inspection_handler.go
 ├── internal/
 │   ├── redfish/             # Redfish client (simplified)
-│   └── coordination/        # Host claiming logic
+│   └── metrics/             # Prometheus metrics
 ├── docs/                    # Documentation
 ├── examples/                # Example YAMLs
 └── config/                  # Kustomize manifests
