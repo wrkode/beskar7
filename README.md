@@ -54,8 +54,8 @@ Beskar7 is a Kubernetes operator that implements the Cluster API infrastructure 
 ## Key Features
 
 - **Power Management** - Simple on/off via Redfish
-- **iPXE Provisioning** - Network boot for any OS
-- **Hardware Inspection** - Real CPU, RAM, disk, NIC discovery
+- **iPXE Provisioning** - Network boot 
+- **Hardware Inspection** - CPU, RAM, disk, NIC discovery
 - **Hardware Validation** - Enforce minimum requirements
 - **Cluster API Integration** - Full CAPI provider implementation
 - **Vendor Agnostic** - No vendor-specific code
@@ -316,23 +316,16 @@ Beskar7 works with **any Redfish-compliant BMC** because it only uses:
 - Supermicro
 - Generic Redfish BMCs
 
-**No vendor-specific code needed!**
-
 ## Supported Operating Systems
 
-Any OS that can be deployed via network boot:
+Any OS that can be deployed via network boot but we're focusing on these immutable OSs:
 - **Kairos** (recommended) - Cloud-native, immutable
 - **Flatcar** - Container-optimized
-- **Talos** - Kubernetes-optimized
-- **Ubuntu** - Traditional Linux
-- **RHEL/Rocky/Alma** - Enterprise Linux
-- **Custom** - Build your own image
 
 The inspection image uses Alpine Linux, and the final OS is determined by your `targetImageURL`.
 
 ## Documentation
 
-- **[Breaking Changes](BREAKING_CHANGES.md)** - v1.0 migration guide
 - **[iPXE Setup Guide](docs/ipxe-setup.md)** - Infrastructure requirements
 - **[API Reference](docs/api-reference.md)** - Complete API documentation
 - **[Examples](examples/)** - Working configuration examples
@@ -384,14 +377,14 @@ beskar7/
 
 ### What Changed?
 
-**v0.x (VirtualMedia):**
+**v0.3.4 (VirtualMedia):**
 - Complex vendor-specific workarounds
 - ISO mounting via VirtualMedia
 - BIOS attribute manipulation
 - Boot parameter injection
 - 2,250 lines of code
 
-**v1.0 (iPXE + Inspection):**
+**v0.4.0 (iPXE + Inspection):**
 - Simple power management only
 - Network boot via iPXE
 - Hardware discovery via inspection
@@ -405,7 +398,6 @@ beskar7/
 3. **Network boot is universal** - Works the same everywhere
 4. **Hardware discovery is better** - Get real specs, not guesses
 
-See [`BREAKING_CHANGES.md`](BREAKING_CHANGES.md) for complete details.
 
 ## Troubleshooting
 
@@ -491,4 +483,4 @@ This project was inspired by and learns from:
 
 ---
 
-**Beskar7** - Simple, reliable bare-metal provisioning for Kubernetes.
+**Beskar7** - Simple, reliable bare-metal provisioning for immutable Kubernetes.
