@@ -48,6 +48,6 @@ replacements:
     fieldPath: metadata.labels.[app.kubernetes.io/version]
   targets:
   - select:
-      kind: "*"
+      kind: .*
     fieldPaths:
     - metadata.labels.[app.kubernetes.io/version]
