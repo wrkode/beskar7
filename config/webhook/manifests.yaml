@@ -10,26 +10,6 @@ webhooks:
     service:
       name: beskar7-webhook-service
       namespace: beskar7-system
-      path: /mutate-infrastructure-cluster-x-k8s-io-v1beta1-physicalhost
-  failurePolicy: Fail
-  name: default.physicalhost.infrastructure.cluster.x-k8s.io
-  rules:
-  - apiGroups:
-    - infrastructure.cluster.x-k8s.io
-    apiVersions:
-    - v1beta1
-    operations:
-    - CREATE
-    - UPDATE
-    resources:
-    - physicalhosts
-  sideEffects: None
-- admissionReviewVersions:
-  - v1
-  clientConfig:
-    service:
-      name: beskar7-webhook-service
-      namespace: beskar7-system
       path: /mutate-infrastructure-cluster-x-k8s-io-v1beta1-beskar7machine
   failurePolicy: Fail
   matchPolicy: Equivalent
@@ -155,24 +135,4 @@ webhooks:
     - UPDATE
     resources:
     - beskar7machinetemplates
-  sideEffects: None
-- admissionReviewVersions:
-  - v1
-  clientConfig:
-    service:
-      name: beskar7-webhook-service
-      namespace: beskar7-system
-      path: /validate-infrastructure-cluster-x-k8s-io-v1beta1-physicalhost
-  failurePolicy: Fail
-  name: validation.physicalhost.infrastructure.cluster.x-k8s.io
-  rules:
-  - apiGroups:
-    - infrastructure.cluster.x-k8s.io
-    apiVersions:
-    - v1beta1
-    operations:
-    - CREATE
-    - UPDATE
-    resources:
-    - physicalhosts
   sideEffects: None
