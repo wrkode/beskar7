@@ -19,7 +19,6 @@ package main
 import (
 	"context"
 	"flag"
-	"fmt"
 	"os"
 	"time"
 
@@ -29,23 +28,19 @@ import (
 
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
-	"k8s.io/client-go/kubernetes"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
-	"sigs.k8s.io/controller-runtime/pkg/manager/signals"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	infrastructurev1beta1 "github.com/wrkode/beskar7/api/v1beta1"
 	"github.com/wrkode/beskar7/api/v1beta1/webhooks"
 	"github.com/wrkode/beskar7/controllers"
-	"github.com/wrkode/beskar7/internal/coordination"
 	internalmetrics "github.com/wrkode/beskar7/internal/metrics"
-	"github.com/wrkode/beskar7/internal/security"
 	//+kubebuilder:scaffold:imports
 )
 
@@ -67,26 +62,17 @@ func init() {
 //+kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterroles;clusterrolebindings,verbs=get;list;watch
 //+kubebuilder:rbac:groups="",resources=events,verbs=create;patch
 //+kubebuilder:rbac:groups=coordination.k8s.io,resources=leases,verbs=get;list;watch;create;update;patch;delete
-//+kubebuilder:rbac:namespace=beskar7-system,groups=rbac.authorization.k8s.io,resources=roles;rolebindings,verbs=create;delete;get;list;patch;update;watch
-//+kubebuilder:rbac:namespace=beskar7-system,groups=coordination.k8s.io,resources=leases,verbs=get;list;watch;create;update;patch;delete
 
 func main() {
 	var metricsAddr string
 	var enableLeaderElection bool
 	var probeAddr string
-	var enableSecurityMonitoring bool
 	var leaderElectionLeaseDuration time.Duration
 	var leaderElectionRenewDeadline time.Duration
 	var leaderElectionRetryPeriod time.Duration
-	var leaderElectionReleaseOnCancel bool
-	var enableClaimCoordinatorLeaderElection bool
-	var claimCoordinatorLeaseDuration time.Duration
-	var claimCoordinatorRenewDeadline time.Duration
-	var claimCoordinatorRetryPeriod time.Duration
-	// PhysicalHost controller tuning
-	var reconcileTimeout time.Duration
-	var stuckStateTimeout time.Duration
-	var maxRetries int
+	var enableWebhook bool
+	var webhookPort int
+	var webhookCertDir string
 
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
@@ -99,22 +85,13 @@ func main() {
 		"The interval between attempts by the acting master to renew a leadership slot before it stops leading.")
 	flag.DurationVar(&leaderElectionRetryPeriod, "leader-elect-retry-period", 2*time.Second,
 		"The duration the clients should wait between attempting acquisition and renewal of a leadership.")
-	flag.BoolVar(&leaderElectionReleaseOnCancel, "leader-elect-release-on-cancel", true,
-		"If the leader should step down voluntarily when the Manager ends.")
-	flag.BoolVar(&enableClaimCoordinatorLeaderElection, "enable-claim-coordinator-leader-election", false,
-		"Enable leader election for claim coordination to handle high-contention scenarios.")
-	flag.DurationVar(&claimCoordinatorLeaseDuration, "claim-coordinator-lease-duration", 15*time.Second,
-		"The duration that non-leader candidates will wait to force acquire claim coordination leadership.")
-	flag.DurationVar(&claimCoordinatorRenewDeadline, "claim-coordinator-renew-deadline", 10*time.Second,
-		"The interval between attempts by the acting claim coordinator leader to renew leadership.")
-	flag.DurationVar(&claimCoordinatorRetryPeriod, "claim-coordinator-retry-period", 2*time.Second,
-		"The duration claim coordinator clients should wait between attempting acquisition and renewal of leadership.")
-	flag.BoolVar(&enableSecurityMonitoring, "enable-security-monitoring", true,
-		"Enable security monitoring for TLS, RBAC, and credential validation.")
-	// Reconciliation tuning flags (can also be set via env)
-	flag.DurationVar(&reconcileTimeout, "reconcile-timeout", getEnvDuration("RECONCILE_TIMEOUT", 2*time.Minute), "Maximum reconciliation time for PhysicalHost controller")
-	flag.DurationVar(&stuckStateTimeout, "stuck-state-timeout", getEnvDuration("STUCK_STATE_TIMEOUT", 15*time.Minute), "Time before considering a PhysicalHost stuck in a state")
-	flag.IntVar(&maxRetries, "max-retries", getEnvInt("MAX_RETRIES", 3), "Maximum retries for guarded state transitions")
+	flag.BoolVar(&enableWebhook, "enable-webhook", false,
+		"Enable webhook server for admission control and defaulting.")
+	flag.IntVar(&webhookPort, "webhook-port", 9443,
+		"Webhook server port.")
+	flag.StringVar(&webhookCertDir, "webhook-cert-dir", "/tmp/k8s-webhook-server/serving-certs",
+		"Webhook server certificate directory.")
+
 	opts := zap.Options{
 		Development: true,
 	}
@@ -123,80 +100,38 @@ func main() {
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
-	// Initialize metrics
+	// Setup metrics registry
 	internalmetrics.Init()
-	setupLog.Info("Metrics initialized successfully")
+
+	// Configure webhook server
+	webhookServerOptions := webhook.Options{
+		Port:    webhookPort,
+		CertDir: webhookCertDir,
+	}
 
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
-		Scheme:  scheme,
-		Metrics: metricsserver.Options{BindAddress: metricsAddr},
-		WebhookServer: webhook.NewServer(webhook.Options{
-			Port: 9443,
-		}),
-		HealthProbeBindAddress:        probeAddr,
-		LeaderElection:                enableLeaderElection,
-		LeaderElectionID:              "7be7e04e.cluster.x-k8s.io",
-		LeaderElectionNamespace:       "beskar7-system",
-		LeaseDuration:                 &leaderElectionLeaseDuration,
-		RenewDeadline:                 &leaderElectionRenewDeadline,
-		RetryPeriod:                   &leaderElectionRetryPeriod,
-		LeaderElectionReleaseOnCancel: leaderElectionReleaseOnCancel,
+		Scheme:                 scheme,
+		Metrics:                metricsserver.Options{BindAddress: metricsAddr},
+		WebhookServer:          webhook.NewServer(webhookServerOptions),
+		HealthProbeBindAddress: probeAddr,
+		LeaderElection:         enableLeaderElection,
+		LeaderElectionID:       "beskar7.infrastructure.cluster.x-k8s.io",
+		LeaseDuration:          &leaderElectionLeaseDuration,
+		RenewDeadline:          &leaderElectionRenewDeadline,
+		RetryPeriod:            &leaderElectionRetryPeriod,
 	})
 	if err != nil {
 		setupLog.Error(err, "unable to start manager")
 		os.Exit(1)
 	}
 
-	// Create kubernetes client for leader election (if needed)
-	var kubernetesClient kubernetes.Interface
-	if enableClaimCoordinatorLeaderElection {
-		kubernetesClient, err = kubernetes.NewForConfig(mgr.GetConfig())
-		if err != nil {
-			setupLog.Error(err, "unable to create Kubernetes client for claim coordinator leader election")
-			os.Exit(1)
-		}
-	}
-
-	// Setup host claim coordinator (with optional leader election)
-	var hostClaimCoordinator coordination.ClaimCoordinator
-	if enableClaimCoordinatorLeaderElection {
-		setupLog.Info("Setting up leader election claim coordinator")
-		leaderElectionConfig := coordination.LeaderElectionConfig{
-			Namespace:          "beskar7-system",
-			Identity:           "beskar7-claim-coordinator", // This should be unique per pod in production
-			LeaseDuration:      claimCoordinatorLeaseDuration,
-			RenewDeadline:      claimCoordinatorRenewDeadline,
-			RetryPeriod:        claimCoordinatorRetryPeriod,
-			ProcessingInterval: 1 * time.Second,
-		}
-
-		leaderElectionCoordinator := coordination.NewLeaderElectionClaimCoordinator(
-			mgr.GetClient(),
-			kubernetesClient,
-			leaderElectionConfig,
-		)
-
-		// Start the leader election coordinator
-		if err := mgr.Add(&leaderElectionCoordinatorRunnable{coordinator: leaderElectionCoordinator}); err != nil {
-			setupLog.Error(err, "unable to add leader election claim coordinator to manager")
-			os.Exit(1)
-		}
-
-		hostClaimCoordinator = &leaderElectionClaimCoordinatorWrapper{coordinator: leaderElectionCoordinator}
-		setupLog.Info("Leader election claim coordinator configured")
-	} else {
-		setupLog.Info("Using standard host claim coordinator")
-		hostClaimCoordinator = coordination.NewHostClaimCoordinator(mgr.GetClient())
-	}
-
-	// Setup controllers here
+	// Setup controllers
 	if err = (&controllers.Beskar7MachineReconciler{
 		Client:               mgr.GetClient(),
 		Scheme:               mgr.GetScheme(),
 		RedfishClientFactory: nil, // Use default
 		Log:                  ctrl.Log.WithName("controllers").WithName("Beskar7Machine"),
-		HostClaimCoordinator: hostClaimCoordinator,
-	}).SetupWithManager(context.Background(), mgr, controller.Options{MaxConcurrentReconciles: 10}); err != nil {
+	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Beskar7Machine")
 		os.Exit(1)
 	}
@@ -209,88 +144,30 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Initialize ProvisioningQueue for PhysicalHost controller
-	provisioningQueue := coordination.NewProvisioningQueue(
-		5,  // maxConcurrentOps: Allow up to 5 concurrent BMC operations
-		50, // maxQueueSize: Queue up to 50 operations
-	)
-
-	// Initialize PhysicalHost reconciler with tuned values
-	phLogger := ctrl.Log.WithName("controllers").WithName("PhysicalHost")
-	phRecorder := mgr.GetEventRecorderFor("beskar7-physicalhost-controller")
-	phReconciler := controllers.NewPhysicalHostReconciler(
-		mgr.GetClient(),
-		mgr.GetScheme(),
-		nil, // default redfish client factory
-		phLogger,
-		phRecorder,
-		provisioningQueue,
-		reconcileTimeout,
-		stuckStateTimeout,
-		maxRetries,
-	)
-	if err = phReconciler.SetupWithManager(mgr); err != nil {
+	if err = (&controllers.PhysicalHostReconciler{
+		Client:               mgr.GetClient(),
+		Scheme:               mgr.GetScheme(),
+		RedfishClientFactory: nil, // Use default
+		Log:                  ctrl.Log.WithName("controllers").WithName("PhysicalHost"),
+	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "PhysicalHost")
 		os.Exit(1)
 	}
 
-	if err = (&controllers.Beskar7MachineTemplateReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
-		Log:    ctrl.Log.WithName("controllers").WithName("Beskar7MachineTemplate"),
-	}).SetupWithManager(context.Background(), mgr, controller.Options{}); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "Beskar7MachineTemplate")
+	// Setup inspection handler
+	if err := controllers.SetupInspectionServer(mgr, 8082); err != nil {
+		setupLog.Error(err, "unable to setup inspection server")
 		os.Exit(1)
 	}
 
-	// Setup webhooks
-	if err = (&webhooks.Beskar7ClusterWebhook{}).SetupWebhookWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create webhook", "webhook", "Beskar7Cluster")
-		os.Exit(1)
-	}
-
-	if err = (&webhooks.Beskar7MachineWebhook{}).SetupWebhookWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create webhook", "webhook", "Beskar7Machine")
-		os.Exit(1)
-	}
-
-	if err = (&webhooks.PhysicalHostWebhook{}).SetupWebhookWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create webhook", "webhook", "PhysicalHost")
-		os.Exit(1)
-	}
-
-	if err = (&webhooks.Beskar7MachineTemplateWebhook{}).SetupWebhookWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create webhook", "webhook", "Beskar7MachineTemplate")
-		os.Exit(1)
-	}
-
-	// Setup security monitoring
-	if enableSecurityMonitoring {
-		kubernetesClient, err := kubernetes.NewForConfig(mgr.GetConfig())
-		if err != nil {
-			setupLog.Error(err, "unable to create Kubernetes client for security monitoring")
+	// Setup webhooks if enabled
+	if enableWebhook {
+		setupLog.Info("Setting up webhooks")
+		if err = (&webhooks.Beskar7ClusterWebhook{}).SetupWebhookWithManager(mgr); err != nil {
+			setupLog.Error(err, "unable to setup webhook", "webhook", "Beskar7Cluster")
 			os.Exit(1)
 		}
-
-		securityMonitor := security.NewSecurityMonitor(
-			mgr.GetClient(),
-			kubernetesClient,
-			"beskar7-system", // Default namespace
-		)
-
-		// Start security monitoring in the background
-		if err := mgr.Add(&securityMonitorManager{
-			monitor: securityMonitor,
-		}); err != nil {
-			setupLog.Error(err, "unable to add security monitor to manager")
-			os.Exit(1)
-		}
-
-		setupLog.Info("Security monitoring enabled")
-	} else {
-		setupLog.Info("Security monitoring disabled")
 	}
-
 	//+kubebuilder:scaffold:builder
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
@@ -303,63 +180,8 @@ func main() {
 	}
 
 	setupLog.Info("starting manager")
-	if err := mgr.Start(signals.SetupSignalHandler()); err != nil {
+	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)
 	}
-}
-
-// getEnvDuration returns a duration read from env if present, otherwise the default.
-func getEnvDuration(envName string, def time.Duration) time.Duration {
-	if v, ok := os.LookupEnv(envName); ok && v != "" {
-		d, err := time.ParseDuration(v)
-		if err == nil {
-			return d
-		}
-		setupLog.Info("Invalid duration in env, using default", "env", envName, "value", v, "default", def)
-	}
-	return def
-}
-
-// getEnvInt returns an int read from env if present, otherwise the default.
-func getEnvInt(envName string, def int) int {
-	if v, ok := os.LookupEnv(envName); ok && v != "" {
-		var parsed int
-		if _, err := fmt.Sscanf(v, "%d", &parsed); err == nil {
-			return parsed
-		}
-		setupLog.Info("Invalid int in env, using default", "env", envName, "value", v, "default", def)
-	}
-	return def
-}
-
-// leaderElectionCoordinatorRunnable wraps the leader election coordinator to implement manager.Runnable
-type leaderElectionCoordinatorRunnable struct {
-	coordinator *coordination.LeaderElectionClaimCoordinator
-}
-
-func (r *leaderElectionCoordinatorRunnable) Start(ctx context.Context) error {
-	return r.coordinator.Start(ctx)
-}
-
-// leaderElectionClaimCoordinatorWrapper adapts the leader election coordinator to the ClaimCoordinator interface
-type leaderElectionClaimCoordinatorWrapper struct {
-	coordinator *coordination.LeaderElectionClaimCoordinator
-}
-
-func (w *leaderElectionClaimCoordinatorWrapper) ClaimHost(ctx context.Context, request coordination.ClaimRequest) (*coordination.ClaimResult, error) {
-	return w.coordinator.ClaimHostWithLeaderElection(ctx, request)
-}
-
-func (w *leaderElectionClaimCoordinatorWrapper) ReleaseHost(ctx context.Context, machine *infrastructurev1beta1.Beskar7Machine) error {
-	return w.coordinator.ReleaseHost(ctx, machine)
-}
-
-// securityMonitorManager wraps the security monitor to implement manager.Runnable
-type securityMonitorManager struct {
-	monitor *security.SecurityMonitor
-}
-
-func (s *securityMonitorManager) Start(ctx context.Context) error {
-	return s.monitor.StartMonitoring(ctx)
 }
