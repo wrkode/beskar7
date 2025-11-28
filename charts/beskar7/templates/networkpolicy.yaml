@@ -78,32 +78,13 @@ spec:
       port: 3269
 
 ---
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: {{ include "beskar7.fullname" . }}-allow-namespace
-  namespace: {{ .Values.namespace }}
-  labels:
-    {{- include "beskar7.labels" . | nindent 4 }}
-    app.kubernetes.io/component: network-policy
-spec:
-  podSelector: {}
-  policyTypes:
-  - Ingress
-  - Egress
-  
-  # Allow communication within the namespace
-  ingress:
-  - from:
-    - namespaceSelector:
-        matchLabels:
-          kubernetes.io/metadata.name: {{ .Values.namespace }}
-  
-  egress:
-  - to:
-    - namespaceSelector:
-        matchLabels:
-          kubernetes.io/metadata.name: {{ .Values.namespace }}
+# NOTE: The namespace-scoped allow policy has been removed because:
+# 1. It was too restrictive, only allowing egress within the namespace
+# 2. It blocked the controller from reaching the Kubernetes API server  
+# 3. The manager-specific policy already provides proper egress controls
+# 4. Having overlapping NetworkPolicies can cause unexpected denials
+#
+# The beskar7-manager NetworkPolicy provides all necessary rules.
 
 ---
 apiVersion: networking.k8s.io/v1

@@ -1105,31 +1105,6 @@ metadata:
     app.kubernetes.io/component: security
     app.kubernetes.io/name: beskar7
     app.kubernetes.io/version: v0.4.0-alpha
-  name: beskar7-allow-namespace-communication
-  namespace: beskar7-system
-spec:
-  egress:
-  - to:
-    - namespaceSelector:
-        matchLabels:
-          kubernetes.io/metadata.name: beskar7-system
-  ingress:
-  - from:
-    - namespaceSelector:
-        matchLabels:
-          kubernetes.io/metadata.name: beskar7-system
-  podSelector: {}
-  policyTypes:
-  - Ingress
-  - Egress
----
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  labels:
-    app.kubernetes.io/component: security
-    app.kubernetes.io/name: beskar7
-    app.kubernetes.io/version: v0.4.0-alpha
   name: beskar7-manager-network-policy
   namespace: beskar7-system
 spec:

@@ -82,38 +82,17 @@ spec:
       port: 3269
 
 ---
-# NOTE: A deny-all default policy has been intentionally removed
-# because it conflicts with the specific allow policies below.
-# If you need a deny-all default, ensure all your allow policies
-# explicitly cover all required traffic patterns.
-
----
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: beskar7-allow-namespace-communication
-  namespace: beskar7-system
-  labels:
-    app.kubernetes.io/name: beskar7
-    app.kubernetes.io/component: network-policy
-spec:
-  podSelector: {}
-  policyTypes:
-  - Ingress
-  - Egress
-  
-  # Allow communication within the namespace
-  ingress:
-  - from:
-    - namespaceSelector:
-        matchLabels:
-          kubernetes.io/metadata.name: beskar7-system
-  
-  egress:
-  - to:
-    - namespaceSelector:
-        matchLabels:
-          kubernetes.io/metadata.name: beskar7-system
+# NOTE: The beskar7-allow-namespace-communication policy has been removed because:
+# 1. It was too restrictive, only allowing egress within beskar7-system namespace
+# 2. It blocked the controller from reaching the Kubernetes API server
+# 3. The beskar7-manager-network-policy already provides proper egress controls
+# 4. Having overlapping NetworkPolicies can cause unexpected denials
+#
+# If you need additional namespace-level restrictions, ensure they don't conflict
+# with the manager's need to reach:
+# - Kubernetes API server (for leader election, resource management)
+# - External BMC endpoints (for Redfish communication)
+# - DNS services (for name resolution)
 
 ---
 apiVersion: networking.k8s.io/v1
