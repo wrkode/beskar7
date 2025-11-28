@@ -99,7 +99,7 @@ kubectl get beskar7machine worker-01 -o jsonpath='{.status.phase}'
 
 # Check PhysicalHost inspection phase
 kubectl get physicalhost server-01 -o jsonpath='{.status.inspectionPhase}'
-# Output: InProgress → Complete
+# Output: InProgress -> Complete
 
 # View inspection report
 kubectl get physicalhost server-01 -o jsonpath='{.status.inspectionReport}' | jq
@@ -259,16 +259,16 @@ kubectl get beskar7machine worker-01 -o jsonpath='{.spec.hardwareRequirements}' 
 5. **Organize Configuration Files**
    ```
    boot-server/
-   ├── configs/
-   │   ├── control-plane-config.yaml
-   │   ├── worker-config.yaml
-   │   └── custom-config.yaml
-   ├── images/
-   │   ├── kairos-v2.8.1.tar.gz
-   │   └── flatcar-3602.tar.gz
-   └── ipxe/
-       ├── boot.ipxe
-       └── inspect.ipxe
+    configs/
+       control-plane-config.yaml
+       worker-config.yaml
+       custom-config.yaml
+    images/
+       kairos-v2.8.1.tar.gz
+       flatcar-3602.tar.gz
+    ipxe/
+        boot.ipxe
+        inspect.ipxe
    ```
 
 ## Next Steps

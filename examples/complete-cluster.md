@@ -13,24 +13,24 @@ This example creates a fully functional cluster with:
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    Beskar7 Controller                       │
-│              (Manages PhysicalHosts & Machines)             │
-└─────────────────────────────────────────────────────────────┘
-                            │
-                ┌───────────┼───────────┐
-                │           │           │
-       ┌────────▼──────┐   │   ┌───────▼────────┐
-       │ PhysicalHost  │   │   │ PhysicalHost   │
-       │ control-plane │   │   │   worker-01    │
-       │ (172.16.56.101)│  │   │ (172.16.56.102)│
-       └───────────────┘   │   └────────────────┘
-                           │
-                   ┌───────▼────────┐
-                   │ PhysicalHost   │
-                   │   worker-02    │
-                   │ (172.16.56.103)│
-                   └────────────────┘
+
+                    Beskar7 Controller                       
+              (Manages PhysicalHosts & Machines)             
+
+                            
+                
+                                      
+       v      v
+        PhysicalHost         PhysicalHost   
+        control-plane          worker-01    
+        (172.16.56.101)      (172.16.56.102)
+             
+                           
+                   v
+                    PhysicalHost   
+                      worker-02    
+                    (172.16.56.103)
+                   
 ```
 
 ## Prerequisites
