@@ -13,18 +13,18 @@ Beskar7 uses iPXE for network boot provisioning. This requires you to provide:
 5. **OS Images** - Target operating systems for final deployment
 
 ```
-┌──────────┐         ┌──────────┐         ┌──────────┐
-│  Server  │ DHCP    │   DHCP   │  HTTP   │   HTTP   │
-│   BMC    │────────>│  Server  │────────>│  Server  │
-└──────────┘         └──────────┘         └──────────┘
-     │                     │                     │
-     │ PXE Boot            │ iPXE Chain          │ Boot Script
-     │                     │                     │
-     ▼                     ▼                     ▼
-┌──────────┐         ┌──────────┐         ┌──────────┐
-│  iPXE    │         │ iPXE     │         │Inspector │
-│  Boot    │────────>│ Script   │────────>│  Image   │
-└──────────┘         └──────────┘         └──────────┘
+                  
+  Server   DHCP       DHCP     HTTP      HTTP   
+   BMC    >  Server  >  Server  
+                  
+                                               
+      PXE Boot             iPXE Chain           Boot Script
+                                               
+     v                     v                     v
+                  
+  iPXE              iPXE              Inspector 
+  Boot    > Script   >  Image   
+                  
 ```
 
 ## Quick Setup (dnsmasq + nginx)
@@ -387,62 +387,62 @@ wget https://github.com/kairos-io/kairos/releases/download/v2.8.1/kairos-alpine-
 ### Simple Single-Network Setup
 
 ```
-┌─────────────────────────────────────┐
-│  Network: 192.168.1.0/24            │
-│                                     │
-│  ┌──────────┐    ┌──────────┐      │
-│  │  Boot    │    │  Beskar7 │      │
-│  │  Server  │    │  Controller     │
-│  │.1.10     │    │.1.20     │      │
-│  └──────────┘    └──────────┘      │
-│       │               │             │
-│  ┌────┴───────────────┴─────┐      │
-│  │      Servers              │      │
-│  │  ┌─────┐ ┌─────┐ ┌─────┐ │      │
-│  │  │BMC  │ │BMC  │ │BMC  │ │      │
-│  │  │.1.100│ │.1.101│ │.1.102│     │
-│  │  └─────┘ └─────┘ └─────┘ │      │
-│  └───────────────────────────┘      │
-└─────────────────────────────────────┘
+
+  Network: 192.168.1.0/24            
+                                     
+            
+    Boot          Beskar7       
+    Server        Controller     
+  .1.10         .1.20           
+            
+                                   
+        
+        Servers                    
+             
+    BMC   BMC   BMC         
+    .1.100 .1.101 .1.102     
+             
+        
+
 ```
 
 ### Production Multi-Network Setup
 
 ```
 Management Network (BMC): 10.0.1.0/24
-┌──────────────────────────────────────┐
-│  ┌──────────┐                         │
-│  │ Beskar7  │                         │
-│  │.1.10     │                         │
-│  └──────────┘                         │
-│       │                               │
-│  ┌────┴───────────┐                   │
-│  │  BMCs          │                   │
-│  │ .1.100-.1.200  │                   │
-│  └────────────────┘                   │
-└──────────────────────────────────────┘
+
+                           
+   Beskar7                           
+  .1.10                              
+                           
+                                      
+                     
+    BMCs                             
+   .1.100-.1.200                     
+                     
+
 
 Provisioning Network (PXE): 10.0.2.0/24
-┌──────────────────────────────────────┐
-│  ┌──────────┐                         │
-│  │  Boot    │                         │
-│  │  Server  │                         │
-│  │.2.10     │                         │
-│  └──────────┘                         │
-│       │                               │
-│  ┌────┴───────────┐                   │
-│  │  Server NICs   │                   │
-│  │ .2.100-.2.200  │                   │
-│  └────────────────┘                   │
-└──────────────────────────────────────┘
+
+                           
+    Boot                             
+    Server                           
+  .2.10                              
+                           
+                                      
+                     
+    Server NICs                      
+   .2.100-.2.200                     
+                     
+
 
 Production Network: 10.0.3.0/24
-┌──────────────────────────────────────┐
-│  ┌────────────────┐                   │
-│  │  Server NICs   │                   │
-│  │ .3.100-.3.200  │                   │
-│  └────────────────┘                   │
-└──────────────────────────────────────┘
+
+                     
+    Server NICs                      
+   .3.100-.3.200                     
+                     
+
 ```
 
 ## Firewall Configuration

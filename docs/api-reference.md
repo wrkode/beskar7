@@ -636,15 +636,15 @@ Resources follow predictable state transitions:
 
 **PhysicalHost States:**
 ```
-None → Enrolling → Available → Claimed → Provisioning → Provisioned
-                     ↓           ↓
-                   Error ← → Deprovisioning → Available
+None -> Enrolling -> Available -> Claimed -> Provisioning -> Provisioned
+                     v           v
+                   Error <- -> Deprovisioning -> Available
 ```
 
 **Beskar7Machine Conditions:**
 ```
-PhysicalHostAssociated: False → True (when host is claimed)
-InfrastructureReady: False → True (when provisioning completes)
+PhysicalHostAssociated: False -> True (when host is claimed)
+InfrastructureReady: False -> True (when provisioning completes)
 ```
 
 This API reference provides comprehensive information for working with Beskar7 resources. For additional examples and usage scenarios, see the other documentation files. 

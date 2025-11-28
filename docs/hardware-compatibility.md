@@ -6,9 +6,9 @@ This document describes Beskar7's hardware compatibility and requirements.
 
 **Beskar7 works with ANY Redfish-compliant BMC** because it only uses universally-supported features:
 
-- ✅ **Power Management** - On/Off/Reset operations
-- ✅ **PXE Boot Flag** - Setting boot source to network
-- ✅ **System Information** - Basic hardware details
+- **Power Management** - On/Off/Reset operations
+- **PXE Boot Flag** - Setting boot source to network
+- **System Information** - Basic hardware details
 
 **No vendor-specific code. No workarounds. No complexity.**
 
@@ -39,12 +39,12 @@ While Beskar7 works with any Redfish BMC, we've specifically tested:
 
 | Vendor | BMC Type | Redfish Version | Status | Notes |
 |--------|----------|-----------------|--------|-------|
-| **Dell** | iDRAC 8/9 | 1.4+ | ✅ Tested | Works perfectly, no special handling |
-| **HPE** | iLO 4/5/6 | 1.2+ | ✅ Tested | Excellent Redfish compliance |
-| **Lenovo** | XCC | 1.6+ | ✅ Tested | Clean implementation |
-| **Supermicro** | BMC | 1.4+ | ✅ Tested | Newer BMC versions recommended |
-| **Generic** | AMI MegaRAC | 1.4+ | ✅ Tested | Used by many whitebox vendors |
-| **Generic** | Aspeed OpenBMC | 1.0+ | ⚠️ Partial | Some implementations incomplete |
+| **Dell** | iDRAC 8/9 | 1.4+ | Tested | no special handling |
+| **HPE** | iLO 4/5/6 | 1.2+ | Tested | Redfish compliance |
+| **Lenovo** | XCC | 1.6+ | Tested | Clean implementation |
+| **Supermicro** | BMC | 1.4+ | Tested | Newer BMC versions recommended |
+| **Generic** | AMI MegaRAC | 1.4+ | Tested | Used by many whitebox vendors |
+| **Generic** | Aspeed OpenBMC | 1.0+ | Partial | Some implementations incomplete |
 
 ### Notes on Tested Hardware
 
@@ -88,11 +88,11 @@ While Beskar7 works with any Redfish BMC, we've specifically tested:
 - Uses only standard Redfish features
 - Simpler and more reliable
 
-### No VirtualMedia
+### Network Boot Only
 
 **Other tools:**
-- Mount ISOs via Redfish VirtualMedia
-- Complex vendor quirks
+- Complex ISO mounting mechanisms
+- Vendor-specific implementations
 - Unreliable across vendors
 
 **Beskar7:**
@@ -311,11 +311,11 @@ Submit to: https://github.com/wrkode/beskar7/issues
 
 | Feature | Requirement | All Vendors |
 |---------|-------------|-------------|
-| **Power On/Off** | `/redfish/v1/Systems/{id}/Actions/ComputerSystem.Reset` | ✅ |
-| **Power Status** | `/redfish/v1/Systems/{id}` → `PowerState` | ✅ |
-| **Set PXE Boot** | `/redfish/v1/Systems/{id}` → `Boot.BootSourceOverrideTarget = Pxe` | ✅ |
-| **System Info** | `/redfish/v1/Systems/{id}` → Manufacturer, Model, Serial | ✅ |
-| **Network Info** | `/redfish/v1/Systems/{id}/EthernetInterfaces` | ✅ |
+| **Power On/Off** | `/redfish/v1/Systems/{id}/Actions/ComputerSystem.Reset` | Yes |
+| **Power Status** | `/redfish/v1/Systems/{id}` -> `PowerState` | Yes |
+| **Set PXE Boot** | `/redfish/v1/Systems/{id}` -> `Boot.BootSourceOverrideTarget = Pxe` | Yes |
+| **System Info** | `/redfish/v1/Systems/{id}` -> Manufacturer, Model, Serial | Yes |
+| **Network Info** | `/redfish/v1/Systems/{id}/EthernetInterfaces` | Yes |
 
 Everything Beskar7 needs is universally supported!
 

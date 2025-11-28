@@ -95,21 +95,21 @@ For information about contributing to Beskar7, see the main repository documenta
 
 | Document | Status | Last Updated |
 |----------|--------|--------------|
-| Introduction | ✅ Complete | Current |
-| Quick Start Guide | ✅ Complete | Current |
-| **🚀 Quick Start - Vendor Support** | **✅ NEW** | **Current** |
-| **🚀 Vendor-Specific Support** | **✅ NEW** | **Current** |
-| Architecture | ✅ Complete | Current |
-| API Reference | ✅ Complete | Current |
-| PhysicalHost | ✅ Complete | Current |
-| Beskar7Machine | ✅ Complete | Current |
-| Beskar7Cluster | ✅ Complete | Current |
-| Beskar7MachineTemplate | ✅ Complete | Current |
-| Deployment Best Practices | ✅ Complete | Current |
-| Advanced Usage | ✅ Complete | Current |
-| Hardware Compatibility | ✅ Complete | Current |
-| Troubleshooting | ✅ Complete | Current |
-| **🚀 State Management** | **✅ NEW** | **Current** |
-| Metrics | ✅ Complete | Current |
+| Introduction | Yes Complete | Current |
+| Quick Start Guide | Yes Complete | Current |
+| **🚀 Quick Start - Vendor Support** | **Yes NEW** | **Current** |
+| **🚀 Vendor-Specific Support** | **Yes NEW** | **Current** |
+| Architecture | Yes Complete | Current |
+| API Reference | Yes Complete | Current |
+| PhysicalHost | Yes Complete | Current |
+| Beskar7Machine | Yes Complete | Current |
+| Beskar7Cluster | Yes Complete | Current |
+| Beskar7MachineTemplate | Yes Complete | Current |
+| Deployment Best Practices | Yes Complete | Current |
+| Advanced Usage | Yes Complete | Current |
+| Hardware Compatibility | Yes Complete | Current |
+| Troubleshooting | Yes Complete | Current |
+| **🚀 State Management** | **Yes NEW** | **Current** |
+| Metrics | Yes Complete | Current |
 
 All documentation is current and comprehensive as of the latest release. 

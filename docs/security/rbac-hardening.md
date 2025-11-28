@@ -19,11 +19,11 @@ The original RBAC configuration contained **CRITICAL** security vulnerability:
 ```
 
 This granted **cluster-admin equivalent permissions**, allowing the Beskar7 controller to:
-- ✗ Access ALL Kubernetes resources 
-- ✗ Perform ANY operation (create, delete, modify)
-- ✗ Access sensitive resources like secrets, nodes, RBAC
-- ✗ Potentially escalate privileges
-- ✗ Bypass all security controls
+- No Access ALL Kubernetes resources 
+- No Perform ANY operation (create, delete, modify)
+- No Access sensitive resources like secrets, nodes, RBAC
+- No Potentially escalate privileges
+- No Bypass all security controls
 
 **Risk Level:** **CRITICAL** - This configuration is unsuitable for production use and violates security best practices.
 
@@ -201,11 +201,11 @@ kubectl get events -n beskar7-system --field-selector reason=RBACSecurityIssue
 
 | Security Aspect | Before | After | Industry Standard |
 |------------------|--------|-------|-------------------|
-| Wildcard Permissions | ❌ Full wildcards | ✅ None | ✅ None allowed |
-| Privilege Level | ❌ Cluster Admin | ✅ Minimal required | ✅ Least privilege |
-| Resource Scope | ❌ All resources | ✅ Specific resources | ✅ Scoped access |
-| Verb Scope | ❌ All operations | ✅ Required operations | ✅ Limited verbs |
-| Security Monitoring | ❌ None | ✅ Built-in | ✅ Recommended |
+| Wildcard Permissions | No Full wildcards | Yes None | Yes None allowed |
+| Privilege Level | No Cluster Admin | Yes Minimal required | Yes Least privilege |
+| Resource Scope | No All resources | Yes Specific resources | Yes Scoped access |
+| Verb Scope | No All operations | Yes Required operations | Yes Limited verbs |
+| Security Monitoring | No None | Yes Built-in | Yes Recommended |
 
 ## Migration Guide
 

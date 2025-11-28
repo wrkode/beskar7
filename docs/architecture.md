@@ -7,8 +7,8 @@ This document describes the high-level architecture of the Beskar7 Cluster API i
 Beskar7 integrates with the Kubernetes Cluster API (CAPI) framework to manage the lifecycle of bare-metal hosts as Kubernetes nodes. It uses a **simple, reliable approach**: Redfish for power management + iPXE for network boot + hardware inspection.
 
 The architecture follows these principles:
-- **Simplicity**: No complex VirtualMedia or vendor-specific workarounds
-- **Reliability**: Uses only universally-supported Redfish features
+- **Simplicity**: No complex vendor-specific workarounds
+- **Reliability**: Uses only universally-supported Redfish features (power management and PXE boot)
 - **Vendor Agnostic**: Works with any Redfish-compliant BMC
 - **Observable**: Rich hardware inspection data collected before provisioning
 
@@ -218,86 +218,62 @@ The inspection workflow is the core innovation in Beskar7 v0.4.0+. It provides r
 ### Workflow Steps
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│ 1. Beskar7Machine created, claims PhysicalHost                │
-└────────────────────────┬────────────────────────────────────────┘
-                         │
-                         v
-┌─────────────────────────────────────────────────────────────────┐
-│ 2. Controller sets PXE boot flag via Redfish                  │
-│    Controller powers on server via Redfish                     │
-└────────────────────────┬────────────────────────────────────────┘
-                         │
-                         v
-┌─────────────────────────────────────────────────────────────────┐
-│ 3. Server network boots (DHCP -> iPXE chainload)              │
-└────────────────────────┬────────────────────────────────────────┘
-                         │
-                         v
-┌─────────────────────────────────────────────────────────────────┐
-│ 4. iPXE fetches boot script from HTTP server                  │
-│    Boot script includes: API URL, token, namespace, host name  │
-└────────────────────────┬────────────────────────────────────────┘
-                         │
-                         v
-┌─────────────────────────────────────────────────────────────────┐
-│ 5. iPXE boots inspection image (Alpine Linux)                 │
-│    Kernel parameters: beskar7.api=URL beskar7.token=XXX       │
-└────────────────────────┬────────────────────────────────────────┘
-                         │
-                         v
-┌─────────────────────────────────────────────────────────────────┐
-│ 6. Inspection scripts run automatically:                      │
-│    - Detect CPUs (lscpu, /proc/cpuinfo)                       │
-│    - Detect Memory (free, /proc/meminfo)                      │
-│    - Detect Disks (lsblk, smartctl)                           │
-│    - Detect NICs (ip link, ethtool)                           │
-│    - Collect system info (dmidecode)                          │
-└────────────────────────┬────────────────────────────────────────┘
-                         │
-                         v
-┌─────────────────────────────────────────────────────────────────┐
-│ 7. Inspection image POSTs report to Beskar7 API               │
-│    POST /api/v1/inspection/{namespace}/{host}                 │
-│    Body: JSON with all hardware details                       │
-└────────────────────────┬────────────────────────────────────────┘
-                         │
-                         v
-┌─────────────────────────────────────────────────────────────────┐
-│ 8. Inspection Handler updates PhysicalHost status             │
-│    Sets InspectionReport field                                 │
-│    Sets InspectionPhase to Complete                            │
-└────────────────────────┬────────────────────────────────────────┘
-                         │
-                         v
-┌─────────────────────────────────────────────────────────────────┐
-│ 9. Beskar7Machine controller validates hardware               │
-│    Checks minCPUCores, minMemoryGB, minDiskGB                 │
-│    If validation fails: mark machine as failed                 │
-│    If validation passes: continue to provisioning              │
-└────────────────────────┬────────────────────────────────────────┘
-                         │
-                         v
-┌─────────────────────────────────────────────────────────────────┐
-│ 10. Inspection image downloads final OS                       │
-│     Downloads target image (e.g., Kairos tar.gz)              │
-│     Extracts kernel and initrd                                 │
-│     Prepares kexec command                                     │
-└────────────────────────┬────────────────────────────────────────┘
-                         │
-                         v
-┌─────────────────────────────────────────────────────────────────┐
-│ 11. Kexec into final OS                                       │
-│     Server reboots directly into production OS                 │
-│     No additional network boot needed                          │
-└────────────────────────┬────────────────────────────────────────┘
-                         │
-                         v
-┌─────────────────────────────────────────────────────────────────┐
-│ 12. Final OS boots and joins cluster                          │
-│     Beskar7Machine marked as Ready                             │
-│     Node appears in cluster                                    │
-└─────────────────────────────────────────────────────────────────┘
+1. Beskar7Machine created, claims PhysicalHost
+   |
+   v
+2. Controller sets PXE boot flag via Redfish
+   Controller powers on server via Redfish
+   |
+   v
+3. Server network boots (DHCP -> iPXE chainload)
+   |
+   v
+4. iPXE fetches boot script from HTTP server
+   Boot script includes: API URL, token, namespace, host name
+   |
+   v
+5. iPXE boots inspection image (Alpine Linux)
+   Kernel parameters: beskar7.api=URL beskar7.token=XXX
+   |
+   v
+6. Inspection scripts run automatically:
+   - Detect CPUs (lscpu, /proc/cpuinfo)
+   - Detect Memory (free, /proc/meminfo)
+   - Detect Disks (lsblk, smartctl)
+   - Detect NICs (ip link, ethtool)
+   - Collect system info (dmidecode)
+   |
+   v
+7. Inspection image POSTs report to Beskar7 API
+   POST /api/v1/inspection/{namespace}/{host}
+   Body: JSON with all hardware details
+   |
+   v
+8. Inspection Handler updates PhysicalHost status
+   Sets InspectionReport field
+   Sets InspectionPhase to Complete
+   |
+   v
+9. Beskar7Machine controller validates hardware
+   Checks minCPUCores, minMemoryGB, minDiskGB
+   If validation fails: mark machine as failed
+   If validation passes: continue to provisioning
+   |
+   v
+10. Inspection image downloads final OS
+    Downloads target image (e.g., Kairos tar.gz)
+    Extracts kernel and initrd
+    Prepares kexec command
+    |
+    v
+11. Kexec into final OS
+    Server reboots directly into production OS
+    No additional network boot needed
+    |
+    v
+12. Final OS boots and joins cluster
+    Beskar7Machine marked as Ready
+    Node appears in cluster
 ```
 
 ### Inspection Image
