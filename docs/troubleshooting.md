@@ -116,9 +116,9 @@ kubectl get secret <secret-name> -o jsonpath='{.data.password}' | base64 -d
 **Solution:**
 - Log into BMC web interface
 - Enable Redfish API in settings
-- Dell iDRAC: Network → Redfish → Enable
-- HPE iLO: Network → iLO RESTful API → Enable
-- Supermicro: Configuration → Redfish API → Enable
+- Dell iDRAC: Network -> Redfish -> Enable
+- HPE iLO: Network -> iLO RESTful API -> Enable
+- Supermicro: Configuration -> Redfish API -> Enable
 
 ### 4. Inspection Phase Stuck in "Pending" or "Booting"
 

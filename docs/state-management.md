@@ -15,29 +15,29 @@ The state management system provides:
 ### State Diagram
 
 ```
-┌─────────────┐    ┌─────────────┐    ┌─────────────┐    ┌─────────────┐
-│    None     │───▶│ Enrolling   │───▶│ Available   │───▶│   Claimed   │
-└─────────────┘    └─────────────┘    └─────────────┘    └─────────────┘
-       │                   │                   │                   │
-       │                   │                   │                   ▼
-       │                   │                   │          ┌─────────────┐
-       │                   │                   │          │Provisioning │
-       │                   │                   │          └─────────────┘
-       │                   │                   │                   │
-       │                   │                   │                   ▼
-       │                   │                   │          ┌─────────────┐
-       │                   │                   │          │ Provisioned │
-       │                   │                   │          └─────────────┘
-       │                   │                   │                   │
-       │                   │                   │                   ▼
-       └──────────────────▶┌─────────────────────────────────────────┐
-                           │                Error                    │
-                           └─────────────────────────────────────────┘
-                                               │
-                                               ▼
-                                    ┌─────────────┐
-                                    │Deprovisioning│
-                                    └─────────────┘
+            
+    None     ▶ Enrolling   ▶ Available   ▶   Claimed   
+            
+                                                                
+                                                                v
+                                                       
+                                                       Provisioning 
+                                                       
+                                                                
+                                                                v
+                                                       
+                                                        Provisioned 
+                                                       
+                                                                
+                                                                v
+       ▶
+                                           Error                    
+                           
+                                               
+                                               v
+                                    
+                                    Deprovisioning
+                                    
 ```
 
 ### State Definitions
@@ -55,28 +55,28 @@ The state management system provides:
 
 ### Transition Requirements
 
-#### Enrolling → Available
+#### Enrolling -> Available
 - Redfish connection successful
 - Hardware details retrieved
 
-#### Available → Claimed  
+#### Available -> Claimed  
 - `ConsumerRef` must be set
 - Host must not be in error state
 
-#### Claimed → Provisioning
+#### Claimed -> Provisioning
 - `ConsumerRef` must be set
 - `BootISOSource` must be set
 
-#### Provisioning → Provisioned
+#### Provisioning -> Provisioned
 - Boot configuration successful
 - Host powered on
 
-#### Any State → Error
+#### Any State -> Error
 - Always allowed (for error handling)
 
-#### Error → Recovery States
-- `Error → Enrolling`: Redfish connection info present
-- `Error → Available`: Host not claimed, connection healthy
+#### Error -> Recovery States
+- `Error -> Enrolling`: Redfish connection info present
+- `Error -> Available`: Host not claimed, connection healthy
 
 ## Automatic Recovery
 
@@ -269,7 +269,7 @@ State machine operations are logged with structured logging:
 ### For End Users
 
 1. **Avoid Manual Edits**: Don't manually edit PhysicalHost status fields
-2. **Use Proper Workflow**: Follow claiming → provisioning → release workflow  
+2. **Use Proper Workflow**: Follow claiming -> provisioning -> release workflow  
 3. **Monitor Events**: Check events if hosts appear stuck
 4. **Report Issues**: Report persistent state issues to operations team
 

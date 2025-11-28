@@ -366,11 +366,11 @@ spec:
 
 ### Common Pitfalls
 
-1. **Under-provisioning requests** → Poor scheduling
-2. **Over-provisioning limits** → Resource waste
-3. **Missing GOMAXPROCS** → CPU over-subscription
-4. **Insufficient ephemeral storage** → Pod evictions
-5. **No monitoring** → No visibility into actual usage
+1. **Under-provisioning requests** -> Poor scheduling
+2. **Over-provisioning limits** -> Resource waste
+3. **Missing GOMAXPROCS** -> CPU over-subscription
+4. **Insufficient ephemeral storage** -> Pod evictions
+5. **No monitoring** -> No visibility into actual usage
 
 ### Production Recommendations
 

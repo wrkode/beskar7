@@ -34,13 +34,13 @@ Triggered on Git tags starting with `v*`.
 
 ### **Pipeline Features**
 
-✅ **Multi-arch builds** (linux/amd64, linux/arm64)
-✅ **Security scanning** with SARIF reports
-✅ **Coverage reporting** to Codecov
-✅ **Performance benchmarking**
-✅ **Helm chart automation**
-✅ **SBOM generation** for supply chain security
-✅ **Automated releases** with proper versioning
+Yes **Multi-arch builds** (linux/amd64, linux/arm64)
+Yes **Security scanning** with SARIF reports
+Yes **Coverage reporting** to Codecov
+Yes **Performance benchmarking**
+Yes **Helm chart automation**
+Yes **SBOM generation** for supply chain security
+Yes **Automated releases** with proper versioning
 
 ## 🧪 **Hardware Emulation Testing Framework**
 
@@ -149,11 +149,11 @@ go test -v -tags=integration ./test/emulation/... -run TestStressTesting
 # Run all benchmarks
 go test -bench=. -benchmem ./...
 
-# Run coordination benchmarks
-go test -bench=BenchmarkHostClaimCoordinator -benchmem ./internal/coordination/
+# Run controller benchmarks
+go test -bench=. -benchmem ./controllers/
 
-# Run large-scale benchmarks
-go test -bench=BenchmarkHostSelection_LargeScale -benchmem ./internal/coordination/
+# Run Redfish client benchmarks
+go test -bench=. -benchmem ./internal/redfish/
 
 # Generate benchmark comparison
 go test -bench=. -benchmem ./... > benchmark-before.txt
@@ -391,28 +391,28 @@ Customize emulation behavior:
 ## 🎯 **Best Practices**
 
 ### **Development**
-- ✅ Write tests first (TDD approach)
-- ✅ Use emulation for development without real hardware
-- ✅ Run full test suite before committing
-- ✅ Keep benchmarks for performance-critical code
+- Yes Write tests first (TDD approach)
+- Yes Use emulation for development without real hardware
+- Yes Run full test suite before committing
+- Yes Keep benchmarks for performance-critical code
 
 ### **Testing**
-- ✅ Test vendor-specific behaviors separately
-- ✅ Include failure scenario testing
-- ✅ Use realistic data in tests
-- ✅ Test concurrent operations
+- Yes Test vendor-specific behaviors separately
+- Yes Include failure scenario testing
+- Yes Use realistic data in tests
+- Yes Test concurrent operations
 
 ### **CI/CD**
-- ✅ Keep builds fast (< 10 minutes)
-- ✅ Fail fast on critical errors
-- ✅ Generate comprehensive reports
-- ✅ Automate security scanning
+- Yes Keep builds fast (< 10 minutes)
+- Yes Fail fast on critical errors
+- Yes Generate comprehensive reports
+- Yes Automate security scanning
 
 ### **Releases**
-- ✅ Use semantic versioning
-- ✅ Generate detailed changelogs
-- ✅ Include security assessments
-- ✅ Test upgrade paths
+- Yes Use semantic versioning
+- Yes Generate detailed changelogs
+- Yes Include security assessments
+- Yes Test upgrade paths
 
 ## 🚨 **Troubleshooting**
 

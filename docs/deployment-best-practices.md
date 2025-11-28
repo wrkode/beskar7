@@ -60,26 +60,26 @@ graph TB
 
 **Network Requirements:**
 ```
-Management Cluster → BMC Network: HTTPS (443), SSH (22)
-BMCs → Image Repository: HTTP/HTTPS (80/443)
-BMCs → Configuration Server: HTTP/HTTPS (80/443)
+Management Cluster -> BMC Network: HTTPS (443), SSH (22)
+BMCs -> Image Repository: HTTP/HTTPS (80/443)
+BMCs -> Configuration Server: HTTP/HTTPS (80/443)
 ```
 
 **Recommended Network Topology:**
 ```
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│ Management      │    │ BMC Network     │    │ Workload        │
-│ Cluster Network │    │ (Isolated)      │    │ Networks        │
-│                 │    │                 │    │                 │
-│ 10.0.1.0/24     │    │ 10.0.100.0/24   │    │ 10.0.2.0/24     │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
-         │                       │                       │
-         └───────────────────────┼───────────────────────┘
-                                 │
-                     ┌─────────────────┐
-                     │ Core Network    │
-                     │ Infrastructure  │
-                     └─────────────────┘
+        
+ Management           BMC Network          Workload        
+ Cluster Network      (Isolated)           Networks        
+                                                           
+ 10.0.1.0/24          10.0.100.0/24        10.0.2.0/24     
+        
+                                                       
+         
+                                 
+                     
+                      Core Network    
+                      Infrastructure  
+                     
 ```
 
 ### 2. Resource Planning
